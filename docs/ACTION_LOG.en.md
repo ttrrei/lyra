@@ -17,6 +17,24 @@
 >    content, landing spot (doc + section / rule number).
 > 4. Readable by AI and humans alike; AI should scan the last 10 rows
 >    before acting, to avoid re-deciding or overturning settled items.
+> 5. **The `## Current state` block is the only section of this file that
+>    may be updated in place over time** (refresh it every time an entry
+>    is appended); the entries themselves stay append-only.
+>    **A new session reads that block as the answer to "where is the
+>    project now"** (AGENTS.md only points here; it never states progress).
+
+## Current state
+
+| Item | Value |
+|---|---|
+| Updated | 2026-11-06 (#38) |
+| Build order | `docs/hld.md` §8 (0001→0009, single source of truth) |
+| Done | **0001** (repo + OCI split, settled in docs); first commit `c8f3851` (doc skeleton + LICENSE + pyproject + examples) |
+| Next | **0002**: OCI pull + clean + aggregate — write `docs/decisions/0002-ohlcv-data-sync.md` (ZH+EN) first, then the code |
+| Code status | No source code yet; the `lyra/` package is created with 0002 |
+| Delivery order | 0002 pull → 0003 feature builder → 0004 compiler → 0005 trade engine → 0006 metrics/runner (on fixtures) → 0007 push/backup |
+| Open questions | **None** (open-questions O1–O5, O11–O15 all closed) |
+| Awaiting user | 0002's OCI access method (PAR URL vs signed requests — settles O5) + OCI connection parameters |
 
 ## Legend
 
@@ -71,6 +89,7 @@
 | 35 | fix | **T3 done**: ① `LICENSE` (Apache-2.0 full text); ② `pyproject.toml` skeleton (lyra 0.1.0, py≥3.11, core deps ≤ 8 packages, `lyra` CLI entry, pytest/ruff/mypy config); ③ `strategies/examples/momentum_breakout/` (hypothesis.md + lessons.md + v01.yaml, YAML schema per nova's proven structure) + `strategies/examples/README.md` inventory — closing the "dangling examples promise" found in self-audit; .gitignore boundary verified (examples trackable; custom directions / alpha / data / config.yml all ignored) | `LICENSE`, `pyproject.toml`, `strategies/examples/*` (4 files) |
 | 36 | commit | User decided to skip a further adversarial round and make **lyra's first commit** directly (doc skeleton + engineering init: .gitignore / LICENSE / pyproject.toml / strategies/examples). T1 closed; next is T2 (0002 OCI pull decision doc + code) | first commit (see git log) |
 | 37 | doc | User asked whether AGENTS.md is enough for a fresh session to grasp background + progress — audit found the contract was sufficient but **three things missing**: ① current progress (0001 done / 0002 next / no code yet) ② **bilingual-pair rule + ACTION_LOG ZH/EN must be updated together** (the convention a new session is most likely to miss) ③ one-line core loop + explicit pointer to hld §8 as single source of truth. Added `## Where we are (read first)` + `## Documentation conventions (load-bearing)` | `AGENTS.md` |
+| 38 | doc (user feedback) | User pushed back: #37 hard-codes "where we are" into AGENTS.md, which **goes stale and needs manual edits before every new session** — wrong. Settled: **the `## Current state` block in ACTION_LOG is the single source of truth for progress** (the only in-place-updatable section of the file, refreshed with every appended entry; the log body stays append-only). AGENTS.md `## Where we are` now **only points** (to the state block + hld §8 + core loop) and states no stale progress facts; working style "scan before acting" changed to "state block first, then last 10 rows" | `docs/ACTION_LOG.md`/`.en.md` (new state block + maintenance rule #5), `AGENTS.md` |
 
 ## Open (as of 2026-11-05 close)
 

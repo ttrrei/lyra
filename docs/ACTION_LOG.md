@@ -13,6 +13,22 @@
 >    （文档 + 章节/规则号）。
 > 4. AI 和人都能读；AI 在动手前先扫本文件最近 10 行，避免重复决策或
 >    推翻已定事项。
+> 5. **`## 当前状态` 块是全文唯一允许随时间原地更新的位置**（每次追加
+>    日志行时同步刷新它）；日志条目本体仍只增不删。
+>    **新会话的"项目现在到哪了"以该块为准**（AGENTS.md 只指路，不写进度）。
+
+## 当前状态（Current state）
+
+| 项 | 值 |
+|---|---|
+| 更新于 | 2026-11-06（#38） |
+| 构建顺序 | `docs/hld.md` §8（0001→0009，唯一事实来源） |
+| 已完成 | **0001**（repo + OCI split，文档定案）；首次 commit `c8f3851`（文档骨架 + LICENSE + pyproject + examples） |
+| 下一步 | **0002**：OCI pull + clean + aggregate —— 先写 `docs/decisions/0002-ohlcv-data-sync.md`（中英），再写代码 |
+| 代码状态 | 尚无源码；`lyra/` 包将在 0002 随代码创建 |
+| 代码交付顺序 | 0002 pull → 0003 feature builder → 0004 compiler → 0005 trade engine → 0006 metrics/runner（在 fixture 数据上）→ 0007 push/backup |
+| 未决问题 | **无**（open-questions O1–O5、O11–O15 全部已关闭） |
+| 待用户输入 | 0002 的 OCI 访问方式（PAR URL vs 签名请求，决定 O5 最终答案）+ OCI 连接参数 |
 
 ## 图例
 
@@ -67,6 +83,7 @@
 | 35 | fix | **T3 完成**：① `LICENSE`（Apache-2.0 全文）；② `pyproject.toml` 骨架（lyra 0.1.0, py≥3.11, 核心依赖 ≤ 8 包, `lyra` CLI entry, pytest/ruff/mypy 配置）；③ `strategies/examples/momentum_breakout/`（hypothesis.md + lessons.md + v01.yaml，YAML schema 按 nova 已验证结构）+ `strategies/examples/README.md` 清单——消除自我审计发现的"examples 悬空承诺"；.gitignore 边界验证全过（examples 可跟踪，自定义方向/alpha/data/config.yml 全忽略） | `LICENSE`, `pyproject.toml`, `strategies/examples/*`（4 文件） |
 | 36 | commit | 用户决定跳过再次对抗性 review，直接做 **lyra 第一次 commit**（文档骨架 + 工程初始化：.gitignore / LICENSE / pyproject.toml / strategies/examples）。T1 关闭；下一步 T2（0002 OCI pull 决策文档 + 代码） | 首次 commit（见 git log） |
 | 37 | doc | 用户问"AGENTS.md 是否足以让新对话窗口快速了解背景与进度"——审查后确认**契约部分足够，但缺三样**：①当前进度（0001 完成 / 0002 是下一个 / 尚无代码）②**双语成对规则 + ACTION_LOG 中英必须同步更新**（新窗口最易漏的约定）③一句话核心循环 + hld §8 单一事实来源点名。已补 `## Where we are (read first)` + `## Documentation conventions (load-bearing)` 两节 | `AGENTS.md` |
+| 38 | doc(用户反馈) | 用户指出 #37 把"进度感"写死在 AGENTS.md 里**会过期、每次开新对话前都得手改**，不对。定案：**ACTION_LOG 的 `## 当前状态 / Current state` 块是进度的唯一事实来源**（全文唯一允许原地更新的区块，随每次日志追加同步刷新；日志本体仍 append-only）。AGENTS.md `## Where we are` 改为**只指路**（指状态块 + hld §8 + 核心循环），不再写任何会过期的进度事实；working style 的"动手前扫描"改为"先状态块、后最近 10 行" | `docs/ACTION_LOG.md`/`.en.md`（新增状态块 + 维护规则 #5）、`AGENTS.md` |
 
 ## 待办（截至 2026-11-05 收工）
 

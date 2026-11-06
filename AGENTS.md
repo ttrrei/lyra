@@ -6,9 +6,11 @@ takes precedence over any inherited Nova or Moneta proposal. Read
 
 ## Where we are (read first)
 
-- **Status: documentation baseline committed (0001 done in docs); no source
-  code yet.** The first code deliverable is **0002 OCI pull + clean +
-  aggregate** — write its decision doc first, then the code.
+- **Progress has ONE source of truth: the `## 当前状态 / Current state`
+  block at the top of `docs/ACTION_LOG.md`** (kept current with every log
+  entry — it is the only mutable section of the log; the entries below it
+  are append-only). Do not hard-code progress anywhere else; if a doc
+  states "we are at step N", it must say "per ACTION_LOG".
 - **Build order has ONE source of truth: `docs/hld.md` §8**
   (0001 repo/OCI split → 0002 pull → 0003 feature builder → 0004 compiler →
   0005 trade engine → 0006 metrics/runner → 0007 push/backup → 0008
@@ -17,8 +19,9 @@ takes precedence over any inherited Nova or Moneta proposal. Read
   OCI ─pull→ local OHLCV ─aggregate→ 1m/5m/60m Parquet ─features→
   DuckDB-queried wide tables ─compile→ YAML→past-only SQL ─run→
   per-instrument trade reports ─push→ OCI.
-- **All open questions are closed** (see `docs/open-questions.md`);
-  recent decisions live in the last rows of `docs/ACTION_LOG.md`.
+- **Recent decisions** = last rows of `docs/ACTION_LOG.md`;
+  **live questions** = `docs/open-questions.md` (closed rows stay closed —
+  re-open by adding a new O-row, never by editing old ones).
 
 ## Documentation conventions (load-bearing)
 
@@ -92,7 +95,8 @@ takes precedence over any inherited Nova or Moneta proposal. Read
 
 ## Working style
 
-- **Scan `docs/ACTION_LOG.md` (last 10 rows) before acting** — it is the
+- **Scan `docs/ACTION_LOG.md` before acting — first the `## Current state`
+  block (where the project is now), then the last 10 entries** — it is the
   central action log; do not re-decide or overturn settled items.
 - **Append a row to `docs/ACTION_LOG.md` in the same change** as any doc
   change, rule change, decision, or review outcome (category:
