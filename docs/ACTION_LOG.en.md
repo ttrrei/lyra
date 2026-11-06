@@ -31,14 +31,15 @@
 
 | Item | Value |
 |---|---|
-| Updated | 2026-11-06 (#39) |
-| Build order | `docs/hld.md` §8 (0001→0009, single source of truth) |
+| Updated | 2026-11-06 (#40) |
+| Build order | `docs/hld.en.md` §8 (0001→0009, single source of truth) |
 | Done | **0001** (repo + OCI split, settled in docs); first commit `c8f3851` (doc skeleton + LICENSE + pyproject + examples) |
-| Next | **0002**: OCI pull + clean + aggregate — write `docs/decisions/0002-ohlcv-data-sync.md` (ZH+EN) first, then the code |
+| In progress | **0002 decision doc written** (`docs/decisions/0002-ohlcv-data-sync.md` ZH+EN, status = proposed, awaiting approval); **O5 settled** (user-managed PARs + expiry diagnostic + 0009 doctor); `config_example.yml` now reserves 3 PAR slots (data/strategies/features) |
+| Next | **0002 code**: user approves the decision doc + provides a real `data_par_url` → implement the `lyra/` package (oci_client / pull / clean / aggregate / cli) + tests green |
 | Code status | No source code yet; the `lyra/` package is created with 0002 |
 | Delivery order | 0002 pull → 0003 feature builder → 0004 compiler → 0005 trade engine → 0006 metrics/runner (on fixtures) → 0007 push/backup |
-| Open questions | **None** (open-questions O1–O5, O11–O15 all closed) |
-| Awaiting user | 0002's OCI access method (PAR URL vs signed requests — settles O5) + OCI connection parameters |
+| Open questions | **None** (open-questions O1–O5, O11–O15 all closed; O5 closed at #40) |
+| Awaiting user | ① approve the 0002 decision doc ② provide a real `data_par_url` (needed for the OCI end-to-end test) |
 
 ## Legend
 
@@ -95,6 +96,7 @@
 | 37 | doc | User asked whether AGENTS.md is enough for a fresh session to grasp background + progress — audit found the contract was sufficient but **three things missing**: ① current progress (0001 done / 0002 next / no code yet) ② **bilingual-pair rule + ACTION_LOG ZH/EN must be updated together** (the convention a new session is most likely to miss) ③ one-line core loop + explicit pointer to hld §8 as single source of truth. Added `## Where we are (read first)` + `## Documentation conventions (load-bearing)` | `AGENTS.md` |
 | 38 | doc (user feedback) | User pushed back: #37 hard-codes "where we are" into AGENTS.md, which **goes stale and needs manual edits before every new session** — wrong. Settled: **the `## Current state` block in ACTION_LOG is the single source of truth for progress** (the only in-place-updatable section of the file, refreshed with every appended entry; the log body stays append-only). AGENTS.md `## Where we are` now **only points** (to the state block + hld §8 + core loop) and states no stale progress facts; working style "scan before acting" changed to "state block first, then last 10 rows" | `docs/ACTION_LOG.md`/`.en.md` (new state block + maintenance rule #5), `AGENTS.md` |
 | 39 | decision (user) | After the user's foolproofing adversarial check, settled: **"refreshing the state block" is upgraded from convention to a mandatory rule** — every working turn (doc / code / config / strategy / review) must, in the same change: ① append an ACTION_LOG row AND ② refresh the `## Current state` block at the top; missing either = incomplete change, do not finish the turn, do not commit. Landed in: AGENTS.md **Non-negotiables item 1** (one-liner, first thing a new window reads) + Working style (full version with the completeness check) + maintenance rule #5 in both ACTION_LOGs (mandatory wording). Rationale: a fresh session must read many docs and risks losing the thread; the state block is the one entry point that locates "where the project is" without reading everything | `AGENTS.md`, `docs/ACTION_LOG.md`/`.en.md` maintenance rule #5 |
+| 40 | doc + decision | **0002 decision doc landed** (ZH+EN, status = proposed, awaiting approval): ① audited moneta's `pipeline/extract_oci.py` + `aggregate_ohlcv.py` for the proven mechanism (PAR prefix object listing w/ pagination, streaming object download, size idempotency, path-traversal guard, UTC-boundary aggregation + `n_bars`); ② **settled: pull uses PAR prefix URL** (moneta's mechanism, zero SDK credentials; whether push uses signer deferred to 0007); ③ **O5 settled**: user-managed PARs + `lyra pull` 403/404 expiry diagnostic + 0009 doctor health check; ④ **user-requested PAR reservation**: `config_example.yml` `oci:` section now has 3 slots — `data_par_url` (used by 0002) / `strategies_par_url` + `features_par_url` (for 0007; 0002 reserves but never reads them); ⑤ new invariants settled: data-layer reproducibility (same PAR + same code → byte-identical), PAR URL redaction in logs | `docs/decisions/0002-ohlcv-data-sync.md`+`.en.md` (new), `config/config_example.yml`, `docs/open-questions.md`/`.en.md` (O5 closed), state block |
 
 ## Open (as of 2026-11-05 close)
 

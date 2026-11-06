@@ -18,7 +18,7 @@ dependencies = [
     "duckdb>=1.0",        # Hybrid 特征存储查询（R3）
     "pyarrow>=15.0",      # Parquet I/O
     "typer>=0.12",        # CLI
-    "oracledb>=2.0",      # OCI Object Storage（0002 起使用）
+    "requests>=2.31",     # OCI PAR download (0002, moneta-proven mechanism)
 ]
 
 [project.optional-dependencies]

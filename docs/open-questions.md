@@ -13,7 +13,7 @@
 | O2 | `runs/` 按 strategy_id 还是按日期分组？ | strategy_id | 待 `0007` 决策 |
 | O3 | alpha feature 按 family 分子目录吗？ | 不（文件名=注册名） | 待 `0003` 决策 |
 | O4 | `index/*.json` 进 git 作为只读镜像吗？ | 不进（0001 I15：`runs/` 全部 + alpha 路径不进 git；index 是派生物，可重建） | **已关闭**（0001） |
-| O5 | PAR URL 90 天过期怎么办？ | `lyra-doctor` 检测 + 提醒 | 待 `0007` 决策 |
+| O5 | PAR URL 90 天过期怎么办？ | **定案（0002）**：PAR 由用户侧管理（过期重新生成、更新 `config.yml`）；`lyra pull` 遇 403/404 给出"PAR may have expired"诊断；`lyra-doctor`（0009）常规体检检测 PAR 可用性 | **已关闭**（`0002` §2） |
 | O6 | 支持 S3 / GCS 吗？ | 不 | 已关（OCI 唯一） |
 | O7 | feature-vs-feature 比较放宽后，332 策略里有几个用到？ | 0（全部是 feature-vs-constant） | 待 `0004` 验证 |
 | O8 | supertrend 的 contract card + golden test 样例先做哪个？ | supertrend（最复杂） | 待 `0003` 决策 |
@@ -57,3 +57,4 @@
 | 2026-11-05 | 0.1 | 初稿。 |
 | 2026-11-06 | 0.2 | O4 关闭（0001 I15 已界定 index 不进 git）；新增 **O11-O15**：跨代交叉代数公式、命名碰撞、Active Branch Cap、21 标的代码清单、financing 天数口径（均源自批次2 对抗性 review，待用户决策或后续 feature 闭环）。 |
 | 2026-11-06 | 0.3 | 用户拍板：**O11** 定案（max+1）、**O12** 定案（`_1`/`_2` 后缀）、**O13** 定案（**Active Branch Cap = 8**）、**O14** 定案（继承 moneta BASE_QUOTE 格式，完整清单归 0002 枚举）、**O15** 定案（按交易日计，周末+节假日不计）；**O11-O15 全部关闭**。 |
+| 2026-11-06 | 0.4 | **O5 关闭**（`0002` §2 定案：PAR 用户侧管理 + `lyra pull` 过期诊断 + 0009 doctor 体检）。**至此 O1–O5、O11–O15 全部关闭，无未决问题。** |

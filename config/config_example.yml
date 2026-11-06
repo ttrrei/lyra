@@ -4,11 +4,21 @@
 # Real PAR URLs, local paths and OCI auth never enter the repository.
 
 oci:
-  # Bucket + namespace (without the bucket, shown for documentation):
-  #   oci://<tenant>.ap-sydney-1.objectstorage.../n/<namespace>/b/lyra/o/
-  par_url_read:  "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/"   # read-only PAR
-  par_url_write: "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/"   # write PAR (push)
-  prefix: "lyra"          # all paths below this prefix
+  # ---- pull (0002 uses this; read-only PAR PREFIX URL, moneta-proven
+  #      mechanism: list objects + download each; moneta's
+  #      `pipeline/extract_oci.py` is the reference implementation) ----
+  data_par_url: "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/data/"
+
+  # ---- push (0007 uses these; RESERVED NOW, never read by 0002) ----
+  # Write PAR prefixes. Regenerate on expiry (90-day limit) and update
+  # config.yml — see decision 0002 §2 (O5 settled) and 0007 (when written).
+  strategies_par_url: "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/strategies-upload/"   # strategy YAML + hypothesis/lessons
+  features_par_url:   "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/features-upload/"     # custom features + contract cards + tests
+
+  # Optional OCI SDK auth, only needed if a push target cannot use a
+  # write PAR. The credentials file is NOT in git and NOT read from
+  # environment variables (avoids shell-history leakage). See B10.
+  # auth_file: "~/.lyra/credentials"
 
 local:
   # OCI mirrors live OUTSIDE the repository by default (anti-footgun:
@@ -38,8 +48,3 @@ databackend:
   memory_limit: "1GB"
   threads: 2
   # spills go to local.tmp
-
-# Optional OCI SDK auth (used only when par_url_write is not enough).
-# The credentials file is NOT in git and NOT read from environment
-# variables (avoids shell-history leakage). See B10.
-# oci_auth_file: "~/.lyra/credentials"
