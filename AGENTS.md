@@ -35,6 +35,10 @@ takes precedence over any inherited Nova or Moneta proposal. Read
 
 ## Non-negotiables
 
+- **Every working turn must land in `docs/ACTION_LOG.md` + `.en.md`**:
+  append a log row AND refresh the `## Current state` block (the file's
+  only in-place section). A change without that refresh is incomplete —
+  do not finish the turn, do not commit.
 - **YAML is the only strategy language.** No SQL, Python, eval, or callbacks
   inside strategy files.
 - **Feature parameters are fixed.** New features are registered, not
@@ -98,9 +102,16 @@ takes precedence over any inherited Nova or Moneta proposal. Read
 - **Scan `docs/ACTION_LOG.md` before acting — first the `## Current state`
   block (where the project is now), then the last 10 entries** — it is the
   central action log; do not re-decide or overturn settled items.
-- **Append a row to `docs/ACTION_LOG.md` in the same change** as any doc
-  change, rule change, decision, or review outcome (category:
-  decision / doc / review / fix). Append-only.
+- **MANDATORY, every working turn, no exceptions:** the change you make
+  and its effect on progress must be reflected in **both**
+  `docs/ACTION_LOG.md` and `docs/ACTION_LOG.en.md` —
+  1. append a new log row (category: decision / doc / review / fix), and
+  2. **update the `## 当前状态 / Current state` block at the top of the
+     file in the same change** (done / next / awaiting-user rows, plus the
+     `更新于 / Updated` stamp).
+  A change that touches any file (doc, code, config, strategy, review)
+  and does NOT refresh the state block is an **incomplete change** — do
+  not finish the turn, and do not commit.
 - One feature = one commit = one decision doc (`docs/decisions/NNNN-*.md`)
   = a set of tests. Write the decision doc **before** the code.
 - Decision docs are append-only. Never delete a historical decision; add a

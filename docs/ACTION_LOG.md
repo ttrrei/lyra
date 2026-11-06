@@ -13,15 +13,18 @@
 >    （文档 + 章节/规则号）。
 > 4. AI 和人都能读；AI 在动手前先扫本文件最近 10 行，避免重复决策或
 >    推翻已定事项。
-> 5. **`## 当前状态` 块是全文唯一允许随时间原地更新的位置**（每次追加
->    日志行时同步刷新它）；日志条目本体仍只增不删。
+> 5. **`## 当前状态` 块是全文唯一允许随时间原地更新的位置**——且更新它是
+>    **强制的**：任何一次改动（文档/代码/配置/策略/review）落地时，必须在
+>    同一次改动里刷新该块（done / next / 待用户输入 / 更新于戳），见
+>    AGENTS.md Non-negotiables 第 1 条。只做日志行、不刷状态块 = 改动不完整，
+>    不得收尾、不得 commit；日志条目本体仍只增不删。
 >    **新会话的"项目现在到哪了"以该块为准**（AGENTS.md 只指路，不写进度）。
 
 ## 当前状态（Current state）
 
 | 项 | 值 |
 |---|---|
-| 更新于 | 2026-11-06（#38） |
+| 更新于 | 2026-11-06（#39） |
 | 构建顺序 | `docs/hld.md` §8（0001→0009，唯一事实来源） |
 | 已完成 | **0001**（repo + OCI split，文档定案）；首次 commit `c8f3851`（文档骨架 + LICENSE + pyproject + examples） |
 | 下一步 | **0002**：OCI pull + clean + aggregate —— 先写 `docs/decisions/0002-ohlcv-data-sync.md`（中英），再写代码 |
@@ -84,6 +87,7 @@
 | 36 | commit | 用户决定跳过再次对抗性 review，直接做 **lyra 第一次 commit**（文档骨架 + 工程初始化：.gitignore / LICENSE / pyproject.toml / strategies/examples）。T1 关闭；下一步 T2（0002 OCI pull 决策文档 + 代码） | 首次 commit（见 git log） |
 | 37 | doc | 用户问"AGENTS.md 是否足以让新对话窗口快速了解背景与进度"——审查后确认**契约部分足够，但缺三样**：①当前进度（0001 完成 / 0002 是下一个 / 尚无代码）②**双语成对规则 + ACTION_LOG 中英必须同步更新**（新窗口最易漏的约定）③一句话核心循环 + hld §8 单一事实来源点名。已补 `## Where we are (read first)` + `## Documentation conventions (load-bearing)` 两节 | `AGENTS.md` |
 | 38 | doc(用户反馈) | 用户指出 #37 把"进度感"写死在 AGENTS.md 里**会过期、每次开新对话前都得手改**，不对。定案：**ACTION_LOG 的 `## 当前状态 / Current state` 块是进度的唯一事实来源**（全文唯一允许原地更新的区块，随每次日志追加同步刷新；日志本体仍 append-only）。AGENTS.md `## Where we are` 改为**只指路**（指状态块 + hld §8 + 核心循环），不再写任何会过期的进度事实；working style 的"动手前扫描"改为"先状态块、后最近 10 行" | `docs/ACTION_LOG.md`/`.en.md`（新增状态块 + 维护规则 #5）、`AGENTS.md` |
+| 39 | decision(用户) | 用户（防呆对抗性检查后）定案：**"刷状态块"从维护惯例升级为强制规则**——每次执行任何工作（文档/代码/配置/策略/review），必须在同一次改动里 ① 追加 ACTION_LOG 行 + ② 刷新文件头 `## 当前状态` 块；缺其一 = 改动不完整，不得收尾、不得 commit。落点：AGENTS.md **Non-negotiables 第 1 条**（一行版，新窗口最先读到）+ Working style（完整版含判定标准）+ 两份 ACTION_LOG 维护规则 #5（强制措辞）。动机：新对话开场要读大量文档，存在失焦风险，状态块是唯一免读全文即可定位"项目在哪"的入口 | `AGENTS.md`、`docs/ACTION_LOG.md`/`.en.md` 维护规则 #5 |
 
 ## 待办（截至 2026-11-05 收工）
 
