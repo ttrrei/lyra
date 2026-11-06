@@ -4,6 +4,32 @@ Lyra is the clean, lightweight successor to Nova and Moneta. This contract
 takes precedence over any inherited Nova or Moneta proposal. Read
 `docs/hld.md` and `docs/requirements.md` before changing scope.
 
+## Where we are (read first)
+
+- **Status: documentation baseline committed (0001 done in docs); no source
+  code yet.** The first code deliverable is **0002 OCI pull + clean +
+  aggregate** — write its decision doc first, then the code.
+- **Build order has ONE source of truth: `docs/hld.md` §8**
+  (0001 repo/OCI split → 0002 pull → 0003 feature builder → 0004 compiler →
+  0005 trade engine → 0006 metrics/runner → 0007 push/backup → 0008
+  migration → 0009 polish). If README/background say anything else, §8 wins.
+- **Core loop (the whole product in one line):**
+  OCI ─pull→ local OHLCV ─aggregate→ 1m/5m/60m Parquet ─features→
+  DuckDB-queried wide tables ─compile→ YAML→past-only SQL ─run→
+  per-instrument trade reports ─push→ OCI.
+- **All open questions are closed** (see `docs/open-questions.md`);
+  recent decisions live in the last rows of `docs/ACTION_LOG.md`.
+
+## Documentation conventions (load-bearing)
+
+- **Every doc ships as a bilingual pair**: Chinese `.md` (default, English
+  terms kept inline) + full English `*.en.md`. `README.md` is the sole
+  English-only file.
+- **`docs/ACTION_LOG.md` and `docs/ACTION_LOG.en.md` must be updated
+  together, in the same change** that changes any doc/rule/decision.
+- Decision docs live in `docs/decisions/NNNN-slug.md` (+`.en.md`), are
+  written **before** the code, and are append-only.
+
 ## Non-negotiables
 
 - **YAML is the only strategy language.** No SQL, Python, eval, or callbacks

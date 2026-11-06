@@ -66,6 +66,7 @@
 | 34 | decision(用户)+fix | **O13 定案 = 8**（每方向同时 active 分支数上限，防 AI 无限 fork；超额显式 prune）写入 open-questions + layout §2.3 中英；**修正批次1 review 标注**：item7（O4 悬挂）该 AI 标注的"未完成"已过期，因 #31 已关闭 O4，故 item7 ZH+EN + 两个汇总表第10行统一改"已完成" | `open-questions`(O13 已决)、`oci-alpha-layout` §2.3、`docs/reviews/批次1`(item7+表10) |
 | 35 | fix | **T3 完成**：① `LICENSE`（Apache-2.0 全文）；② `pyproject.toml` 骨架（lyra 0.1.0, py≥3.11, 核心依赖 ≤ 8 包, `lyra` CLI entry, pytest/ruff/mypy 配置）；③ `strategies/examples/momentum_breakout/`（hypothesis.md + lessons.md + v01.yaml，YAML schema 按 nova 已验证结构）+ `strategies/examples/README.md` 清单——消除自我审计发现的"examples 悬空承诺"；.gitignore 边界验证全过（examples 可跟踪，自定义方向/alpha/data/config.yml 全忽略） | `LICENSE`, `pyproject.toml`, `strategies/examples/*`（4 文件） |
 | 36 | commit | 用户决定跳过再次对抗性 review，直接做 **lyra 第一次 commit**（文档骨架 + 工程初始化：.gitignore / LICENSE / pyproject.toml / strategies/examples）。T1 关闭；下一步 T2（0002 OCI pull 决策文档 + 代码） | 首次 commit（见 git log） |
+| 37 | doc | 用户问"AGENTS.md 是否足以让新对话窗口快速了解背景与进度"——审查后确认**契约部分足够，但缺三样**：①当前进度（0001 完成 / 0002 是下一个 / 尚无代码）②**双语成对规则 + ACTION_LOG 中英必须同步更新**（新窗口最易漏的约定）③一句话核心循环 + hld §8 单一事实来源点名。已补 `## Where we are (read first)` + `## Documentation conventions (load-bearing)` 两节 | `AGENTS.md` |
 
 ## 待办（截至 2026-11-05 收工）
 
