@@ -40,6 +40,10 @@ class CleanInputError(ValueError):
     """A flat CSV is missing a required input column (0002 §3.3)."""
 
 
+class DataQualityError(ValueError):
+    """Bronze rows violate a data-quality invariant (0002 §3.4, DQ1–DQ4)."""
+
+
 def open_limited_duckdb(
     db=None,
     data_root: str | Path | None = None,
@@ -81,6 +85,58 @@ def _quote(path: Path) -> str:
     return "'" + s.replace("'", "''") + "'"
 
 
+def _quality_checks(present: set[str]) -> dict[str, str]:
+    """Data-quality invariants applied to the deduped bronze candidates
+    (0002 §3.4, DQ1–DQ3). Each value is a WHERE expression matching a
+    *violating* row; NULL comparisons naturally exclude partial rows.
+
+    Ported from nova's ``_validate`` (the middle of moneta→nova→lyra): the
+    OHLC/spread/volume invariants moneta's data happens to satisfy, now made
+    explicit so dirty input cannot silently flow into bronze. Only invariants
+    whose columns the input actually carries are emitted — referencing an
+    absent column would be a binder error under ``union_by_name``.
+    """
+    checks: dict[str, str] = {
+        # DQ1: mid OHLC must be positive and internally consistent (o,c ∈ [l,h]).
+        "mid_ohlc": (
+            "mid_h < mid_l OR mid_h < mid_o OR mid_h < mid_c "
+            "OR mid_l > mid_o OR mid_l > mid_c "
+            "OR mid_o <= 0 OR mid_h <= 0 OR mid_l <= 0 OR mid_c <= 0"
+        ),
+        # DQ3: volume, when present, must be finite and non-negative.
+        "bad_volume": "volume IS NOT NULL AND (volume < 0 OR NOT isfinite(volume))",
+    }
+    # DQ2: where both sides of a quote exist at a point, ask must be ≥ bid.
+    if {"bid_o", "bid_h", "bid_l", "bid_c", "ask_o", "ask_h", "ask_l", "ask_c"} <= present:
+        checks["bad_spread"] = " OR ".join(
+            f"bid_{p} IS NOT NULL AND ask_{p} IS NOT NULL AND ask_{p} < bid_{p}"
+            for p in ("o", "h", "l", "c")
+        )
+    return checks
+
+
+def _assert_quality(con, inner_sql: str, present: set[str]) -> None:
+    """Fail fast (0002 §3.4) if any deduped bronze candidate violates DQ1–DQ3.
+
+    Counts violating rows per invariant and raises ``DataQualityError`` naming
+    each offender with its count, so a corrupt source is loud, not silent.
+    """
+    checks = _quality_checks(present)
+    expressions = ",".join(
+        f"count(*) FILTER (WHERE {expr})" for expr in checks.values()
+    )
+    # fetchall() (not fetchone()) so the result is fully consumed before any
+    # later query reuses the same connection — required for the list-of-dicts
+    # path, which runs another query on this connection right after.
+    (counts,) = con.execute(f"SELECT {expressions} FROM ({inner_sql}) t").fetchall()
+    offenders = {name: int(count) for name, count in zip(checks, counts) if count}
+    if offenders:
+        raise DataQualityError(
+            "bronze data-quality violations (0002 §3.4): "
+            + ", ".join(f"{name}={n}" for name, n in offenders.items())
+        )
+
+
 def _clean_sql(csv_dir: Path, payload_present: set[str]) -> str:
     score_cols = [f"({c} IS NOT NULL)::INT" for c in PAYLOAD if c in payload_present]
     score = " + ".join(score_cols) if score_cols else "0"
@@ -88,7 +144,7 @@ def _clean_sql(csv_dir: Path, payload_present: set[str]) -> str:
     return f"""
         WITH raw AS (
             SELECT *, filename AS _source_file
-            FROM read_csv({_quote(csv_dir / "*.csv")},
+            FROM read_csv({_quote(csv_dir / "**/*.csv")},
                           header = TRUE, auto_detect = TRUE,
                           union_by_name = TRUE, filename = TRUE)
         ),
@@ -122,14 +178,14 @@ def clean_csv_to_bronze(
     Raises ``CleanInputError`` if any CSV lacks a required input column.
     """
     csv_dir = Path(csv_dir)
-    if not csv_dir.exists() or not list(csv_dir.glob("*.csv")):
+    if not csv_dir.exists() or not list(csv_dir.rglob("*.csv")):
         return []
 
     con = open_limited_duckdb(db, data_root)
     try:
         # Probe the first CSV for the required input contract (moneta's
         # approach: a glob-level sniff is unreliable).
-        first = sorted(csv_dir.glob("*.csv"))[0]
+        first = sorted(csv_dir.rglob("*.csv"))[0]
         cols = {
             r[0].lower()
             for r in con.execute(
@@ -147,6 +203,9 @@ def clean_csv_to_bronze(
         present = {c for c in PAYLOAD if c in cols}
 
         sql = _clean_sql(csv_dir, present)
+        # Same fail-fast DQ gate as the Parquet path (0002 §3.4) — this
+        # list-of-dicts entry must not be able to bypass validation.
+        _assert_quality(con, sql, present)
         out_cols = ["instrument", "time"] + [
             c for c in ALWAYS_PRESENT if c not in ("instrument", "time")
         ]
@@ -176,7 +235,7 @@ def clean_csv_to_bronze_parquet(
     csv_dir = Path(csv_dir)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    if not csv_dir.exists() or not list(csv_dir.glob("*.csv")):
+    if not csv_dir.exists() or not list(csv_dir.rglob("*.csv")):
         # D7 (batch-7): the empty path MUST use the same ``timestamp[us, tz=UTC]``
         # as the non-empty DuckDB path (TIMESTAMPTZ, I18 schema stability).
         import pyarrow as pa
@@ -194,7 +253,7 @@ def clean_csv_to_bronze_parquet(
 
     con = open_limited_duckdb(db, data_root)
     try:
-        first = sorted(csv_dir.glob("*.csv"))[0]
+        first = sorted(csv_dir.rglob("*.csv"))[0]
         cols = {
             r[0].lower()
             for r in con.execute(
@@ -209,6 +268,8 @@ def clean_csv_to_bronze_parquet(
             )
         present = {c for c in PAYLOAD if c in cols}
         inner = _clean_sql(csv_dir, present)
+        # Fail fast on dirty rows *before* writing bronze (0002 §3.4, DQ1–DQ3).
+        _assert_quality(con, inner, present)
         out_cols = ["instrument", "time"] + [
             c for c in ALWAYS_PRESENT if c not in ("instrument", "time")
         ]

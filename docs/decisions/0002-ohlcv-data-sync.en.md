@@ -209,6 +209,91 @@ oci:
 - **Alpha boundary**: this feature does not touch `alpha/`, strategies,
   or `strategies/examples/`.
 
+### 3.4 Data-quality validation (DQ1–DQ3, fail-fast)
+
+**Motivation**: moneta's `load_data.py` only filters on `is_complete` and
+dedupes — it does **not** validate OHLC internal consistency / spread
+direction / non-negative volume, so dirty rows (`bid > ask`, `l > h`,
+negative volume) silently flow into bronze and contaminate every 0003
+feature and 0005 backtest. nova's `data._validate` has these checks; lyra
+makes that stage of the moneta→nova→lyra chain **explicit**.
+
+**Timing**: clean runs this **after** the `is_complete` filter +
+`(instrument,time)` dedup and **before** the `COPY` writes bronze (it
+validates the survivor candidates, so rows dropped by dedup cannot
+false-positive). **Fail-fast**: any violation → raise
+`DataQualityError` (naming each offender with its count); bronze is not
+written.
+
+**Invariants** (each = a WHERE expression matching a *violating* row; NULL
+comparisons naturally exclude partial rows):
+
+| # | Invariant | Expression (matches a violation) |
+|---|---|---|
+| DQ1 | mid OHLC positive and internally consistent (o,c ∈ [l,h]) | `mid_h < mid_l OR mid_h < mid_o OR mid_h < mid_c OR mid_l > mid_o OR mid_l > mid_c OR mid_o<=0 OR mid_h<=0 OR mid_l<=0 OR mid_c<=0` |
+| DQ2 | where both quote sides exist, ask ≥ bid (only enabled when all 8 cols present) | `bid_p IS NOT NULL AND ask_p IS NOT NULL AND ask_p < bid_p` (p ∈ o,h,l,c) |
+| DQ3 | volume, if present, finite and non-negative | `volume IS NOT NULL AND (volume < 0 OR NOT isfinite(volume))` |
+
+**Column-aware**: DQ2 is enabled only when the input carries all of
+`bid_o/h/l/c` + `ask_o/h/l/c` (referencing an absent column under
+`union_by_name` is a binder error); DQ1/DQ3 use `ALWAYS_PRESENT` columns and
+are always enabled.
+
+**Real-data verification (61,615,338 raw CSV rows, 183 real moneta CSVs)**:
+DQ1/DQ2/DQ3 all **0 violations** — fail-fast does not false-positive on real
+data, and it turns "moneta's data happens to be clean" from an assumption
+into a **code-enforced contract**.
+
+**Design trade-off**: we do not silently drop violating rows (that would
+mask a source-data problem) — fail-fast surfaces it upstream, because 0002
+is the data entry point and catching dirty data here is far cheaper than
+having it surface in 0005 as "the strategy results look weird."
+
+### 3.5 OANDA backfill / gap-fill (`lyra oanda`)
+
+**Motivation**: `lyra pull` only downloads objects **already present** under
+the PAR prefix — it has no "fetch missing history by instrument/time window"
+capability. moneta's `extract_oanda.py` does (pull 1-min candles from the
+OANDA API, chunked by UTC month, resumable). This is the stage of the
+moneta→lyra chain that lyra needs: the I22 philosophy is "gaps are
+legitimate," but the **tool to fill gaps** should still be provided by the
+framework rather than requiring users to hand-write API calls.
+
+**Contract** (carried from moneta's proven implementation, re-written
+independently):
+
+- **CLI**: `lyra oanda <instrument> --from <UTC> --to <UTC> [--dry-run] [--force]`
+- **Source**: OANDA v3 `/v3/instruments/<inst>/candles`, 1-min granularity,
+  `price=MBA` (mid+bid+ask, aligned to the bronze schema).
+- **5000-candle page cap**: OANDA rejects `count` with `from`+`to` and caps a
+  response at 5000, so the window is paged in `PAGE_SIZE-1` candle steps,
+  each page starting one candle before the previous page's last (deliberate
+  overlap, removed by clean's `(instrument,time)` dedup).
+- **Calendar-month chunking + resume**: output lands at
+  `raw_csv/<instrument>/<instrument>_<gran>_<YYYYMM>01T000000Z.csv` (one
+  file per UTC month); a month that is already present and non-empty is
+  **skipped by default** (`--force` re-fetches), so an interrupted run
+  resumes automatically.
+- **Token is a secret**: it lives only in the gitignored
+  `config/config.yml` under `oanda.api_token` and is **never committed**
+  (moneta's convention). An empty token → `OandaConfigMissing` (loud
+  failure, not a silent skip). `--dry-run` needs no token.
+- **UTC only**: no local/DST conversion; all timestamps are ISO-8601 `...Z`.
+- **Output schema**: exactly the bronze input contract
+  (`instrument,is_complete,time,volume,mid_*,bid_*,ask_*`), picked up by
+  clean's recursive `**/*.csv` glob (§3.3 boundary).
+
+**Coupling with §3.3**: clean's CSV glob was promoted from `*.csv` to
+`**/*.csv` (DuckDB 2.0 recursive expansion) so per-instrument sub-directories
+are first-class; all existing flat-CSV tests remain compatible (verified,
+47 tests green).
+
+**Real data NOT verified**: the token is a secret and the API needs
+network, so this batch covers only the **offline-verifiable** parts
+(schema / paging logic / resume / DQ compatibility) in unit tests; a real
+OANDA fetch is left for the user to run once after filling the token —
+`lyra oanda GBP_USD --from ... --to ... --dry-run`.
+
 ## 4. Invariants
 
 | # | Invariant | Source |
@@ -218,6 +303,7 @@ oci:
 | I20 | Object downloads idempotent: **skip when md5 matches** (moneta's listing already returns md5); fall back to size when md5 unavailable; same key with different content MUST be re-downloaded | Moneta mechanism + strengthening (download-side guarantee of I11 rebuildability) |
 | I21 | Aggregation uses only `time_bucket` UTC boundaries + 1m bars present in the window; `n_bars` truthfully flags partial bars (gaps are legitimate); open/close from the window's first/last bar. **`time` is actually `TIMESTAMPTZ(UTC)`** (source carries `Z`, DuckDB infers; downstream reads need pytz, see pyproject) | Moneta `aggregate_ohlcv` (fixed here); **TIMESTAMPTZ confirmed after the real end-to-end run (batch-5 A7)** |
 | I22 | Input's **native resolution must = 1m UTC** (foolproofing; premise of I18). Criterion: the **minimum** inter-bar gap per instrument is ≈1m (59–61 s). **Market gaps (missing bars) are legitimate** — real 1m data is missing bars on weekends/holidays/no-trade (this dataset has 730k gaps ≥5m); these must NOT cause rejection. Only **5m/1h native resolution** (min gap ≥ 5m) is rejected | New; **refined after the real end-to-end run** (the original "every-pair 1m" wrongly rejected legitimate gaps — fixed in batch-5) |
+| I23 | **Data quality (DQ1–DQ3, fail-fast)**: bronze candidate rows must satisfy mid-OHLC positive and internally consistent (o,c ∈ [l,h]); where both quote sides exist, ask ≥ bid; volume, if present, finite and non-negative. Any violation → `DataQualityError`, bronze not written. **Real 61,615,338 CSV rows: 0 violations** (no false positives) | New (the equivalent fixation of nova `data._validate`; absent in moneta, restored by lyra); see §3.4 |
 | I1 | YAML is the only strategy language | HLD §4 (untouched here, trivially holds) |
 
 ## 5. Tests
@@ -238,6 +324,14 @@ oci:
 | `test_clean_recompute_overwrites` | bronze deleted, re-run `lyra pull` (raw all skipped as idempotent) → bronze still rebuilt (A1) |
 | `test_par_expiry_diagnostic` | 403/404 → error includes "PAR may have expired" hint (O5) |
 | `test_par_url_redacted_in_logs` | no full PAR URL in logs / exception messages (I19) |
+| `test_clean_rejects_bad_mid_ohlc` | `mid_h < mid_l` row → `DataQualityError` (DQ1/I23) |
+| `test_clean_rejects_negative_volume` | `volume < 0` row → `DataQualityError` (DQ3/I23) |
+| `test_clean_rejects_inverted_spread` | `ask < bid` (both sides present) → `DataQualityError` (DQ2/I23) |
+| `test_clean_accepts_valid_data` | well-formed rows pass (DQ no false positive) |
+| `test_clean_picks_up_nested_oanda_csv` | `raw_csv/<inst>/*.csv` subdir picked up by recursive glob (§3.5) |
+| `test_oanda_fetch_requires_token` | empty token → `OandaConfigMissing` (§3.5, loud failure) |
+| `test_oanda_candles_to_rows_schema` | OANDA candle → rows matching the bronze input contract exactly (§3.5) |
+| `test_oanda_backfill_resume_skips_existing` | an existing non-empty month is skipped, no network fetch (§3.5 resume) |
 
 ## 6. Rollback
 
@@ -268,3 +362,4 @@ oci:
 | 2026-11-06 | 0.5 | **Integrity audit + DuckDB efficient read/write / catalog (batch-6)** — ① **three-layer integrity verification all pass**: bronze/5m/1h footers readable with `num_rows` matching the success report + **full row-group decompression scan** (484/484 pages decode cleanly, rows scanned == footer) + raw 163/163 zips match the remote PAR per-object by **md5 AND size** → **confirms the earlier system interruptions left no truncation / page corruption / silent failure**; ② **read path unified on DuckDB external tables / VIEWS** — `_register_bronze` changed from `CREATE TABLE` (materialized the full 48M rows) to `CREATE VIEW` (streaming, A2); ③ **new `lyra/catalog.py`** — a persistent DuckDB catalog (`~/.lyra/default/data/catalog.duckdb`, outside the repo, pure schema metadata) with `bronze`/`ohlcv_5m`/`ohlcv_1h` VIEW named entry points, auto-built at the end of `lyra pull` and rebuildable via the `lyra catalog` CLI (A3); ④ **honest efficiency bound** — aggregate's grouping working set peaks ≈10 GB at 48M rows (inherent to DuckDB hash aggregation, not a bug, not streaming-removable); 0003 must plan memory around this (A6). Real-data regression: after the view change, re-running aggregate yields 5m/1h bars row-identical to batch-5 (I18 holds). Tests 24→30 (added 6 catalog tests, including the VIEW-not-TABLE assertion). |
 | 2026-11-06 | 0.6 | **Batch-7 external red-team: all 9 findings accepted and fixed** (0002 first full "second AI" review): ① **D1 (Major)** `_quote` regex rejected Windows paths → SQL single-quote escaping + control-char rejection (R8 portability); ② **D2 (Major)** `upsert_views` had no lock guard → `try/except` + `warnings.warn` ("best-effort" became code, not just a comment); ③ **D3 (Moderate)** `databackend.memory_limit`/`tmp` never reached DuckDB → new `DatabackendConfig` + `open_limited_duckdb()` (`SET max_memory`/`threads`/`temp_directory`), wired through the full pipeline; **same-round footgun fixed**: `config_example.yml` 1 GB example → 16 GB (real data needs ~10 GB working set; 1 GB would OOM); ④ **D4 (Moderate)** O1 doc gap → `open-questions` now records the ruling (0002 drops the directory-level snapshot_id; single-file external tables + raw md5 provenance); ⑤ **D5 (Moderate)** 21-instrument list never written down → §3.3 now carries the table + `Catalog.instruments()` interface (data is authoritative; list is extensible); ⑥ **D6 (Moderate)** `_validate_1m` opaque error → now names offending instruments + measured `min_gap_s`; **rejected** the "relax to multiples of 60s" suggestion (5m-native 300s is a multiple of 60s and would slip through); ⑦ **D7 (Minor)** empty-table naive timestamp → `pa.timestamp("us", tz="UTC")`; ⑧ **D8 (Minor)** catalog relative paths → `Path.resolve()`; ⑨ **D9 (Minor)** no zip-bomb guard → `MAX_EXTRACTED_MEMBER_BYTES` (8 GB; largest real member is 575 MB) + `ZipBombError`. **38 tests green** (+8 new), pyflakes clean. Batch-7 review doc (ZH+EN) gained the disposition table. |
 | 2026-11-06 | 0.7 | **Pre-close-out self-review + adversarial self-review**: re-verifying all Batch-7 changes surfaced **F1 real defect** — `Catalog.instruments()`'s docstring promised "return [] when the bronze view is missing/unreadable", but a deleted/corrupt bronze parquet made the `SELECT` raise `IO Error` instead of degrading; fixed with `except duckdb.Error: return []` + regression test `test_instruments_returns_empty_on_broken_catalog` (valid-then-delete reproduces the real path). 3 other candidates checked and dismissed/deferred: run_pull not explicitly closing its two count connections (CPython refcount backstop, not a correctness bug, and a scoped-close refactor would break the D2 test's structure → deferred for 0003 cleanup); the alleged `_count_rows` doc reference (grep proved the doc uses DuckDB `COUNT(*)`, false positive); the alleged `tmp/` leak (DuckDB's legitimate `temp_directory` spill space, false positive). **39 tests green** (+1), pyflakes clean, real-data regression bronze/5m/1h = 48,846,896/9,986,167/838,272 consistent with Batch-5 (I18 holds), `instruments()`=21 verified. **0002 closed out** |
+| 2026-11-07 | 0.8 | **Compared against moneta/nova and filled two genuine gaps** (user decided: both into 0002). ① **Data-quality validation (§3.4, DQ1–DQ3, fail-fast)**: the OHLC/spread/volume checks that nova's `data._validate` has but moneta/lyra lacked are now explicit in clean — run after the is_complete filter + dedup, before the COPY, on the survivor candidates; any violation raises `DataQualityError` and bronze is not written. Column-aware (DQ2 only when all 8 quote columns are present, avoiding a `union_by_name` binder error). **Real 61,615,338 CSV rows: 0 violations** (no false positives). New invariant I23. Also fixed a **real test-fixture bug**: `test_aggregate.py`'s placeholder bid/ask were inverted (bid_l > ask_l, physically impossible) and were correctly rejected by the new DQ gate — the fixture now uses ask ≥ bid (valid). ② **OANDA backfill / gap-fill (§3.5, `lyra oanda`)**: the "fetch missing 1-min history by instrument/time window" capability moneta's `extract_oanda.py` has but lyra lacked is now independently re-implemented as `lyra/oanda.py` + a `lyra oanda` CLI — OANDA v3 paging (5000-candle cap, one candle of overlap per page), UTC calendar-month chunking, resume (an existing non-empty month is skipped by default), the token lives only in the gitignored config (an empty token fails loudly), and the output matches the bronze input contract. clean's CSV glob was promoted `*.csv`→`**/*.csv` (DuckDB 2.0 recursive expansion) so per-instrument sub-directories are first-class. **47 tests green** (+8), pyflakes clean. A real OANDA fetch is left for the user to verify after filling the token (a secret; needs network) |

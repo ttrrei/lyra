@@ -184,6 +184,76 @@ oci:
 - **alpha 边界**：本 feature 不碰 `alpha/`、不碰策略、不碰
   `strategies/examples/`。
 
+### 3.4 数据质量校验（DQ1–DQ3，fail-fast）
+
+**动机**：moneta 的 `load_data.py` 只有 `is_complete` 过滤 + 去重，**不校验**
+OHLC 内部一致性 / spread 方向 / volume 非负——脏数据（`bid > ask`、`l > h`、
+负 volume）会静默流入 bronze，污染 0003 的全部特征与 0005 的全部回测。
+nova 的 `data._validate` 有这些检查，lyra 在 moneta→nova→lyra 链条里把这一环
+**显式固化**。
+
+**时机**：clean 在 `is_complete` 过滤 + `(instrument,time)` 去重**之后**、
+`COPY` 写 bronze **之前**执行（对"存活候选行"校验，避免被去重丢弃的行
+误触发）。**fail-fast**：任何违反 → 抛 `DataQualityError`（列出每项违反数），
+bronze 不写出。
+
+**不变量**（每条 = "违反行"的 WHERE 表达式，NULL 比较天然排除部分行）：
+
+| # | 不变量 | 表达式（违反即报错） |
+|---|---|---|
+| DQ1 | mid OHLC 正值且内部一致（o,c ∈ [l,h]） | `mid_h < mid_l OR mid_h < mid_o OR mid_h < mid_c OR mid_l > mid_o OR mid_l > mid_c OR mid_o<=0 OR mid_h<=0 OR mid_l<=0 OR mid_c<=0` |
+| DQ2 | 两侧 quote 都存在时 ask ≥ bid（仅在 8 列全有时启用） | `bid_p IS NOT NULL AND ask_p IS NOT NULL AND ask_p < bid_p`（p ∈ o,h,l,c） |
+| DQ3 | volume（若有）有限且非负 | `volume IS NOT NULL AND (volume < 0 OR NOT isfinite(volume))` |
+
+**列感知**：DQ2 只在输入同时带 `bid_o/h/l/c` + `ask_o/h/l/c` 时启用
+（`union_by_name` 下引用不存在的列是 binder error）；DQ1/DQ3 的列是
+`ALWAYS_PRESENT`，恒启用。
+
+**真实数据验证（61,615,338 raw CSV 行，183 个真实 moneta CSV）**：
+DQ1/DQ2/DQ3 全部 **0 违反**——fail-fast 在真实数据上不误伤，且把
+"moneta 数据恰好干净"这件事从假设变成了**被代码强制的契约**。
+
+**设计取舍**：不静默丢弃违反行（那会掩盖源数据问题），而是 fail-fast
+让上游可见——0002 是数据入口，脏数据在这里被拦下比在 0005 回测里
+以"策略结果诡异"的形式暴露便宜得多。
+
+### 3.5 OANDA 回补 / 缺口填充（`lyra oanda`）
+
+**动机**：`lyra pull` 只下载 **PAR 前缀里已存在**的对象——它没有
+"按标的/时间窗口补缺失历史"的能力。moneta 的 `extract_oanda.py` 有
+（从 OANDA API 拉 1m K 线，按 UTC 月分块、断点续传），这是 moneta→lyra
+链条里 lyra 需要补的一环：I22 哲学是"gap 合法"，但**填 gap 的工具**
+仍应由框架提供，而不是要求用户手写 API 调用。
+
+**契约**（沿用 moneta 的成熟实现，独立重写）：
+
+- **CLI**：`lyra oanda <instrument> --from <UTC> --to <UTC> [--dry-run] [--force]`
+- **来源**：OANDA v3 `/v3/instruments/<inst>/candles`，1m 粒度，
+  `price=MBA`（mid+bid+ask，对齐 bronze schema）。
+- **5000 K 线分页上限**：OANDA 拒绝 `count` 与 `from`+`to` 同用、
+  单页上限 5000——窗口按 `PAGE_SIZE-1` K 线分页，每页起点比上页末点
+  提前 1 K 线（刻意重叠，下游 clean 的 `(instrument,time)` 去重消解）。
+- **日历月分块 + 断点续传**：输出落 `raw_csv/<instrument>/
+  <instrument>_<gran>_<YYYYMM>01T000000Z.csv`（每 UTC 月一文件）；
+  已存在且非空的月份**默认跳过**（`--force` 才重拉），中断重跑自动续。
+- **token 是秘密**：只在 gitignored 的 `config/config.yml` 的
+  `oanda.api_token` 下，**永不进 git**（moneta 惯例）。空 token →
+  `OandaConfigMissing`（响亮的失败，不是静默跳过）。`--dry-run` 不
+  需要 token。
+- **UTC 只**：无本地/DST 转换；所有时间戳 ISO-8601 `...Z`。
+- **输出 schema**：与 bronze 输入契约完全一致
+  （`instrument,is_complete,time,volume,mid_*,bid_*,ask_*`），
+  经 clean 的递归 `**/*.csv` glob 自然被拾取（§3.3 边界）。
+
+**与 §3.3 的耦合**：clean 的 CSV glob 从 `*.csv` 升级为 `**/*.csv`
+（DuckDB 2.0 递归展开），使 per-instrument 子目录成为一等公民；
+既有扁平 CSV 测试全部保持兼容（已验证 47 测试全绿）。
+
+**真实数据未验证**：token 是秘密、API 需要网络，本批只做**离线可验证**
+的部分（schema / 分页逻辑 / 断点续传 / DQ 兼容性）的单元测试；真实
+OANDA 拉取留给用户在 `config/config.yml` 填 token 后跑一次
+`lyra oanda GBP_USD --from ... --to ... --dry-run` 验证。
+
 ## 4. 不变量
 
 | # | 不变量 | 来源 |
@@ -193,6 +263,7 @@ oci:
 | I20 | 对象下载幂等：**md5 一致即跳过**（moneta list 已返回 md5）；md5 不可用时回退 size 判断；同键不同内容必须被重下 | moneta 机制 + 强化（I11 可重建性的下载侧保证） |
 | I21 | 聚合只用 `time_bucket` UTC 边界 + 窗口内已有 1m bar；`n_bars` 如实标记部分 bar（缺口合法）；open/close 取窗口首/末 bar。**`time` 实为 `TIMESTAMPTZ(UTC)`**（源带 `Z`，DuckDB 自动推断；下游读需 pytz，见 pyproject） | moneta `aggregate_ohlcv`（本 feature 固化）；**TIMESTAMPTZ 为真实数据端到端后确认（批次5 A7）** |
 | I22 | 输入**原生分辨率必须 = 1m UTC**（防呆，I18 的前提）。判据：每标的**最小** bar 间隔 ≈ 1m（59–61s）。**市场缺口（bar 缺失）是合法的**——真实 1m 数据周末/休市/无成交会缺 bar（本数据集 73 万处 5m+ 缺口），不得据此拒绝；**5m/1h 原生分辨率**（最小间隔 ≥ 5m）才拒绝 | 本 feature 新增；**真实数据端到端后精确化**（原始"逐对 1m"误拒合法缺口，批次5 修正） |
+| I23 | **数据质量（DQ1–DQ3，fail-fast）**：bronze 候选行必须满足 mid OHLC 正值且内部一致（o,c ∈ [l,h]）、两侧 quote 全有时 ask ≥ bid、volume（若有）有限且非负。任何违反 → `DataQualityError`，bronze 不写出。**真实 61,615,338 CSV 行 0 违反**（不误伤） | 本 feature 新增（nova `data._validate` 的等价固化；moneta 缺失、lyra 补回）；见 §3.4 |
 | I1 | YAML 是唯一策略语言 | HLD §4（本 feature 不碰策略，天然满足） |
 
 ## 5. 测试
@@ -213,6 +284,14 @@ oci:
 | `test_clean_recompute_overwrites` | 删 bronze 后重跑 `lyra pull`（raw 全幂等跳过）→ bronze 仍被重建（A1） |
 | `test_par_expiry_diagnostic` | 403/404 → 报错含 "PAR may have expired" 提示（O5） |
 | `test_par_url_redacted_in_logs` | 日志 / 异常消息中无完整 PAR URL（I19） |
+| `test_clean_rejects_bad_mid_ohlc` | `mid_h < mid_l` 行 → `DataQualityError`（DQ1/I23） |
+| `test_clean_rejects_negative_volume` | `volume < 0` 行 → `DataQualityError`（DQ3/I23） |
+| `test_clean_rejects_inverted_spread` | `ask < bid`（两侧都有）→ `DataQualityError`（DQ2/I23） |
+| `test_clean_accepts_valid_data` | 良形行通过（DQ 不误伤） |
+| `test_clean_picks_up_nested_oanda_csv` | `raw_csv/<inst>/*.csv` 子目录被递归 glob 拾取（§3.5） |
+| `test_oanda_fetch_requires_token` | 空 token → `OandaConfigMissing`（§3.5，响亮失败） |
+| `test_oanda_candles_to_rows_schema` | OANDA candle → 与 bronze 输入契约完全一致的行（§3.5） |
+| `test_oanda_backfill_resume_skips_existing` | 已存在非空月份被跳过，不触发网络拉取（§3.5 断点续传） |
 
 ## 6. 回滚
 
@@ -242,3 +321,4 @@ oci:
 | 2026-11-06 | 0.5 | **完整性审计 + DuckDB 高效读写 / catalog（批次6）**：① **完整性三层验证全过**——bronze/5m/1h footer 可读且 `num_rows` 与成功报告一致 + **全 row-group 解压扫描**（484/484 page 解码成功、扫到行数 == footer）+ raw 163/163 zip 与远端 PAR 逐对象 **md5+size** 全等 → **确认前面的系统中断无截断 / page 损坏 / 静默失败**；② **读路径统一为 DuckDB 外部表 / VIEW**——`_register_bronze` 由 `CREATE TABLE`（物化全表 48M 行）改为 `CREATE VIEW`（流式，A2）；③ **新增 `lyra/catalog.py`**——持久化 DuckDB catalog（`~/.lyra/default/data/catalog.duckdb`，仓库外，纯 schema 元数据），`bronze/ohlcv_5m/ohlcv_1h` 三 VIEW 命名入口，`lyra pull` 末步自动建、`lyra catalog` CLI 可重建（A3）；④ **诚实标注效率上界**——aggregate 分组工作集在 48M 行下实测峰值 ≈10 GB（DuckDB 哈希聚合固有形态，非 bug，非流式可消除），0003 设计大 feature 面时须据此规划（A6）。真实数据回归：视图改造后重跑 aggregate，5m/1h bars 与批次5 逐行一致（I18 成立）。测试 24→30（新增 catalog 6 个，含 VIEW 非 TABLE 断言）。 |
 | 2026-11-06 | 0.6 | **批次7 外部红队 9 项全接受并修复**（0002 首次"第二个 AI"全面审查）：① **D1（Major）**`_quote` 正则阻断 Windows 路径 → 改 SQL 单引号转义 + 控制字符拒绝（R8 可移植性）；② **D2（Major）** `upsert_views` 无锁保护 → `try/except` + `warnings.warn`（"Best-effort"从注释变成代码）；③ **D3（Moderate）** `databackend.memory_limit`/`tmp` 未传入 DuckDB → 新增 `DatabackendConfig` + `open_limited_duckdb()`（`SET max_memory`/`threads`/`temp_directory`），全链路接入；**同轮修脚枪**：`config_example.yml` 的 1GB 示例改 16GB（真实数据需 ~10GB 工作集，1GB 会 OOM）；④ **D4（Moderate）** O1 文档断层 → `open-questions` 补裁决（0002 废弃目录级 snapshot_id，单文件外部表 + raw md5 溯源）；⑤ **D5（Moderate）** 21 标的清单未落盘 → §3.3 补清单表 + `Catalog.instruments()` 接口（权威来源是数据本身，清单可扩展）；⑥ **D6（Moderate）** `_validate_1m` 报错无明细 → 改返回违规标的 + 实测 min_gap_s；**拒绝"放宽到 60s 倍数"建议**（5m 原生 300s 恰是倍数会误放）；⑦ **D7（Minor）** 空表 naive timestamp → 统一 `pa.timestamp("us", tz="UTC")`；⑧ **D8（Minor）** catalog 相对路径 → `Path.resolve()`；⑨ **D9（Minor）** 无解压炸弹防御 → `MAX_EXTRACTED_MEMBER_BYTES`（8GB，真实最大 575MB）+ `ZipBombError`。**38 测试全绿**（新增 8 个），pyflakes 干净。批次7 review 文档（中英双份）补处置表 |
 | 2026-11-06 | 0.7 | **0002 收口前自审 + 对抗性自审**：核验批次7 全部改动后抓出 **F1 真缺陷**——`Catalog.instruments()` 的 docstring 承诺"bronze 视图缺失/不可读时返回 []"，但 bronze parquet 被删/损坏时 `SELECT` 抛 `IO Error` 而非降级；修为 `except duckdb.Error: return []`，新增回归测试 `test_instruments_returns_empty_on_broken_catalog`（valid-then-delete 复现真实路径）。另 3 候选经核验为误报/挂起：run_pull 未显式 close 两个 count 连接（CPython refcount 兜底、非正确性 bug、改法会破坏 D2 测试结构→挂起待 0003 一并清理）/ `_count_rows` 文档引用（grep 证实用 DuckDB `COUNT(*)`，误报）/ `tmp/` 泄漏（DuckDB `temp_directory` 合法换页空间，误报）。**39 测试全绿**（+1），pyflakes 干净，真实数据回归 bronze/5m/1h = 48,846,896/9,986,167/838,272 与批次5 一致（I18 成立）、`instruments()`=21 核验。**0002 收口** |
+| 2026-11-07 | 0.8 | **对比 moneta/nova 补齐两个真缺**（用户拍板：都补进 0002）。① **数据质量校验（§3.4，DQ1–DQ3，fail-fast）**：nova `data._validate` 有、moneta/lyra 无的 OHLC/spread/volume 校验被显式固化进 clean——在 is_complete 过滤 + 去重后、COPY 前对存活候选行校验，违反即 `DataQualityError`、bronze 不写出。列感知（DQ2 仅 8 列全有时启用，防 `union_by_name` binder error）。**真实 61,615,338 CSV 行 0 违反**（不误伤）。新增 I23。顺带修 1 个**测试 fixture 真 bug**：`test_aggregate.py` 的占位 bid/ask 是反的（bid_l > ask_l，物理不可能），被新 DQ 正确拒绝——fixture 改为 ask ≥ bid 的合法报价。② **OANDA 回补 / 缺口填充（§3.5，`lyra oanda`）**：moneta `extract_oanda.py` 有、lyra 无的"按标的/时间窗口补 1m 历史"能力被独立重写为 `lyra/oanda.py` + `lyra oanda` CLI——OANDA v3 分页（5000 K 线上限、每页 1 K 线重叠）、UTC 日历月分块、断点续传（已存在非空月份默认跳过）、token 只在 gitignored config（空 token 响亮失败）、输出对齐 bronze 输入契约。clean 的 CSV glob `*.csv`→`**/*.csv`（DuckDB 2.0 递归展开）使 per-instrument 子目录一等公民。**47 测试全绿**（+8），pyflakes 干净。真实 OANDA 拉取留给用户填 token 后验证（token 是秘密、需网络） |

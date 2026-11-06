@@ -95,11 +95,14 @@ def make_csv_bytes(instrument: str, start_minute: int, n_rows: int, complete: bo
     lines = [HEADER]
     for i in range(n_rows):
         t = datetime.datetime(2026, 1, 2, 0, 0) + datetime.timedelta(minutes=start_minute + i)
+        # Physically valid quote: bid below mid, ask above mid, ask >= bid at
+        # every point (0002 §3.4 DQ2). The original fixture had bid_l > ask_l
+        # (impossible), which the data-quality gate correctly rejects.
         lines.append(
             f"{instrument},{str(complete).lower()},{t.strftime('%Y-%m-%d %H:%M:%S')},"
             f"{vol},{o + i},{o + i + 1},{o + i - 1},{o + i + 0.5},"
-            f"{o + i - 0.2},{o + i + 0.8},{o + i - 0.3},{o + i + 0.3},"
-            f"{o + i + 0.2},{o + i + 1.2},{o + i - 0.7},{o + i + 0.7}"
+            f"{o + i - 0.2},{o + i + 0.8},{o + i - 0.8},{o + i + 0.2},"
+            f"{o + i + 0.2},{o + i + 1.2},{o + i - 0.2},{o + i + 0.7}"
         )
     return ("\n".join(lines) + "\n").encode()
 

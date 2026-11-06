@@ -303,6 +303,154 @@ def test_open_limited_duckdb_applies_settings():
         con.close()
 
 
+def test_clean_rejects_bad_mid_ohlc(tmp_path):
+    """DQ1 (0002 §3.4): a row where mid_high < mid_low must be rejected, not
+    silently written to bronze (nova's invariant, now explicit in lyra)."""
+    from lyra.clean import DataQualityError
+
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "bad.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,is_complete\n"
+        # mid_h (3) < mid_l (5) -> internally inconsistent, must fail.
+        "X,2020-01-01T00:00:00Z,1,2,3,5,2,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    with pytest.raises(DataQualityError, match="mid_ohlc"):
+        clean_mod.clean_csv_to_bronze_parquet(csv, out)
+    # Nothing may have been written.
+    assert not out.exists()
+
+
+def test_clean_rejects_negative_volume(tmp_path):
+    """DQ3 (0002 §3.4): a negative volume must be rejected."""
+    from lyra.clean import DataQualityError
+
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "bad.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,is_complete\n"
+        "X,2020-01-01T00:00:00Z,-5,1,2,1,2,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    with pytest.raises(DataQualityError, match="bad_volume"):
+        clean_mod.clean_csv_to_bronze_parquet(csv, out)
+
+
+def test_clean_rejects_inverted_spread(tmp_path):
+    """DQ2 (0002 §3.4): where both sides of a quote exist, ask must be >= bid.
+
+    A bid/ask input whose ask < bid is physically impossible and must fail.
+    """
+    from lyra.clean import DataQualityError
+
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "bad.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,bid_o,bid_h,bid_l,bid_c,"
+        "ask_o,ask_h,ask_l,ask_c,is_complete\n"
+        # ask_o (9.0) < bid_o (9.5) -> inverted spread, must fail.
+        "X,2020-01-01T00:00:00Z,1,9.2,9.3,9.1,9.2,9.5,9.6,9.4,9.5,9.0,9.1,8.9,9.0,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    with pytest.raises(DataQualityError, match="bad_spread"):
+        clean_mod.clean_csv_to_bronze_parquet(csv, out)
+
+
+def test_clean_accepts_valid_data(tmp_path):
+    """DQ sanity: well-formed rows (o,c in [l,h], volume >= 0) pass through."""
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "ok.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,is_complete\n"
+        "X,2020-01-01T00:00:00Z,1,9.2,9.3,9.1,9.2,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    clean_mod.clean_csv_to_bronze_parquet(csv, out)
+    assert out.exists()
+
+
+def test_clean_picks_up_nested_oanda_csv(tmp_path):
+    """§3.5: OANDA backfill writes raw_csv/<inst>/*.csv; clean's recursive
+    glob must pick up per-instrument sub-directories (not just flat)."""
+    nested = tmp_path / "raw" / "GBP_USD"
+    nested.mkdir(parents=True)
+    (nested / "GBP_USD_M1_20200101T000000Z.csv").write_text(
+        "instrument,is_complete,time,volume,mid_o,mid_h,mid_l,mid_c,"
+        "bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c\n"
+        "GBP_USD,True,2020-01-01T00:00:00Z,1,9.2,9.3,9.1,9.2,"
+        "9.1,9.2,9.0,9.1,9.3,9.4,9.2,9.3\n"
+    )
+    out = tmp_path / "b.parquet"
+    clean_mod.clean_csv_to_bronze_parquet(tmp_path / "raw", out)
+    con = duckdb.connect(":memory:")
+    try:
+        n = con.execute("SELECT COUNT(*) FROM read_parquet(?)", [str(out)]).fetchone()[0]
+        assert n == 1
+        inst = con.execute("SELECT DISTINCT instrument FROM read_parquet(?)", [str(out)]).fetchone()[0]
+        assert inst == "GBP_USD"
+    finally:
+        con.close()
+
+
+def test_oanda_fetch_requires_token():
+    """§3.5: an empty token must raise OandaConfigMissing (loud, not silent)."""
+    from lyra import oanda as oanda_mod
+
+    with pytest.raises(oanda_mod.OandaConfigMissing):
+        oanda_mod.fetch_candles("GBP_USD", "2020-01-01T00:00:00Z",
+                                "2020-01-01T00:00:01Z", token="")
+
+
+def test_oanda_candles_to_rows_schema():
+    """§3.5: candles_to_rows must emit the exact bronze input contract."""
+    from lyra import oanda as oanda_mod
+
+    candles = [{
+        "time": "2020-01-01T00:00:00Z",
+        "complete": True,
+        "volume": 7,
+        "mid": {"o": "9.2", "h": "9.3", "l": "9.1", "c": "9.2"},
+        "bid": {"o": "9.1", "h": "9.2", "l": "9.0", "c": "9.1"},
+        "ask": {"o": "9.3", "h": "9.4", "l": "9.2", "c": "9.3"},
+    }]
+    rows = oanda_mod.candles_to_rows("GBP_USD", candles)
+    assert rows[0]["instrument"] == "GBP_USD"
+    assert rows[0]["is_complete"] is True
+    assert rows[0]["volume"] == 7
+    assert rows[0]["mid_o"] == 9.2
+    assert rows[0]["bid_c"] == 9.1
+    assert rows[0]["ask_h"] == 9.4
+    assert set(rows[0]) == set(oanda_mod.RAW_COLUMNS)
+
+
+def test_oanda_backfill_resume_skips_existing(tmp_path, monkeypatch):
+    """§3.5: a month that already has a non-empty CSV is skipped on re-run
+    (the interrupted-backfill resume contract)."""
+    from lyra import oanda as oanda_mod
+
+    csv_root = tmp_path / "raw_csv"
+    # Pre-create the January 2020 chunk as if a prior run wrote it.
+    pre = csv_root / "GBP_USD" / "GBP_USD_M1_20200101T000000Z.csv"
+    pre.parent.mkdir(parents=True)
+    pre.write_text("instrument,time\nGBP_USD,2020-01-01T00:00:00Z\n")
+
+    # A real fetch would need network + token; the resume path must NOT reach
+    # it. Make fetch_candles explode if called, to prove it was skipped.
+    def boom(*a, **k):
+        raise AssertionError("fetch_candles must be skipped for an existing month")
+
+    monkeypatch.setattr(oanda_mod, "fetch_candles", boom)
+    written = oanda_mod.backfill_window(
+        csv_root, "GBP_USD",
+        "2020-01-01T00:00:00Z", "2020-01-31T23:59:59Z",
+        token="dummy", dry_run=False, force=False, log=lambda *a: None,
+    )
+    assert written == [pre]
+    # And the file is unchanged (not re-fetched).
+    assert pre.read_text().endswith("\n")
+
+
 def test_instruments_returns_empty_on_broken_catalog(tmp_path):
     """F1 (self-review 2026-11-06): a catalog whose bronze view points at a
     deleted Parquet must degrade to [] (the documented contract) rather than

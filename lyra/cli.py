@@ -16,6 +16,7 @@ from .config import (
     load_config,
     local_from_dict,
     oci_from_dict,
+    oanda_from_dict,
     resolve_data_root,
 )
 from . import pipeline
@@ -128,6 +129,55 @@ def catalog(
     for v in views:
         typer.secho(f"{v['view']:<10}", fg=typer.colors.GREEN)
     typer.echo(f"catalog file: {cat.path}")
+
+
+@app.command()
+def oanda(
+    instrument: str = typer.Argument(..., help="OANDA instrument, e.g. GBP_USD"),
+    from_t: str = typer.Option(..., "--from", help="UTC ISO-8601 start (inclusive)"),
+    to: str = typer.Option(..., "--to", help="UTC ISO-8601 end (inclusive)"),
+    config: str = typer.Option("config/config.yml", "--config"),
+    data_root: str | None = typer.Option(None, "--data-root"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan without downloading"),
+    force: bool = typer.Option(False, "--force", help="Re-fetch months that already have a CSV"),
+) -> None:
+    """Backfill / gap-fill a window of OANDA 1-min candles into raw_csv/<inst>/.
+
+    Reads ``oanda.api_token`` from the config (a secret, never committed).
+    After this, run ``lyra pull`` so clean+aggregate pick up the new CSVs.
+    """
+    from . import oanda as oanda_mod
+
+    data = load_config(config or "config/config.yml")
+    ocfg = oanda_from_dict(data)
+    local = local_from_dict(data)
+    root = resolve_data_root(local, data_root)
+    csv_root = root / "raw_csv"
+
+    if not ocfg.api_token and not dry_run:
+        typer.secho(
+            "oanda.api_token is empty — set it in config/config.yml (a secret, "
+            "never committed). Use --dry-run to preview without a token.",
+            fg=typer.colors.RED, err=True,
+        )
+        raise typer.Exit(code=2)
+
+    written = oanda_mod.backfill_window(
+        csv_root,
+        instrument,
+        from_t,
+        to,
+        token=ocfg.api_token,
+        host=ocfg.host,
+        granularity=ocfg.granularity,
+        price=ocfg.price,
+        dry_run=dry_run,
+        force=force,
+    )
+    typer.secho(f"wrote/resumed {len(written)} month CSV(s) under {csv_root}/{instrument}/",
+                fg=typer.colors.GREEN)
+    if not dry_run:
+        typer.echo("next: run `lyra pull` to clean+aggregate the new CSVs.")
 
 
 @app.command()

@@ -22,9 +22,12 @@ def _bronze_parquet(tmp_path, minutes: list[int], instrument="XAU_USD"):
     for i in range(len(minutes)):
         t = base + datetime.timedelta(minutes=i)
         o = 100 + i
+        # Physically valid quote: bid below mid, ask above mid, ask >= bid at
+        # every point (0002 §3.4 DQ2). The original fixture had bid_l > ask_l
+        # (impossible), which the new data-quality gate correctly rejects.
         rows.append(
             f"{instrument},true,{t.strftime('%Y-%m-%d %H:%M:%S')},10,{o},{o + 1},{o - 1},{o + 0.5},"
-            f"{o - 0.2},{o + 0.8},{o - 0.3},{o + 0.3},{o + 0.2},{o + 1.2},{o - 0.7},{o + 0.7}"
+            f"{o - 0.2},{o + 0.8},{o - 0.8},{o + 0.2},{o + 0.2},{o + 1.2},{o - 0.2},{o + 0.7}"
         )
     (csv_dir / f"{instrument}.csv").write_text(HEADER + "\n" + "\n".join(rows) + "\n")
     out = pathlib.Path(tmp_path) / "bronze.parquet"
@@ -84,7 +87,7 @@ def test_aggregate_partial_window_flag(tmp_path):
         o = 100 + i
         rows.append(
             f"XAU_USD,true,{t.strftime('%Y-%m-%d %H:%M:%S')},10,{o},{o + 1},{o - 1},{o + 0.5},"
-            f"{o - 0.2},{o + 0.8},{o - 0.3},{o + 0.3},{o + 0.2},{o + 1.2},{o - 0.7},{o + 0.7}"
+            f"{o - 0.2},{o + 0.8},{o - 0.8},{o + 0.2},{o + 0.2},{o + 1.2},{o - 0.2},{o + 0.7}"
         )
     (csv_dir / "XAU_USD.csv").write_text(HEADER + "\n" + "\n".join(rows) + "\n")
     bronze = pathlib.Path(tmp_path) / "bronze.parquet"
@@ -109,7 +112,7 @@ def test_aggregate_non_1m_rejected(tmp_path):
         o = 100 + m
         rows.append(
             f"XAU_USD,true,{t.strftime('%Y-%m-%d %H:%M:%S')},10,{o},{o + 1},{o - 1},{o + 0.5},"
-            f"{o - 0.2},{o + 0.8},{o - 0.3},{o + 0.3},{o + 0.2},{o + 1.2},{o - 0.7},{o + 0.7}"
+            f"{o - 0.2},{o + 0.8},{o - 0.8},{o + 0.2},{o + 0.2},{o + 1.2},{o - 0.2},{o + 0.7}"
         )
     (csv_dir / "XAU_USD.csv").write_text(HEADER + "\n" + "\n".join(rows) + "\n")
     bronze = pathlib.Path(tmp_path) / "bronze.parquet"
@@ -132,7 +135,7 @@ def test_aggregate_gapped_1m_accepted(tmp_path):
         o = 100 + m
         rows.append(
             f"XAU_USD,true,{t.strftime('%Y-%m-%d %H:%M:%S')},10,{o},{o + 1},{o - 1},{o + 0.5},"
-            f"{o - 0.2},{o + 0.8},{o - 0.3},{o + 0.3},{o + 0.2},{o + 1.2},{o - 0.7},{o + 0.7}"
+            f"{o - 0.2},{o + 0.8},{o - 0.8},{o + 0.2},{o + 0.2},{o + 1.2},{o - 0.2},{o + 0.7}"
         )
     (csv_dir / "XAU_USD.csv").write_text(HEADER + "\n" + "\n".join(rows) + "\n")
     bronze = pathlib.Path(tmp_path) / "bronze.parquet"

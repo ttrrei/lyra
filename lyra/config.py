@@ -39,6 +39,23 @@ class LocalConfig:
 
 
 @dataclass(frozen=True)
+class OandaConfig:
+    """OANDA API access for the gap/backfill tool (0002 §3.5).
+
+    ``api_token`` is a secret — it lives only in the gitignored
+    ``config/config.yml`` and is never committed (moneta's convention).
+    Absent/empty token means "OANDA backfill is not configured"; the
+    OCI-PAR pull pipeline is unaffected.
+    """
+
+    api_token: str = ""
+    host: str = "api-fxpractice.oanda.com"
+    # "MBA" = mid + bid + ask components (matches the bronze schema).
+    price: str = "MBA"
+    granularity: str = "M1"
+
+
+@dataclass(frozen=True)
 class DatabackendConfig:
     """DuckDB resource limits (D3, batch-7).
 
@@ -121,6 +138,25 @@ def databackend_from_dict(data: dict) -> DatabackendConfig:
         memory_limit=str(db.get("memory_limit", "16GB")),
         threads=threads,
         tmp=str(db.get("tmp", "tmp")),
+    )
+
+
+def oanda_from_dict(data: dict) -> OandaConfig:
+    """Parse the optional ``oanda`` section (0002 §3.5).
+
+    Absent section → a default ``OandaConfig`` with an empty token, so
+    callers can uniformly check ``cfg.api_token`` to decide availability.
+    """
+    o = data.get("oanda")
+    if o is None:
+        return OandaConfig()
+    if not isinstance(o, dict):
+        raise ConfigError("'oanda' must be a mapping")
+    return OandaConfig(
+        api_token=str(o.get("api_token") or "").strip(),
+        host=str(o.get("host", "api-fxpractice.oanda.com")),
+        price=str(o.get("price", "MBA")).upper(),
+        granularity=str(o.get("granularity", "M1")).upper(),
     )
 
 

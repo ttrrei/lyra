@@ -56,3 +56,18 @@ databackend:
   memory_limit: "16GB"  # DuckDB ceiling before it spills to temp_directory
   threads: 4            # parallel threads (omit to use DuckDB default)
   tmp: "tmp"            # spill directory, relative to the data root
+
+oanda:
+  # OANDA historical-candle backfill / gap-fill (0002 §3.5, `lyra oanda`).
+  # This is the COMPLEMENT to the OCI-PAR pull: `lyra pull` downloads what is
+  # already in the PAR prefix; `lyra oanda` fetches a specific
+  # (instrument, time window) of 1-min candles straight from the OANDA API
+  # into raw_csv/<instrument>/ so `lyra pull`'s clean step picks it up.
+  #
+  # api_token is a SECRET — it lives only in config/config.yml (gitignored)
+  # and is NEVER committed (moneta's convention). Leave empty to disable
+  # the OANDA backfill; the OCI-PAR pull pipeline is unaffected either way.
+  api_token: ""          # your OANDA API token (a secret; never commit)
+  host: "api-fxpractice.oanda.com"   # practice (demo) host by default
+  price: "MBA"           # mid + bid + ask components (matches bronze schema)
+  granularity: "M1"      # 1-minute candles (the bronze native resolution, I22)
