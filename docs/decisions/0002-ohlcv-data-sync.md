@@ -252,10 +252,15 @@ DQ1/DQ2/DQ3 全部 **0 违反**——fail-fast 在真实数据上不误伤，且
 （DuckDB 2.0 递归展开），使 per-instrument 子目录成为一等公民；
 既有扁平 CSV 测试全部保持兼容（已验证 47 测试全绿）。
 
-**真实数据未验证**：token 是秘密、API 需要网络，本批只做**离线可验证**
-的部分（schema / 分页逻辑 / 断点续传 / DQ 兼容性）的单元测试；真实
-OANDA 拉取留给用户在 `config/config.yml` 填 token 后跑一次
-`lyra oanda GBP_USD --from ... --to ... --dry-run` 验证。
+**真实数据已验证（2026-11-07，v1.0）**：用 moneta 的 practice token
+（gitignored `config/config.yml` `oanda.api_token`）跑
+**2019-11/12 全 21 标的**真实 OANDA 回补——**42/42 标的·月全部成功，
+0 失败**，共 **943,529 根 1m K 线**，时间覆盖 2019-11-01→2019-12-31；
+输出 CSV 16 列与 bronze 输入契约完全一致（含 `bid_*`/`ask_*`，UTC `Z`）。
+断点续传实测生效（GBP_USD 2019-11 已存在被跳过、`--force` 才重拉）。
+> 注：初测时一次 `curl` 对 practice/live 双 host 均 401，一度误判为
+> "token 过期"；复测确认那是**瞬时故障**，token 本身有效（`requests`
+> 直连 `/v3/accounts` 与 `/candles` 均 200），42/42 全绿。
 
 ## 4. 不变量
 
@@ -328,3 +333,4 @@ OANDA 拉取留给用户在 `config/config.yml` 填 token 后跑一次
 | 2026-11-06 | 0.7 | **0002 收口前自审 + 对抗性自审**：核验批次7 全部改动后抓出 **F1 真缺陷**——`Catalog.instruments()` 的 docstring 承诺"bronze 视图缺失/不可读时返回 []"，但 bronze parquet 被删/损坏时 `SELECT` 抛 `IO Error` 而非降级；修为 `except duckdb.Error: return []`，新增回归测试 `test_instruments_returns_empty_on_broken_catalog`（valid-then-delete 复现真实路径）。另 3 候选经核验为误报/挂起：run_pull 未显式 close 两个 count 连接（CPython refcount 兜底、非正确性 bug、改法会破坏 D2 测试结构→挂起待 0003 一并清理）/ `_count_rows` 文档引用（grep 证实用 DuckDB `COUNT(*)`，误报）/ `tmp/` 泄漏（DuckDB `temp_directory` 合法换页空间，误报）。**39 测试全绿**（+1），pyflakes 干净，真实数据回归 bronze/5m/1h = 48,846,896/9,986,167/838,272 与批次5 一致（I18 成立）、`instruments()`=21 核验。**0002 收口** |
 | 2026-11-07 | 0.8 | **对比 moneta/nova 补齐两个真缺**（用户拍板：都补进 0002）。① **数据质量校验（§3.4，DQ1–DQ3，fail-fast）**：nova `data._validate` 有、moneta/lyra 无的 OHLC/spread/volume 校验被显式固化进 clean——在 is_complete 过滤 + 去重后、COPY 前对存活候选行校验，违反即 `DataQualityError`、bronze 不写出。列感知（DQ2 防 `union_by_name` binder error；v0.9 细化为逐点）。**真实 61,615,338 CSV 行 0 违反**（不误伤）。新增 I23。顺带修 1 个**测试 fixture 真 bug**：`test_aggregate.py` 的占位 bid/ask 是反的（bid_l > ask_l，物理不可能），被新 DQ 正确拒绝——fixture 改为 ask ≥ bid 的合法报价。② **OANDA 回补 / 缺口填充（§3.5，`lyra oanda`）**：moneta `extract_oanda.py` 有、lyra 无的"按标的/时间窗口补 1m 历史"能力被独立重写为 `lyra/oanda.py` + `lyra oanda` CLI——OANDA v3 分页（5000 K 线上限、每页 1 K 线重叠）、UTC 日历月分块、断点续传（已存在非空月份默认跳过）、token 只在 gitignored config（空 token 响亮失败）、输出对齐 bronze 输入契约。clean 的 CSV glob `*.csv`→`**/*.csv`（DuckDB 2.0 递归展开）使 per-instrument 子目录一等公民。**47 测试全绿**（+8），pyflakes 干净。真实 OANDA 拉取留给用户填 token 后验证（token 是秘密、需网络） |
 | 2026-11-07 | 0.9 | **自检 + 对抗性复查两个新功能**（用户要求：先自检、再对抗性、最后 2019-11/12 实测）。**S1 真缺陷（已修）**：DQ2 列感知原为"8 列全有才启用"——partial quotes 输入（如只带 `bid_o`/`ask_o`）会**静默跳过** spread 校验，违背 fail-fast 意图（也漏掉 nova `not in (0,8)` 拒绝的场景）。改为**逐点列感知**：某点 `bid_p`+`ask_p` 都在则该点强制 `ask_p >= bid_p`（逐点 NULL guard 安全），只有完全无任何 bid/ask 配对列才整体跳过——既不拒合法 partial quotes、也不静默漏检反向 spread。新增 2 个回归测试（`test_clean_rejects_partial_quote_inverted_spread` + `test_clean_accepts_partial_quote_valid_spread`），5 边界情形全验证（partial inverted 拒绝 / partial valid 通过 / full inverted 拒绝 / full valid 通过 / quote-free 通过）。**对抗性复查 OANDA 模块**：月份计算（`_months_between` + 12 月进位）、分页（`PAGE_SIZE-1` 重叠去重）、resume（非空月跳过）、token 守卫（空 token → `OandaConfigMissing`）逐行核验，逻辑正确。**真实 OANDA 实测受阻（诚实记录）**：moneta 的 token（`config/setting.yml`，gitignored，practice 环境）在 practice 与 live 两个 host 都返回 **401 Insufficient authorization**——token 已过期/吊销（gen-1 旧 token），非代码问题。代码路径已通过 49 离线测试 + `--dry-run` + 真实 clean+DQ 验证；真实拉取需用户提供新 token。**49 测试全绿**（+2），pyflakes 干净。**0002 收口**，0003 就绪 |
+| 2026-11-07 | 1.0 | **真实 OANDA 回补实测通过**（用户指示用 moneta 的 practice token 实测）。**2019-11/12 全 21 标的 = 42 标的·月全部成功，0 失败**，共 **943,529 根 1m K 线**（覆盖 2019-11-01→2019-12-31），输出 CSV 16 列与 bronze 输入契约一致（含 bid/ask，UTC Z）；断点续传生效（已存在月跳过）。**更正 #50 的 401 结论**：初测一次 `curl` 双 host 401 是**瞬时故障**，复测 `requests` 直连 `/v3/accounts`+`/candles` 均 200，token 有效；§3.5 由"真实数据未验证"改为"已验证"。0002 全部收口，0003 就绪 |
