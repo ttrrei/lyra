@@ -24,15 +24,15 @@
 
 | 项 | 值 |
 |---|---|
-| 更新于 | 2026-11-06（#42） |
+| 更新于 | 2026-11-06（#43） |
 | 构建顺序 | `docs/hld.md` §8（0001→0009，唯一事实来源） |
-| 已完成 | **0001**（repo + OCI split，文档定案）；首次 commit `c8f3851`（文档骨架 + LICENSE + pyproject + examples） |
-| 进行中 | **0002 决策文档 v0.3**（中英）：经**自检 + 批次3 对抗性 review** 后定稿——moneta 真实契约核对（15 列 / is_complete 过滤 / 确定性去重）、不变量 **I18–I22**、bronze schema 显式化、raw 层唯一幂等 + clean/aggregate 恒重算、14 个测试场景；**O5 已定案**；`config_example.yml` 已预留 3 个 PAR 位置 |
-| 下一步 | **0002 代码**：用户审批 v0.3 → 实现 `lyra/` 包（oci_client / pull / clean / aggregate / cli）+ 14 个测试全绿（fixture 数据先行，OCI 端到端待真实 PAR） |
-| 代码状态 | 尚无源码；`lyra/` 包将在 0002 随代码创建 |
-| 代码交付顺序 | 0002 pull → 0003 feature builder → 0004 compiler → 0005 trade engine → 0006 metrics/runner（在 fixture 数据上）→ 0007 push/backup |
+| 已完成 | **0001**（repo + OCI split，文档定案）；首次 commit `c8f3851`；**0002 代码完成**——`lyra/` 包（oci_client / pull / clean / aggregate / pipeline / cli / config）+ **22 个测试全绿**、pyflakes 干净、端到端已验证；**自检 + 批次4 对抗性 review 已完成**（发现并修复 5 个真 bug，含 md5 base64/hex 双编码导致 I20 幂等静默失效） |
+| 进行中 | **0002 收尾**：即将 commit（代码 + 测试 + 批次4 review） |
+| 下一步 | **0003 feature builder**（HLD §8）：per-instrument feature cards + Hybrid Parquet store，消费 0002 的 bronze（typed `timestamp[us]` 的 `time` 列、确定性列集）；首次 OCI 端到端 `lyra pull` 仍需真实 `data_par_url` |
+| 代码状态 | `lyra/` 包已存在且可 import；`lyra pull` / `lyra clean` / `lyra aggregate` / `lyra version` 均可跑通；bronze/5m/1h Parquet 具稳定 typed schema |
+| 代码交付顺序 | 0002 pull ✅ → 0003 feature builder → 0004 compiler → 0005 trade engine → 0006 metrics/runner → 0007 push/backup |
 | 未决问题 | **无**（O1–O5、O11–O15 全部已关闭） |
-| 待用户输入 | ① 审批 0002 v0.3（重点：§3.3 契约 + §4 I18–I22 + §5 测试清单）② 真实 `data_par_url`（OCI 端到端测试时） |
+| 待用户输入 | 真实 `data_par_url`（首次真实 OCI 端到端 `lyra pull` 用） |
 
 ## 图例
 
@@ -92,6 +92,7 @@
 | 40 | doc+decision | **0002 决策文档落地**（中英，状态=提案待审批）：① 扫 moneta `pipeline/extract_oci.py` + `aggregate_ohlcv.py` 摸清已验证机制（PAR prefix 列对象分页 / 对象流式下载 / size 幂等 / path-traversal 防护 / UTC 边界聚合 + `n_bars`）；② **定案 pull 用 PAR prefix URL**（沿用 moneta 机制，零 SDK 凭证；push 侧 signer 与否留 0007 再评估）；③ **O5 定案**：PAR 用户侧管理 + `lyra pull` 403/404 过期诊断 + 0009 doctor 体检；④ **用户要求的 PAR 预留**：`config_example.yml` `oci:` 段改为 3 个位置——`data_par_url`（0002 用）/ `strategies_par_url` + `features_par_url`（0007 用，本 feature 只占位不读取）；⑤ 定案新不变量：数据层可复现性（同 PAR+同代码 → 逐字节一致【#41 已修正为逐行一致】）、PAR URL 日志脱敏 | `docs/decisions/0002-ohlcv-data-sync.md`+`.en.md`（新建）、`config/config_example.yml`、`docs/open-questions.md`/`.en.md`（O5 关闭）、状态块 |
 | 41 | review+fix | **0002 自检 + 批次3 对抗性 review**（用户要求；专项打 0002，逐条核对 moneta 源码/真实数据）。**自检 7 处**：S1 输入契约与 moneta 真实列不符（实际必需 `instrument,time,is_complete`，mid/bid/ask 可选，真实 15 列）🔴；S2 clean 语义漏 moneta `load_data.py` 三规则（is_complete 过滤 / (instrument,time) 去重 / 确定性存活行选择）🔴；S3"逐字节可复现"与未定义去重规则自相矛盾 + Parquet 文件字节本就不稳 🔴；S4 size 幂等太弱（moneta list 已取 md5 却未用）；S5 CLI 歧义；S6 缺 prefix 级 PAR / 非 1m 拒绝两句；S7 config 真实值位置未写明。**另抓到 0.1 不变量编号 I2–I6 与 hld §4 已占用编号冲突** → 重编 **I18–I22**。**批次3 红队 5 项**：A1 派生缓存陈旧（bronze 被删/损坏时静默丢数据）→ **raw 层唯一幂等，clean/aggregate 恒重算**；A2 bronze schema 未定义 → **显式定案**（7 列必含 / bid/ask 依源 / 不含 is_complete，0003 输入契约）；A3–A5 记录为接受边界。测试清单 9→14 | `docs/decisions/0002*`（v0.2→v0.3）、`docs/reviews/对抗性review-2026-11-06-批次3.md`+`.en.md`（新建）、状态块 |
 | 42 | doc(用户问) | 用户问"0002/0001 等文档提到的 moneta、nova 是前代仓库，入口文档是否说明了"。核对：README/AGENTS/background 有定义，但**决策文档内部首次出现处没有就地指路**（新窗口读 0002 时"moneta"可能是第一个看到的陌生词）。修复：① 0002 §2 背景开头加谱系指路行（中英，指 `docs/background.md`）；② AGENTS.md 头部加 **Lineage** 块：Moneta(1代,2026-10) → Nova(2代,2026-11, clean-room 重构) → **Lyra(3代,本仓库)**，前两代为本地只读参考（**只继承机制、独立重写，永不 import/修改/拷贝其运行时代码**，与 0002 §6 回滚边界一致），完整"为什么"在 background | `docs/decisions/0002*` §2、`AGENTS.md` |
+| 43 | code+test+review | **0002 代码实现 + 自检 + 批次4 对抗性 review（全过）**。① 实现 `lyra/` 包：`oci_client`（PAR prefix 列对象分页 + 对象流式下载 + path-traversal 防护 + PAR URL 脱敏 + **md5 归一化**）、`pull`（zip→flat CSV，`_N` 去重名，instrument 取列名不取文件名）、`clean`（is_complete 过滤 + (instrument,time) 确定性去重 + bronze schema）、`aggregate`（UTC time_bucket 5m/1h，first/last bar，`n_bars`，I22 校验）、`pipeline`（raw 唯一幂等 + clean/agg 恒重算，typed Parquet 落盘）、`cli`（`lyra pull/clean/aggregate/version`）、`config`（`data_par_url` 必需，push 2 个 PAR 预留不读取）；② **22 个测试全绿**（0002 承诺 14 个场景全覆盖 + 8 个边界/负例），pyflakes 干净，端到端 `FakePar` 验证（70+30 根 1m → bronze 100 / 5m 20 / 1h 3；重跑仅 1 次 list 请求）；③ **批次4 红队 11 项**：修复 5 个真 bug——**A1 md5 base64/hex 双编码恒失配**（I20 幂等静默退化为 size 回退，moneta 同款坑）/ A2 `pull.py` 未 import `Iterator` / A3 `INTERVAL '5 minutes'` 未加引号 + TIMESTAMPTZ 触发 pytz 崩溃 / A4 bronze `time` 落成 string 破坏 I18 稳定 schema / A10 空表 schema 漂移；A11 PAR 脱敏**复核后判定安全**（机密在 query `Signature` 已丢弃，`/p/<namespace>` 是公开标识符）；A5–A9 判定为正确行为或已清理。**无遗留未决项** | `lyra/*.py`（新建 8 个模块）、`tests/*.py`（新建 5 个测试文件 + conftest）、`docs/reviews/对抗性review-2026-11-06-批次4.md`+`.en.md`（新建）、状态块 |
 
 ## 待办（截至 2026-11-05 收工）
 
