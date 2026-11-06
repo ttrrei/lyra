@@ -69,10 +69,9 @@ def _validate_1m(connection: duckdb.DuckDBPyConnection) -> None:
         )
 
 
-def _aggregate_interval(
-    connection: duckdb.DuckDBPyConnection, interval_sql: str
-) -> list[dict[str, Any]]:
-    sql = f"""
+def _interval_sql(interval_sql: str) -> str:
+    """Inner aggregation SELECT (as a subquery body) over the ``bronze`` view."""
+    return f"""
         SELECT
             instrument,
             time_bucket(INTERVAL '{interval_sql}', time)        AS time,
@@ -88,14 +87,17 @@ def _aggregate_interval(
         GROUP BY instrument, time_bucket(INTERVAL '{interval_sql}', time)
         ORDER BY instrument, time_bucket(INTERVAL '{interval_sql}', time)
     """
-    cursor = connection.execute(sql)
-    names = [d[0] for d in cursor.description]
-    return [dict(zip(names, r)) for r in cursor.fetchall()]
 
 
 def _register_bronze(connection: duckdb.DuckDBPyConnection, path: Path) -> None:
+    """Register ``bronze`` as a **view** (external table) over the Parquet file.
+
+    A view (not ``CREATE TABLE``) means DuckDB streams directly from the
+    Parquet file on each query — no in-memory copy of the 48M rows. This is
+    the "DuckDB-as-metadata / external-table" pattern the user asked for.
+    """
     connection.execute(
-        "CREATE OR REPLACE TABLE bronze AS "
+        "CREATE OR REPLACE VIEW bronze AS "
         f"SELECT instrument, time, volume, mid_o, mid_h, mid_l, mid_c "
         f"FROM read_parquet('{_quote(path)}')"
     )
@@ -131,7 +133,7 @@ def aggregate_bronze_to_parquet(
             # ORDER BY in the outer query keeps Parquet row order stable
             # (I18) regardless of parallelism.
             sql = (
-                f"SELECT {select} FROM ({_interval_sql(con, interval_sql)}) t "
+                f"SELECT {select} FROM ({_interval_sql(interval_sql)}) t "
                 "ORDER BY instrument, time"
             )
             con.execute(
@@ -140,26 +142,6 @@ def aggregate_bronze_to_parquet(
     finally:
         con.close()
     return {"ohlcv_5m": p5, "ohlcv_1h": p1}
-
-
-def _interval_sql(con: duckdb.DuckDBPyConnection, interval_sql: str) -> str:
-    """Return the inner aggregation SELECT (as a subquery body)."""
-    return f"""
-        SELECT
-            instrument,
-            time_bucket(INTERVAL '{interval_sql}', time)        AS time,
-            (ARRAY_AGG(mid_o ORDER BY time))[1]                 AS mid_o,
-            (ARRAY_AGG(mid_c ORDER BY time))[
-                ARRAY_LENGTH(ARRAY_AGG(mid_c ORDER BY time))
-            ]                                                    AS mid_c,
-            MAX(mid_h)                                            AS mid_h,
-            MIN(mid_l)                                            AS mid_l,
-            SUM(COALESCE(volume, 0))                              AS volume,
-            COUNT(*)                                              AS n_bars
-        FROM bronze
-        GROUP BY instrument, time_bucket(INTERVAL '{interval_sql}', time)
-        ORDER BY instrument, time_bucket(INTERVAL '{interval_sql}', time)
-    """
 
 
 def aggregate_bronze(bronze_parquet: str | Path) -> dict[str, list[dict[str, Any]]]:
@@ -171,6 +153,11 @@ def aggregate_bronze(bronze_parquet: str | Path) -> dict[str, list[dict[str, Any
     try:
         _register_bronze(con, bronze)
         _validate_1m(con)
-        return {label: _aggregate_interval(con, sql) for label, sql in INTERVALS}
+        out: dict[str, list[dict[str, Any]]] = {}
+        for label, sql in INTERVALS:
+            cur = con.execute(f"SELECT * FROM ({_interval_sql(sql)}) t")
+            names = [d[0] for d in cur.description]
+            out[label] = [dict(zip(names, r)) for r in cur.fetchall()]
+        return out
     finally:
         con.close()

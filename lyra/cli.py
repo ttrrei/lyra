@@ -104,6 +104,31 @@ def aggregate(
 
 
 @app.command()
+def catalog(
+    config: str = typer.Option("config/config.yml", "--config"),
+    data_root: str | None = typer.Option(None, "--data-root"),
+    refresh: bool = typer.Option(False, "--refresh", help="Re-register views from the Parquet files"),
+) -> None:
+    """Show (or refresh) the DuckDB catalog views that reference the Parquet layers."""
+    from .catalog import Catalog, default_catalog_path
+
+    _, root = _load(config, data_root)
+    cat = Catalog(default_catalog_path(root))
+    if refresh:
+        from .catalog import upsert_views
+
+        upsert_views(root, cat)
+    views = cat.views()
+    if not views:
+        typer.secho(f"no catalog views at {cat.path} — run `lyra catalog --refresh` or `lyra pull`",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    for v in views:
+        typer.secho(f"{v['view']:<10}", fg=typer.colors.GREEN)
+    typer.echo(f"catalog file: {cat.path}")
+
+
+@app.command()
 def version() -> None:
     """Print the installed Lyra version."""
     typer.echo(__version__)

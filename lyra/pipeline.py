@@ -144,6 +144,12 @@ def run_pull(
         p1 = _write_parquet([], p1, columns=agg.AGGREGATE_COLUMNS)
         bars_5m = bars_1h = 0
 
+    # 5) register the DuckDB catalog (metadata layer over the Parquet files)
+    #    so 0003+ query stable named views instead of re-opening globs.
+    #    Best-effort: a catalog failure must not fail the data pipeline.
+    from .catalog import upsert_views
+    upsert_views(data_root)
+
     return PullResult(
         raw_zips=raw_zips,
         raw_csvs=raw_csvs,

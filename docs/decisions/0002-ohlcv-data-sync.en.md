@@ -156,9 +156,30 @@ oci:
     re-run** (moneta behavior); sub-directories untouched),
   - `data/all_data/all_data.parquet` (bronze 1m),
   - `data/ohlcv_5m/`, `data/ohlcv_1h/` (aggregated, `time_bucket` UTC
-    boundaries, `n_bars` truthfully flagging partial bars).
+    boundaries, `n_bars` truthfully flagging partial bars),
+  - `data/catalog.duckdb` (a **DuckDB metadata / external-table catalog**,
+    274 KB of pure schema): holds three VIEWS — `bronze` / `ohlcv_5m` /
+    `ohlcv_1h` — each pointing at the corresponding Parquet file. **The data
+    still lives in Parquet (I18 single source of truth)**; the catalog is only
+    the **named entry point** — 0003/0005 just `SELECT ... FROM bronze` with
+    no path to remember and no re-glob. Rebuildable
+    (`lyra catalog --refresh`, idempotent `CREATE OR REPLACE VIEW`), and
+    **not an asset to back up** (0007 push targets the Parquet, not the
+    catalog). **Never in git** (B13, outside the repo).
   All under `~/.lyra/<workspace>/` or `--data-root` (B13), **never in
   git** (B1).
+- **Efficient read / write contract (DuckDB)**:
+  - **Read**: clean / aggregate / catalog all read Parquet through
+    **DuckDB external tables / VIEWS** (streaming), **never materializing the
+    full table into memory** (batch-6 A2/A3);
+  - **Write**: clean streams to disk via `COPY`; aggregate streams via
+    `COPY (… ORDER BY …)` with stable row order (I18);
+  - **Honest boundary (batch-6 A6)**: aggregate's `time_bucket + ARRAY_AGG +
+    GROUP BY` grouping working set peaks ≈**10 GB** at 48M rows (inherent to
+    DuckDB hash aggregation, not a streaming bug and not a leak).
+    "Streaming" means the bronze reads and the clean `COPY` don't materialize
+    the full table; **the grouping working set is not free** — 0003 must plan
+    memory accordingly when designing a larger feature surface.
 - **Credential boundary**: PAR URLs appear only in `config.yml`
   (gitignored); logs / reports / run summaries **never print a full PAR
   URL** (redacted to host + first 2 path segments).
@@ -221,3 +242,4 @@ oci:
 | 2026-11-06 | 0.2 | **Self-check + adversarial review (batch 3) fixes**: ① input contract now matches moneta's real column contract (required `instrument,time,is_complete`; mid/bid/ask optional; real CSVs have 15 columns); ② clean semantics completed with moneta `load_data.py`'s three rules (is_complete filter / dedupe on (instrument,time) / deterministic survivor selection), guarding against `prices_*` backfill overlapping the main CSV on the same key; ③ reproducibility invariant corrected from "byte-identical" to **row-identical content** (Parquet file bytes vary with arrow versions; moneta uses the same standard), with its premises defined (deterministic clean + name-sorted pull); ④ download idempotency upgraded to **md5-first / size-fallback** (moneta listed md5 but never used it); ⑤ new foolproofing I22: non-1m granularity input rejected; ⑥ `data_par_url` must be prefix-level; ⑦ CLI clarified (clean/aggregate are debug entries into pull's internal steps); ⑧ invariant numbering corrected to **I18–I22** (0.1 wrongly used I2–I6, colliding with hld §4's taken numbers); ⑨ test list 9→12 (added md5-mismatch re-download, is_complete filter, dedup determinism, non-1m rejection). |
 | 2026-11-06 | 0.3 | Batch-3 red team's two real defects landed: **A1 stale derived cache** → settled: only the raw layer is idempotent; clean/aggregate always recompute (otherwise deleting/corrupting bronze silently loses data); **A2 bronze schema undefined** → settled explicitly: bronze columns = input union (7 always-present, bid/ask source-dependent, **no `is_complete`**), as the 0003 input contract; test list 12→14. A3–A5 recorded as accepted boundaries. |
 | 2026-11-06 | 0.4 | **After the real end-to-end run (moneta's real PAR, 12 GB / 48.8M rows): contract refinement + 4 fixture-untestable fixes** — ① **clean rewritten in DuckDB** (pure Python infeasible at 48M rows); ② **I22 criterion changed to "native resolution = 1m"** (per-instrument minimum gap ≈1m) with **market gaps legitimate** — the original "every-pair 1m" wrongly rejected 730k real gaps; ③ `time` confirmed as **TIMESTAMPTZ(UTC)** (inferred from source `Z`) + downstream reads need **pytz** (added to pyproject); ④ `read_parquet(?)` bind params wrapped in `str()`; ⑤ `COPY` gains `ORDER BY` for stable row order (I18). Tests 14→24 (added gapped-1m accepted, 5m-native rejected, COPY determinism, empty-table schema). |
+| 2026-11-06 | 0.5 | **Integrity audit + DuckDB efficient read/write / catalog (batch-6)** — ① **three-layer integrity verification all pass**: bronze/5m/1h footers readable with `num_rows` matching the success report + **full row-group decompression scan** (484/484 pages decode cleanly, rows scanned == footer) + raw 163/163 zips match the remote PAR per-object by **md5 AND size** → **confirms the earlier system interruptions left no truncation / page corruption / silent failure**; ② **read path unified on DuckDB external tables / VIEWS** — `_register_bronze` changed from `CREATE TABLE` (materialized the full 48M rows) to `CREATE VIEW` (streaming, A2); ③ **new `lyra/catalog.py`** — a persistent DuckDB catalog (`~/.lyra/default/data/catalog.duckdb`, outside the repo, pure schema metadata) with `bronze`/`ohlcv_5m`/`ohlcv_1h` VIEW named entry points, auto-built at the end of `lyra pull` and rebuildable via the `lyra catalog` CLI (A3); ④ **honest efficiency bound** — aggregate's grouping working set peaks ≈10 GB at 48M rows (inherent to DuckDB hash aggregation, not a bug, not streaming-removable); 0003 must plan memory around this (A6). Real-data regression: after the view change, re-running aggregate yields 5m/1h bars row-identical to batch-5 (I18 holds). Tests 24→30 (added 6 catalog tests, including the VIEW-not-TABLE assertion). |

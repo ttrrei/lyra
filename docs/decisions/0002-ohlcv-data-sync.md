@@ -140,9 +140,26 @@ oci:
     子目录不动）、
   - `data/all_data/all_data.parquet`（bronze 1m）、
   - `data/ohlcv_5m/`、`data/ohlcv_1h/`（聚合，`time_bucket` UTC
-    边界，`n_bars` 如实标记部分 bar）。
+    边界，`n_bars` 如实标记部分 bar）、
+  - `data/catalog.duckdb`（**DuckDB 元数据 / 外部表 catalog**，274 KB
+    纯 schema）：持有 `bronze` / `ohlcv_5m` / `ohlcv_1h` 三个 VIEW，
+    分别指向对应 Parquet 文件。**数据仍在 Parquet（I18 单一事实来源）**，
+    catalog 只是**命名入口**——0003/0005 直接 `SELECT ... FROM bronze`，
+    不必记路径 / re-glob。catalog 可重建（`lyra catalog --refresh`，幂等
+    `CREATE OR REPLACE VIEW`），**不是需备份的资产**（0007 push 的对象是
+    Parquet，不是 catalog）。**永不进 git**（B13，仓库外）。
   全部在 `~/.lyra/<workspace>/` 或 `--data-root` 指定处（B13），
   **永不进 git**（B1）。
+- **高效读 / 写契约（DuckDB）**：
+  - **读**：clean / aggregate / catalog 全部走 **DuckDB 外部表 / VIEW**
+    流式读 Parquet，**不把全表物化进内存**（批次6 A2/A3）；
+  - **写**：clean 用 `COPY` 流式落盘；aggregate 用 `COPY (… ORDER BY …)`
+    流式落盘且行序稳定（I18）；
+  - **诚实边界（批次6 A6）**：aggregate 的 `time_bucket + ARRAY_AGG +
+    GROUP BY` 分组工作集在 48M 行下实测峰值 ≈**10 GB**（这是 DuckDB
+    哈希聚合的固有形态，非流式 bug、非内存泄漏）。"流式"指 bronze 读取
+    与 clean COPY 不物化全表；**分组工作集不免费**——0003 设计更大
+    feature 面时须据此规划内存。
 - **凭证边界**：PAR URL 只出现在 `config.yml`（gitignored）；
   日志 / 报告 / run 摘要中**永不打印完整 PAR URL**（含签名参数）。
 - **alpha 边界**：本 feature 不碰 `alpha/`、不碰策略、不碰
@@ -203,3 +220,4 @@ oci:
 | 2026-11-06 | 0.2 | **自检 + 对抗性 review（批次3）修复**：① 输入契约改为 moneta 真实列契约（必需 `instrument,time,is_complete`；mid/bid/ask 可选；真实 15 列）；② clean 语义补齐 moneta `load_data.py` 三规则（is_complete 过滤 / (instrument,time) 去重 / 确定性存活行选择），防 `prices_*` backfill 与主 CSV 同键重叠；③ 可复现性不变量从"逐字节"修正为"**数据逐行一致**"（文件字节随 arrow 版本可变，moneta 同口径），并定义其前提（确定性 clean + pull 按名排序）；④ 下载幂等升级为 **md5 优先 / size 回退**（moneta list 已取 md5 却未用）；⑤ 新防呆 I22：非 1m 粒度输入拒绝；⑥ 明确 `data_par_url` 必须 prefix 级；⑦ CLI 澄清（clean/aggregate 是 pull 内部步骤的调试入口）；⑧ 不变量编号改 **I18–I22**（0.1 误用 I2–I6，与 hld §4 已占用编号冲突）；⑨ 测试清单 9→12（补 md5 不匹配重下、is_complete 过滤、去重确定性、非 1m 拒绝）。 |
 | 2026-11-06 | 0.3 | 批次3 红队两条真缺陷落地：**A1 派生缓存陈旧** → 定案只有 raw 层幂等，clean/aggregate 恒重算（否则 bronze 被删/损坏时静默丢数据）；**A2 bronze schema 未定义** → 显式定案 bronze 列 = 输入并集（必含 7 列，bid/ask 依源，**不含 `is_complete`**），作为 0003 输入契约；测试清单 12→14。A3–A5 记录为接受边界。 |
 | 2026-11-06 | 0.4 | **真实数据端到端（moneta 真实 PAR，12 GB / 4884 万行）后精确化契约 + 修 4 个 fixture 测不到的偏差**：① **clean 重写为 DuckDB**（纯 Python 在 48M 行不可行）；② **I22 判据改为"原生分辨率 = 1m"**（每标的最小间隔 ≈1m），**市场缺口合法**——原"逐对 1m"误拒 73 万处真实缺口；③ `time` 确认为 **TIMESTAMPTZ(UTC)**（源 `Z` 推断）+ 下游读需 **pytz**（补进 pyproject）；④ `read_parquet(?)` 绑定参数统一 `str()`；⑤ `COPY` 加 `ORDER BY` 稳定行序（I18）。测试 14→24（补 gapped-1m 接受、5m 原生分辨率拒绝、COPY 确定性、空表 schema）。 |
+| 2026-11-06 | 0.5 | **完整性审计 + DuckDB 高效读写 / catalog（批次6）**：① **完整性三层验证全过**——bronze/5m/1h footer 可读且 `num_rows` 与成功报告一致 + **全 row-group 解压扫描**（484/484 page 解码成功、扫到行数 == footer）+ raw 163/163 zip 与远端 PAR 逐对象 **md5+size** 全等 → **确认前面的系统中断无截断 / page 损坏 / 静默失败**；② **读路径统一为 DuckDB 外部表 / VIEW**——`_register_bronze` 由 `CREATE TABLE`（物化全表 48M 行）改为 `CREATE VIEW`（流式，A2）；③ **新增 `lyra/catalog.py`**——持久化 DuckDB catalog（`~/.lyra/default/data/catalog.duckdb`，仓库外，纯 schema 元数据），`bronze/ohlcv_5m/ohlcv_1h` 三 VIEW 命名入口，`lyra pull` 末步自动建、`lyra catalog` CLI 可重建（A3）；④ **诚实标注效率上界**——aggregate 分组工作集在 48M 行下实测峰值 ≈10 GB（DuckDB 哈希聚合固有形态，非 bug，非流式可消除），0003 设计大 feature 面时须据此规划（A6）。真实数据回归：视图改造后重跑 aggregate，5m/1h bars 与批次5 逐行一致（I18 成立）。测试 24→30（新增 catalog 6 个，含 VIEW 非 TABLE 断言）。 |
