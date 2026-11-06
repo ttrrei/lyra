@@ -228,16 +228,22 @@ written.
 **Invariants** (each = a WHERE expression matching a *violating* row; NULL
 comparisons naturally exclude partial rows):
 
-| # | Invariant | Expression (matches a violation) |
+| # | Invariant | Expression (matches a violation; all NULL-safe) |
 |---|---|---|
-| DQ1 | mid OHLC positive and internally consistent (o,c ∈ [l,h]) | `mid_h < mid_l OR mid_h < mid_o OR mid_h < mid_c OR mid_l > mid_o OR mid_l > mid_c OR mid_o<=0 OR mid_h<=0 OR mid_l<=0 OR mid_c<=0` |
-| DQ2 | where a point has both a bid and an ask, ask ≥ bid (**per-point column-aware**: enabled at any point p that has both `bid_p` and `ask_p`; only disabled when no bid/ask pair column exists at all) | `bid_p IS NOT NULL AND ask_p IS NOT NULL AND ask_p < bid_p` (only for points p where both `bid_p` and `ask_p` are present) |
+| DQ1 | mid OHLC positive, finite, internally consistent (o,c ∈ [l,h]) | per-column `IS NOT NULL AND (x<=0 OR NOT isfinite(x))` OR-combined, plus the o/c vs l/h bound checks |
+| DQ2 | per-point `ask_p >= bid_p` (enforced where both columns exist), **plus** bar-wide `ask_h >= bid_l` when both exist | `bid_p IS NOT NULL AND ask_p IS NOT NULL AND ask_p < bid_p`; bar-wide: `ask_h IS NOT NULL AND bid_l IS NOT NULL AND ask_h < bid_l` |
 | DQ3 | volume, if present, finite and non-negative | `volume IS NOT NULL AND (volume < 0 OR NOT isfinite(volume))` |
 
-**Column-aware (per-point)**: DQ2 is judged **per point** — at any point p
-where both `bid_p` and `ask_p` columns exist, `ask_p >= bid_p` is enforced; a
-point with only one side (or neither) is skipped (referencing an absent column
-under `union_by_name` is a binder error). DQ2 is disabled as a whole only when
+**Column-aware (per-point + bar-wide)**: DQ2 is judged **per point** — at any
+point p where both `bid_p` and `ask_p` columns exist, `ask_p >= bid_p` is
+enforced; a point with only one side (or neither) is skipped (referencing an
+absent column under `union_by_name` is a binder error). **The only universal
+cross-point inference is bar-high ask ≥ bar-low bid (`ask_h >= bid_l`)** —
+enforced additionally when both those columns exist (batch1 (2026-11-07)
+adversarial review D4 fixed the boundary: a `bid_l`+`ask_h` partial-pair
+inverted spread was previously missed entirely). Note that `bid_h < ask_l`
+(bids below asks across the bar) is a **legitimate market** and must NOT be
+flagged. DQ2 is disabled as a whole only when
 the input carries **no** bid/ask pair column at all. This neither rejects legal
 partial quotes (some points only) nor silently skips an inverted spread in a
 partial quote (the S1 self-review boundary, found and fixed); DQ1/DQ3 use
@@ -278,10 +284,22 @@ independently):
   file per UTC month); a month that is already present and non-empty is
   **skipped by default** (`--force` re-fetches), so an interrupted run
   resumes automatically.
+- **Month-boundary semantics**: OANDA's `to` parameter is **inclusive**, so
+  the month boundary is "first moment of next month − 1s" (batch1 (2026-11-07)
+  adversarial review D2 fixed: the original "next-month-start − 1min"
+  over-fetched for non-1m granularities, and a start inside the last minute
+  of the month crashed with `m_start > m_end`). After clamping, if
+  `m_end < m_start` → log a WARN and skip the month; **no exception**.
 - **Token is a secret**: it lives only in the gitignored
   `config/config.yml` under `oanda.api_token` and is **never committed**
   (moneta's convention). An empty token → `OandaConfigMissing` (loud
-  failure, not a silent skip). `--dry-run` needs no token.
+  failure, not a silent skip). `OandaConfig.__repr__` does not expose the
+  token (`repr=False`; batch1 (2026-11-07) adversarial review D5 fix).
+- **dry-run degrade**: `--dry-run` with a **missing config** warns and
+  previews only (no network); non-dry-run with a missing config still fails
+  loudly (batch1 (2026-11-07) adversarial review D6 fix — the original
+  dry-run path also called `load_config` and crashed when the file was
+  absent).
 - **UTC only**: no local/DST conversion; all timestamps are ISO-8601 `...Z`.
 - **Output schema**: exactly the bronze input contract
   (`instrument,is_complete,time,volume,mid_*,bid_*,ask_*`), picked up by
@@ -378,3 +396,4 @@ bronze input contract (incl. `bid_*`/`ask_*`, UTC `Z`). Resume verified
 | 2026-11-07 | 0.8 | **Compared against moneta/nova and filled two genuine gaps** (user decided: both into 0002). ① **Data-quality validation (§3.4, DQ1–DQ3, fail-fast)**: the OHLC/spread/volume checks that nova's `data._validate` has but moneta/lyra lacked are now explicit in clean — run after the is_complete filter + dedup, before the COPY, on the survivor candidates; any violation raises `DataQualityError` and bronze is not written. Column-aware (DQ2 avoiding a `union_by_name` binder error; refined to per-point in v0.9). **Real 61,615,338 CSV rows: 0 violations** (no false positives). New invariant I23. Also fixed a **real test-fixture bug**: `test_aggregate.py`'s placeholder bid/ask were inverted (bid_l > ask_l, physically impossible) and were correctly rejected by the new DQ gate — the fixture now uses ask ≥ bid (valid). ② **OANDA backfill / gap-fill (§3.5, `lyra oanda`)**: the "fetch missing 1-min history by instrument/time window" capability moneta's `extract_oanda.py` has but lyra lacked is now independently re-implemented as `lyra/oanda.py` + a `lyra oanda` CLI — OANDA v3 paging (5000-candle cap, one candle of overlap per page), UTC calendar-month chunking, resume (an existing non-empty month is skipped by default), the token lives only in the gitignored config (an empty token fails loudly), and the output matches the bronze input contract. clean's CSV glob was promoted `*.csv`→`**/*.csv` (DuckDB 2.0 recursive expansion) so per-instrument sub-directories are first-class. **47 tests green** (+8), pyflakes clean. A real OANDA fetch is left for the user to verify after filling the token (a secret; needs network) |
 | 2026-11-07 | 0.9 | **Self-review + adversarial re-review of the two new features** (user: self-review first, then adversarial, then the 2019-11/12 real-data test). **S1 real defect (fixed)**: DQ2's column gate was "enabled only when all 8 columns present" — a partial-quotes input (e.g. only `bid_o`/`ask_o`) would **silently skip** spread validation, defeating the fail-fast intent (and missing the case nova's `not in (0,8)` rejects). Changed to **per-point column-awareness**: at any point p where both `bid_p` and `ask_p` exist, `ask_p >= bid_p` is enforced (per-point NULL guard is safe); the whole DQ2 is skipped only when no bid/ask pair column exists at all — so it neither rejects legal partial quotes nor silently misses an inverted spread in a partial quote. Added 2 regression tests (`test_clean_rejects_partial_quote_inverted_spread` + `test_clean_accepts_partial_quote_valid_spread`); 5 boundary cases verified (partial inverted rejected / partial valid passes / full inverted rejected / full valid passes / quote-free passes). **Adversarial re-review of the OANDA module**: month computation (`_months_between` + December rollover), paging (`PAGE_SIZE-1` overlap de-dup), resume (non-empty month skipped), token guard (empty token → `OandaConfigMissing`) all verified line-by-line, logic correct. **Real OANDA test blocked (recorded honestly)**: moneta's token (`config/setting.yml`, gitignored, practice environment) returns **401 Insufficient authorization** on both the practice and live hosts — the token is expired/revoked (a gen-1 stale token), not a code problem. The code path is verified via 49 offline tests + `--dry-run` + a real clean+DQ run; a real fetch needs a fresh token from the user. **49 tests green** (+2), pyflakes clean. **0002 closed out**, 0003 ready |
 | 2026-11-07 | 1.0 | **Real OANDA backfill verified** (user: run the 2019-11/12 test with moneta's practice token). **All 21 instruments × 2019-11/12 = 42 instrument-months succeeded, 0 failures**, **943,529 1-min candles** (spanning 2019-11-01→2019-12-31); output CSVs carry all 16 bronze-contract columns (incl. bid/ask, UTC Z); resume verified (existing month skipped). **Corrects the #50 401 conclusion**: the initial `curl` double-host 401 was a **transient failure** — a re-test with `requests` to `/v3/accounts` + `/candles` both returned 200, so the token is valid; §3.5 changed from "real data NOT verified" to "VERIFIED". 0002 fully closed out, 0003 ready |
+| 2026-11-07 | 1.1 | **Batch1 (2026-11-07) adversarial review D1–D6 fixes**: §3.4 DQ column sniffing now uses whole-directory union DESCRIBE (D1); DQ2 adds bar-wide `ask_h ≥ bid_l` and all DQ1/DQ2/DQ3 clauses are NULL-safe with `isfinite` guards (NaN explicitly rejected, D4); §3.5 month-boundary `to` is inclusive → "next-month-start − 1s" + inverted-clamp loud-skip (D2); `OandaConfig.repr` hides token (D5); dry-run degrades to preview with no config (D6). D3 (resume-by-file granularity) accepted as residual (escape: `--force`). D7/D8 absorbed by 9 new regression tests. 58 tests green, pyflakes clean |

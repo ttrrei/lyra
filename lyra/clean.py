@@ -41,7 +41,7 @@ class CleanInputError(ValueError):
 
 
 class DataQualityError(ValueError):
-    """Bronze rows violate a data-quality invariant (0002 §3.4, DQ1–DQ4)."""
+    """Bronze rows violate a data-quality invariant (0002 §3.4, DQ1–DQ3)."""
 
 
 def open_limited_duckdb(
@@ -85,6 +85,35 @@ def _quote(path: Path) -> str:
     return "'" + s.replace("'", "''") + "'"
 
 
+def _union_columns(con, csv_dir: Path) -> set[str]:
+    """Return the union of lower-cased column names across ALL CSVs in *csv_dir*.
+
+    D1 fix (批次08): the previous first-file sniff missed bid/ask columns
+    that exist only in later files (e.g. OANDA sub-directory backfill CSVs
+    mixed with mid-only flat CSVs), silently dropping them from bronze and
+    skipping DQ2 spread validation. A single ``union_by_name`` DESCRIBE over
+    the recursive glob captures every file's columns in one query.
+    """
+    return {
+        r[0].lower()
+        for r in con.execute(
+            f"DESCRIBE SELECT * FROM read_csv({_quote(csv_dir / '**/*.csv')}, "
+            "header=TRUE, auto_detect=TRUE, union_by_name=TRUE)"
+        ).fetchall()
+    }
+
+
+def _clean_input_columns(con, csv_dir: Path) -> set[str]:
+    """Validate required input columns and return the payload-column set."""
+    cols = _union_columns(con, csv_dir)
+    missing = [c for c in REQUIRED_INPUT if c not in cols]
+    if missing:
+        raise CleanInputError(
+            f"input CSVs are missing required column(s): {', '.join(missing)}"
+        )
+    return {c for c in PAYLOAD if c in cols}
+
+
 def _quality_checks(present: set[str]) -> dict[str, str]:
     """Data-quality invariants applied to the deduped bronze candidates
     (0002 §3.4, DQ1–DQ3). Each value is a WHERE expression matching a
@@ -95,13 +124,25 @@ def _quality_checks(present: set[str]) -> dict[str, str]:
     explicit so dirty input cannot silently flow into bronze. Only invariants
     whose columns the input actually carries are emitted — referencing an
     absent column would be a binder error under ``union_by_name``.
+
+    批次08 D4: every check additionally rejects non-finite values (``NaN`` /
+    ``Inf``) in the columns it covers — DuckDB three-valued logic makes
+    ``NaN > x`` evaluate to NULL, so without explicit guards a NaN price
+    silently passes DQ1/DQ2 (DQ3 already had the guard).
     """
     checks: dict[str, str] = {
-        # DQ1: mid OHLC must be positive and internally consistent (o,c ∈ [l,h]).
+        # DQ1: mid OHLC must be positive, finite, and internally consistent
+        # (o,c ∈ [l,h]). The isfinite guard is NULL-safe: it applies only to
+        # rows that DO carry the value (a union_by_name NULL-filled column is
+        # legal partial input, not a violation).
         "mid_ohlc": (
             "mid_h < mid_l OR mid_h < mid_o OR mid_h < mid_c "
             "OR mid_l > mid_o OR mid_l > mid_c "
-            "OR mid_o <= 0 OR mid_h <= 0 OR mid_l <= 0 OR mid_c <= 0"
+            "OR mid_o <= 0 OR mid_h <= 0 OR mid_l <= 0 OR mid_c <= 0 "
+            "OR (mid_o IS NOT NULL AND NOT isfinite(mid_o)) "
+            "OR (mid_h IS NOT NULL AND NOT isfinite(mid_h)) "
+            "OR (mid_l IS NOT NULL AND NOT isfinite(mid_l)) "
+            "OR (mid_c IS NOT NULL AND NOT isfinite(mid_c))"
         ),
         # DQ3: volume, when present, must be finite and non-negative.
         "bad_volume": "volume IS NOT NULL AND (volume < 0 OR NOT isfinite(volume))",
@@ -114,13 +155,28 @@ def _quality_checks(present: set[str]) -> dict[str, str]:
     # avoids the "all-or-nothing 8 columns" trap where a partial-quote input
     # (e.g. only bid_o/ask_o) would silently skip spread validation. Only a
     # genuinely quote-free input (no bid/ask column at all) omits DQ2.
+    #
+    # 批次08 D4 (cross-point): a bar whose *highest* ask is below its *lowest*
+    # bid is physically impossible at ANY point in time, even when the input
+    # only carries mismatched points (e.g. bid_l + ask_h). This is the one
+    # safe bar-wide inference: ask_h < bid_l ⇒ for every t, ask_t ≤ ask_h <
+    # bid_l ≤ bid_t, so the quote is inverted at every point. (The reverse
+    # inequality, bid_h < ask_l, is LEGITIMATE — the ask can sit above the
+    # bid across the whole bar — so it must not be flagged.)
     point_clauses = [
-        f"bid_{p} IS NOT NULL AND ask_{p} IS NOT NULL AND ask_{p} < bid_{p}"
+        f"bid_{p} IS NOT NULL AND ask_{p} IS NOT NULL AND ask_{p} < bid_{p} "
+        f"AND isfinite(bid_{p}) AND isfinite(ask_{p})"
         for p in ("o", "h", "l", "c")
         if f"bid_{p}" in present and f"ask_{p}" in present
     ]
-    if point_clauses:
-        checks["bad_spread"] = " OR ".join(point_clauses)
+    bar_wide_clauses: list[str] = []
+    if "ask_h" in present and "bid_l" in present:
+        bar_wide_clauses.append(
+            "ask_h IS NOT NULL AND bid_l IS NOT NULL AND ask_h < bid_l "
+            "AND isfinite(ask_h) AND isfinite(bid_l)"
+        )
+    if point_clauses or bar_wide_clauses:
+        checks["bad_spread"] = " OR ".join(point_clauses + bar_wide_clauses)
     return checks
 
 
@@ -192,24 +248,8 @@ def clean_csv_to_bronze(
 
     con = open_limited_duckdb(db, data_root)
     try:
-        # Probe the first CSV for the required input contract (moneta's
-        # approach: a glob-level sniff is unreliable).
-        first = sorted(csv_dir.rglob("*.csv"))[0]
-        cols = {
-            r[0].lower()
-            for r in con.execute(
-                "DESCRIBE SELECT * FROM read_csv(?, header=TRUE, auto_detect=TRUE) LIMIT 1",
-                [str(first)],
-            ).fetchall()
-        }
-        missing = [c for c in REQUIRED_INPUT if c not in cols]
-        if missing:
-            raise CleanInputError(
-                f"{first.name} is missing required column(s): {', '.join(missing)}"
-            )
-        # Payload columns actually present (union_by_name handles per-file
-        # differences; we score on the intersection we can name safely).
-        present = {c for c in PAYLOAD if c in cols}
+        # D1 fix (批次08): union column set over ALL CSVs, not just the first.
+        present = _clean_input_columns(con, csv_dir)
 
         sql = _clean_sql(csv_dir, present)
         # Same fail-fast DQ gate as the Parquet path (0002 §3.4) — this
@@ -262,20 +302,8 @@ def clean_csv_to_bronze_parquet(
 
     con = open_limited_duckdb(db, data_root)
     try:
-        first = sorted(csv_dir.rglob("*.csv"))[0]
-        cols = {
-            r[0].lower()
-            for r in con.execute(
-                "DESCRIBE SELECT * FROM read_csv(?, header=TRUE, auto_detect=TRUE) LIMIT 1",
-                [str(first)],
-            ).fetchall()
-        }
-        missing = [c for c in REQUIRED_INPUT if c not in cols]
-        if missing:
-            raise CleanInputError(
-                f"{first.name} is missing required column(s): {', '.join(missing)}"
-            )
-        present = {c for c in PAYLOAD if c in cols}
+        # D1 fix (批次08): union column set over ALL CSVs, not just the first.
+        present = _clean_input_columns(con, csv_dir)
         inner = _clean_sql(csv_dir, present)
         # Fail fast on dirty rows *before* writing bronze (0002 §3.4, DQ1–DQ3).
         _assert_quality(con, inner, present)

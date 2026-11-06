@@ -9,7 +9,7 @@ the push PAR slots to be present (they are reserved for 0007).
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -48,7 +48,7 @@ class OandaConfig:
     OCI-PAR pull pipeline is unaffected.
     """
 
-    api_token: str = ""
+    api_token: str = field(default="", repr=False)  # secret: never in repr/log (批次08-D5)
     host: str = "api-fxpractice.oanda.com"
     # "MBA" = mid + bid + ask components (matches the bronze schema).
     price: str = "MBA"

@@ -354,6 +354,10 @@ def backfill_window(
         log(f"[{instrument}] window is empty (start > end); nothing to do.")
         return []
 
+    # D2 fix (批次08): the month-end boundary is the start of the next UTC
+    # month — the last candle of every month (at any supported granularity,
+    # incl. S5/S10/S15/S30) now falls inside the clamped window; the previous
+    # hard-coded "minus one minute" truncated the last fraction of each month.
     written: list[Path] = []
     for month in month_starts:
         # Clamp the fetch window to this UTC calendar month.
@@ -362,9 +366,21 @@ def backfill_window(
             next_month_start = datetime(month.year + 1, 1, 1, tzinfo=timezone.utc)
         else:
             next_month_start = datetime(month.year, month.month + 1, 1, tzinfo=timezone.utc)
-        m_end = next_month_start - timedelta(minutes=1)
+        # The window end must stay strictly inside this calendar month:
+        # OANDA treats ``to`` inclusively, so a boundary at the next month's
+        # start would admit a candle from the following month. One second
+        # before it is the last instant of this month (moneta: ``-1min`` for
+        # M1; one second is granularity-neutral and keeps S5/S10/S15/S30
+        # whole — the last candle of every month now falls inside).
+        m_end = min(next_month_start - timedelta(seconds=1), end)
         m_start = max(m_start, start)
-        m_end = min(m_end, end)
+        # D2 fix (批次08): a clamped window can invert (start in the last
+        # instant of the month) — skip it loudly instead of crashing in
+        # fetch_candles.
+        if m_end < m_start:
+            log(f"[{instrument}] month {month:%Y-%m} window is empty after "
+                f"clamping; skipping.")
+            continue
         out = _chunk_path(csv_root, instrument, month, granularity)
         if out.exists() and out.stat().st_size > 0 and not force:
             log(f"[{instrument}] month {month:%Y-%m} already present ({out.name}); skipping.")

@@ -148,7 +148,20 @@ def oanda(
     """
     from . import oanda as oanda_mod
 
-    data = load_config(config or "config/config.yml")
+    # 批次08 D6: a missing config file must not block a --dry-run preview —
+    # fall back to OandaConfig defaults (no token needed for dry-run).
+    try:
+        data = load_config(config or "config/config.yml")
+    except ConfigError:
+        if dry_run:
+            typer.secho(
+                f"note: no readable config at {config!r}; using defaults "
+                "(dry-run only — a real fetch needs oanda.api_token).",
+                fg=typer.colors.YELLOW, err=True,
+            )
+            data = {}
+        else:
+            raise
     ocfg = oanda_from_dict(data)
     local = local_from_dict(data)
     root = resolve_data_root(local, data_root)

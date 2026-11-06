@@ -408,6 +408,189 @@ def test_clean_accepts_valid_data(tmp_path):
     assert out.exists()
 
 
+def test_clean_multi_file_mixed_columns_catches_inverted_spread(tmp_path):
+    """批次08 D1: a directory mixing a mid-only flat CSV (alphabetically
+    first) with an OANDA sub-directory CSV carrying an inverted quote must
+    STILL trigger DQ2 — the first-file column sniff silently disabled spread
+    validation and dropped the bid/ask columns before the fix."""
+    from lyra.clean import DataQualityError
+
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "01_flat.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,is_complete\n"
+        "X,2020-01-01T00:00:00Z,1,10,12,9,11,True\n"
+    )
+    (csv / "GBP_USD").mkdir()
+    (csv / "GBP_USD" / "gbp.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,"
+        "bid_o,bid_h,bid_l,bid_c,ask_o,ask_h,ask_l,ask_c,is_complete\n"
+        # ask_o (5) < bid_o (10) -> inverted, must be rejected now.
+        "Y,2020-01-01T00:01:00Z,1,10,12,9,11,10,12,9,11,5,12,9,11,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    with pytest.raises(DataQualityError, match="bad_spread"):
+        clean_mod.clean_csv_to_bronze_parquet(csv, out)
+    assert not out.exists()
+
+
+def test_clean_multi_file_mixed_columns_keeps_quote_columns(tmp_path):
+    """批次08 D1 (second half): valid mixed multi-file input must keep the
+    OANDA quote columns in bronze (before the fix they were silently
+    projected away)."""
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "01_flat.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,is_complete\n"
+        "X,2020-01-01T00:00:00Z,1,10,12,9,11,True\n"
+    )
+    (csv / "GBP_USD").mkdir()
+    (csv / "GBP_USD" / "gbp.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,bid_o,ask_o,is_complete\n"
+        "Y,2020-01-01T00:01:00Z,1,10,12,9,11,1.2,1.3,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    clean_mod.clean_csv_to_bronze_parquet(csv, out)
+    import duckdb
+    con = duckdb.connect()
+    try:
+        cols = {r[0] for r in con.execute(
+            "DESCRIBE SELECT * FROM read_parquet(?)", [str(out)]).fetchall()}
+        row = con.execute(
+            "SELECT bid_o, ask_o FROM read_parquet(?) WHERE instrument='Y'",
+            [str(out)]).fetchone()
+    finally:
+        con.close()
+    assert "bid_o" in cols and "ask_o" in cols
+    assert row == (1.2, 1.3)
+
+
+def test_clean_rejects_cross_point_inverted_quote(tmp_path):
+    """批次08 D4: a partial-quote input whose points are mismatched
+    (only bid_l + ask_h, no same-point pair) with ask_h < bid_l is
+    physically impossible at every point of the bar and must be rejected."""
+    from lyra.clean import DataQualityError
+
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "bad.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,bid_l,ask_h,is_complete\n"
+        # ask_h (5) < bid_l (10) -> bar-wide inverted, must fail.
+        "X,2020-01-01T00:00:00Z,1,10,12,9,11,10,5,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    with pytest.raises(DataQualityError, match="bad_spread"):
+        clean_mod.clean_csv_to_bronze_parquet(csv, out)
+    assert not out.exists()
+
+
+def test_clean_rejects_nan_price(tmp_path):
+    """批次08 D4 (NaN guard): a NaN mid value must be rejected — SQL three-
+    valued logic makes `nan > x` NULL, so without an explicit isfinite()
+    guard it silently passes DQ1."""
+    from lyra.clean import DataQualityError
+
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "nan.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,is_complete\n"
+        "X,2020-01-01T00:00:00Z,1,10,nan,9,11,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    with pytest.raises(DataQualityError, match="mid_ohlc"):
+        clean_mod.clean_csv_to_bronze_parquet(csv, out)
+    assert not out.exists()
+
+
+def test_oanda_backfill_month_end_last_minute_no_crash(tmp_path, monkeypatch):
+    """批次08 D2: a window starting in the last minute of a month must not
+    crash with `--to < --from`; the clamped month window is fetched with a
+    sane range (and an inverted clamp is skipped, not raised)."""
+    from lyra import oanda as oanda_mod
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_fetch(instrument, t_from, t_to, **kw):
+        assert t_from <= t_to
+        calls.append((t_from, t_to))
+        return []
+
+    monkeypatch.setattr(oanda_mod, "fetch_candles", fake_fetch)
+    oanda_mod.backfill_window(
+        tmp_path, "GBP_USD",
+        "2020-01-31T23:59:30Z", "2020-02-01T00:05:00Z",
+        token="dummy", dry_run=False, log=lambda *a: None,
+    )
+    # Both months are covered with non-inverted windows.
+    assert len(calls) == 2
+    assert calls[0] == ("2020-01-31T23:59:30Z", "2020-01-31T23:59:59Z")
+    assert calls[1][0] == "2020-02-01T00:00:00Z"
+
+
+def test_oanda_resume_skips_existing_month_still_holds(tmp_path, monkeypatch):
+    """批次08 D3: the ORIGINAL resume contract (existing non-empty month file
+    is skipped) must survive the D2 boundary change — re-fetching every
+    completed month on a plain re-run would defeat resume."""
+    from lyra import oanda as oanda_mod
+
+    csv_root = tmp_path / "raw_csv"
+    pre = csv_root / "GBP_USD" / "GBP_USD_M1_20200101T000000Z.csv"
+    pre.parent.mkdir(parents=True)
+    pre.write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,is_complete\n"
+        "GBP_USD,2020-01-01T00:00:00Z,1,1,2,1,2,True\n"
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("fetch_candles must be skipped for an existing month")
+
+    monkeypatch.setattr(oanda_mod, "fetch_candles", boom)
+    written = oanda_mod.backfill_window(
+        csv_root, "GBP_USD",
+        "2020-01-01T00:00:00Z", "2020-01-31T23:59:59Z",
+        token="dummy", dry_run=False, force=False, log=lambda *a: None,
+    )
+    assert written == [pre]
+
+
+def test_oanda_dry_run_without_config_preview(tmp_path):
+    """批次08 D6: `--dry-run` must work with no config file at all (the
+    help text promises a zero-token, zero-config preview)."""
+    from typer.testing import CliRunner
+    from lyra.cli import app
+
+    res = CliRunner().invoke(
+        app, ["oanda", "GBP_USD",
+              "--from", "2020-01-01T00:00:00Z", "--to", "2020-01-02T00:00:00Z",
+              "--config", str(tmp_path / "nonexistent.yml"), "--dry-run"])
+    assert res.exit_code == 0, res.output
+    assert "dry-run" in res.output
+
+
+def test_oanda_real_fetch_without_config_still_loud(tmp_path):
+    """批次08 D6 (guard): without --dry-run a missing config must still fail
+    loudly (no silent default-token path)."""
+    from typer.testing import CliRunner
+    from lyra.cli import app
+
+    res = CliRunner().invoke(
+        app, ["oanda", "GBP_USD",
+              "--from", "2020-01-01T00:00:00Z", "--to", "2020-01-02T00:00:00Z",
+              "--config", str(tmp_path / "nonexistent.yml")])
+    assert res.exit_code != 0
+
+
+def test_oanda_config_repr_hides_token():
+    """批次08 D5: repr(OandaConfig) must never expose the api_token."""
+    from lyra.config import OandaConfig
+
+    cfg = OandaConfig(api_token="oanda_secret_key_abcdef123456")
+    assert "oanda_secret_key_abcdef123456" not in repr(cfg)
+    assert "oanda_secret_key_abcdef123456" not in str(cfg)
+    # The value is still there when needed (fetch uses cfg.api_token).
+    assert cfg.api_token == "oanda_secret_key_abcdef123456"
+
+
 def test_clean_picks_up_nested_oanda_csv(tmp_path):
     """§3.5: OANDA backfill writes raw_csv/<inst>/*.csv; clean's recursive
     glob must pick up per-instrument sub-directories (not just flat)."""

@@ -199,18 +199,32 @@ bronze 不写出。
 
 **不变量**（每条 = "违反行"的 WHERE 表达式，NULL 比较天然排除部分行）：
 
-| # | 不变量 | 表达式（违反即报错） |
+| # | 不变量 | 表达式（违反即报错；全部 NULL 安全） |
 |---|---|---|
-| DQ1 | mid OHLC 正值且内部一致（o,c ∈ [l,h]） | `mid_h < mid_l OR mid_h < mid_o OR mid_h < mid_c OR mid_l > mid_o OR mid_l > mid_c OR mid_o<=0 OR mid_h<=0 OR mid_l<=0 OR mid_c<=0` |
-| DQ2 | 任一侧点同时存在 bid/ask 时 ask ≥ bid（**逐点列感知**：某点 `bid_p`+`ask_p` 都有则该点强制；完全无 bid/ask 列才整体跳过） | `bid_p IS NOT NULL AND ask_p IS NOT NULL AND ask_p < bid_p`（仅对 `bid_p`、`ask_p` 都存在的点 p 启用） |
+| DQ1 | mid OHLC 正值、有限且内部一致（o,c ∈ [l,h]） | 每列 `IS NOT NULL AND (x<=0 OR NOT isfinite(x))` 的 OR 组合，再加 o/c 与 l/h 越界比较 |
+| DQ2 | 逐点 `ask_p >= bid_p`（双列存在即强制），**外加**：`bid_l`+`ask_h` 双列存在时 bar 级 `ask_h >= bid_l` | `bid_p IS NOT NULL AND ask_p IS NOT NULL AND ask_p < bid_p`；bar 级：`ask_h IS NOT NULL AND bid_l IS NOT NULL AND ask_h < bid_l` |
 | DQ3 | volume（若有）有限且非负 | `volume IS NOT NULL AND (volume < 0 OR NOT isfinite(volume))` |
 
-**列感知（逐点）**：DQ2 对**每个**点 p 独立判断——只要 `bid_p` 与 `ask_p`
-两列都存在，就对该点强制 `ask_p >= bid_p`；某点只有一侧（或两侧都无）则
-跳过该点（`union_by_name` 下引用不存在的列是 binder error）。只有当输入
-**完全没有任何** bid/ask 配对列时才整体不启用 DQ2。这样既不会拒绝合法的
-partial quotes（只带部分点），也不会静默漏检 partial quotes 的反向 spread
-（S1 自检发现并修复的边界）；DQ1/DQ3 的列是 `ALWAYS_PRESENT`，恒启用。
+**列感知（逐点 + bar 级）**：DQ2 对**每个**点 p 独立判断——只要 `bid_p` 与
+`ask_p` 两列都存在，就对该点强制 `ask_p >= bid_p`；某点只有一侧（或两侧都无）
+则跳过该点（`union_by_name` 下引用不存在的列是 binder error）。**跨点推理
+只有一条是普适的：bar 最高卖价必 ≥ bar 最低买价（`ask_h >= bid_l`）**——
+当这两列同时存在时追加该检查（批次1(2026-11-07) 对抗性审查 D4 发现并修复
+的边界：`bid_l`+`ask_h` 部分配对的反向 spread 此前整体漏检）。注意
+`bid_h < ask_l`（买价整体低于卖价）是**合法行情**，不得作为违反判据。
+只有当输入完全没有任何 bid/ask 配对列时才整体不启用 DQ2。这样既不会拒绝
+合法的 partial quotes（只带部分点），也不会静默漏检 partial quotes 的反向
+spread；DQ1/DQ3 的列是 `ALWAYS_PRESENT`，恒启用。
+
+**有限性/NaN 与多文件列嗅探**：DQ1/DQ3 的比较全部带 `IS NOT NULL AND
+NOT isfinite(...)` 显式守卫（批次1(2026-11-07) 对抗性审查 D4——NaN 在
+SQL 三值逻辑下会**静默通过**大小比较，必须显式拒绝）；DQ 输入列集合改由
+**整个目录的全文件 `union_by_name` DESCRIBE** 决定（批次1(2026-11-07)
+对抗性审查 D1——原实现只嗅探第一个文件，多文件目录中"第一文件缺某
+bid/ask 列"会让后续文件该列被静默丢弃、且 DQ2 对全目录整体失效）；
+列名经 `?` 绑定/字符串插值均会丢失引号转义（含单引号/空格的 instrument
+路径），SQL 字面量一律走 `_quote` 转义（批次1(2026-11-07) 对抗性审查
+D1 的附带发现）。
 
 **真实数据验证（61,615,338 raw CSV 行，183 个真实 moneta CSV）**：
 DQ1/DQ2/DQ3 全部 **0 违反**——fail-fast 在真实数据上不误伤，且把
@@ -239,10 +253,20 @@ DQ1/DQ2/DQ3 全部 **0 违反**——fail-fast 在真实数据上不误伤，且
 - **日历月分块 + 断点续传**：输出落 `raw_csv/<instrument>/
   <instrument>_<gran>_<YYYYMM>01T000000Z.csv`（每 UTC 月一文件）；
   已存在且非空的月份**默认跳过**（`--force` 才重拉），中断重跑自动续。
+- **月份边界语义**：OANDA `to` 参数为**含端点**，月边界取
+  "下月首日 − 1s"（批次1(2026-11-07) 对抗性审查 D2 修复——原
+  "下月首日 − 1min" 对非 1m 粒度会多取；且 start 落在月末最后一
+  分钟时 `m_start > m_end` 直接崩溃）。clamp 后若 `m_end < m_start`
+  → 记 WARN 并跳过该月，**不再抛异常**。
 - **token 是秘密**：只在 gitignored 的 `config/config.yml` 的
   `oanda.api_token` 下，**永不进 git**（moneta 惯例）。空 token →
-  `OandaConfigMissing`（响亮的失败，不是静默跳过）。`--dry-run` 不
-  需要 token。
+  `OandaConfigMissing`（响亮的失败，不是静默跳过）。
+  `OandaConfig.__repr__` 不暴露 token（`repr=False`，批次1(2026-11-07)
+  对抗性审查 D5 修复）。
+- **dry-run 降级**：`--dry-run` 在**配置完全缺失**时仅告警并预览
+  （不拉网络）；非 dry-run 配置缺失仍大声报错（批次1(2026-11-07)
+  对抗性审查 D6 修复——原实现 dry-run 也依赖 `load_config`，缺
+  config 文件时直接崩溃）。
 - **UTC 只**：无本地/DST 转换；所有时间戳 ISO-8601 `...Z`。
 - **输出 schema**：与 bronze 输入契约完全一致
   （`instrument,is_complete,time,volume,mid_*,bid_*,ask_*`），
@@ -334,3 +358,4 @@ DQ1/DQ2/DQ3 全部 **0 违反**——fail-fast 在真实数据上不误伤，且
 | 2026-11-07 | 0.8 | **对比 moneta/nova 补齐两个真缺**（用户拍板：都补进 0002）。① **数据质量校验（§3.4，DQ1–DQ3，fail-fast）**：nova `data._validate` 有、moneta/lyra 无的 OHLC/spread/volume 校验被显式固化进 clean——在 is_complete 过滤 + 去重后、COPY 前对存活候选行校验，违反即 `DataQualityError`、bronze 不写出。列感知（DQ2 防 `union_by_name` binder error；v0.9 细化为逐点）。**真实 61,615,338 CSV 行 0 违反**（不误伤）。新增 I23。顺带修 1 个**测试 fixture 真 bug**：`test_aggregate.py` 的占位 bid/ask 是反的（bid_l > ask_l，物理不可能），被新 DQ 正确拒绝——fixture 改为 ask ≥ bid 的合法报价。② **OANDA 回补 / 缺口填充（§3.5，`lyra oanda`）**：moneta `extract_oanda.py` 有、lyra 无的"按标的/时间窗口补 1m 历史"能力被独立重写为 `lyra/oanda.py` + `lyra oanda` CLI——OANDA v3 分页（5000 K 线上限、每页 1 K 线重叠）、UTC 日历月分块、断点续传（已存在非空月份默认跳过）、token 只在 gitignored config（空 token 响亮失败）、输出对齐 bronze 输入契约。clean 的 CSV glob `*.csv`→`**/*.csv`（DuckDB 2.0 递归展开）使 per-instrument 子目录一等公民。**47 测试全绿**（+8），pyflakes 干净。真实 OANDA 拉取留给用户填 token 后验证（token 是秘密、需网络） |
 | 2026-11-07 | 0.9 | **自检 + 对抗性复查两个新功能**（用户要求：先自检、再对抗性、最后 2019-11/12 实测）。**S1 真缺陷（已修）**：DQ2 列感知原为"8 列全有才启用"——partial quotes 输入（如只带 `bid_o`/`ask_o`）会**静默跳过** spread 校验，违背 fail-fast 意图（也漏掉 nova `not in (0,8)` 拒绝的场景）。改为**逐点列感知**：某点 `bid_p`+`ask_p` 都在则该点强制 `ask_p >= bid_p`（逐点 NULL guard 安全），只有完全无任何 bid/ask 配对列才整体跳过——既不拒合法 partial quotes、也不静默漏检反向 spread。新增 2 个回归测试（`test_clean_rejects_partial_quote_inverted_spread` + `test_clean_accepts_partial_quote_valid_spread`），5 边界情形全验证（partial inverted 拒绝 / partial valid 通过 / full inverted 拒绝 / full valid 通过 / quote-free 通过）。**对抗性复查 OANDA 模块**：月份计算（`_months_between` + 12 月进位）、分页（`PAGE_SIZE-1` 重叠去重）、resume（非空月跳过）、token 守卫（空 token → `OandaConfigMissing`）逐行核验，逻辑正确。**真实 OANDA 实测受阻（诚实记录）**：moneta 的 token（`config/setting.yml`，gitignored，practice 环境）在 practice 与 live 两个 host 都返回 **401 Insufficient authorization**——token 已过期/吊销（gen-1 旧 token），非代码问题。代码路径已通过 49 离线测试 + `--dry-run` + 真实 clean+DQ 验证；真实拉取需用户提供新 token。**49 测试全绿**（+2），pyflakes 干净。**0002 收口**，0003 就绪 |
 | 2026-11-07 | 1.0 | **真实 OANDA 回补实测通过**（用户指示用 moneta 的 practice token 实测）。**2019-11/12 全 21 标的 = 42 标的·月全部成功，0 失败**，共 **943,529 根 1m K 线**（覆盖 2019-11-01→2019-12-31），输出 CSV 16 列与 bronze 输入契约一致（含 bid/ask，UTC Z）；断点续传生效（已存在月跳过）。**更正 #50 的 401 结论**：初测一次 `curl` 双 host 401 是**瞬时故障**，复测 `requests` 直连 `/v3/accounts`+`/candles` 均 200，token 有效；§3.5 由"真实数据未验证"改为"已验证"。0002 全部收口，0003 就绪 |
+| 2026-11-07 | 1.1 | **批次1(2026-11-07) 对抗性审查 D1–D6 修复**：§3.4 DQ 列嗅探改全文件 union DESCRIBE（D1）；DQ2 增 `bid_l`+`ask_h` bar 级 `ask_h ≥ bid_l`、DQ1/DQ2/DQ3 全部 NULL 安全 `isfinite` 守卫（NaN 显式拒绝，D4）；§3.5 月边界 `to` 含端点 → "下月首日 − 1s" + 倒挂 loud-skip（D2）；`OandaConfig.repr` 隐藏 token（D5）；dry-run 无配置降级预览（D6）。D3（断点续传按文件粒度）接受为残留（`--force` 兜底）。D7/D8 以 9 个新回归测试吸收。58 测试全绿、pyflakes 干净 |
