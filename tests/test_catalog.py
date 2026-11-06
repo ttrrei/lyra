@@ -357,6 +357,44 @@ def test_clean_rejects_inverted_spread(tmp_path):
         clean_mod.clean_csv_to_bronze_parquet(csv, out)
 
 
+def test_clean_rejects_partial_quote_inverted_spread(tmp_path):
+    """DQ2 (0002 §3.4) — S1 self-review: a PARTIAL-quote input (only bid_o/ask_o
+    present) whose ask_o < bid_o must STILL be rejected.
+
+    The original "all-8-columns-or-nothing" column gate would silently skip
+    spread validation on a partial-quote input, defeating the fail-fast intent.
+    The per-point gate must enforce ask >= bid at any point that has a pair.
+    """
+    from lyra.clean import DataQualityError
+
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "bad.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,bid_o,ask_o,is_complete\n"
+        # only bid_o/ask_o present; ask_o (9) < bid_o (10) -> must fail.
+        "X,2020-01-01T00:00:00Z,1,9.2,9.3,9.1,9.2,10,9,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    with pytest.raises(DataQualityError, match="bad_spread"):
+        clean_mod.clean_csv_to_bronze_parquet(csv, out)
+
+
+def test_clean_accepts_partial_quote_valid_spread(tmp_path):
+    """DQ2 (0002 §3.4) — S1 self-review: a PARTIAL-quote input with a VALID
+    spread (ask_o >= bid_o) must pass — DQ2 must not reject legal partial
+    quotes, only enforce direction where a pair exists."""
+    csv = tmp_path / "raw"
+    csv.mkdir()
+    (csv / "ok.csv").write_text(
+        "instrument,time,volume,mid_o,mid_h,mid_l,mid_c,bid_o,ask_o,is_complete\n"
+        # bid_o (9.1) <= ask_o (9.3) -> valid, must pass.
+        "X,2020-01-01T00:00:00Z,1,9.2,9.3,9.1,9.2,9.1,9.3,True\n"
+    )
+    out = tmp_path / "b.parquet"
+    clean_mod.clean_csv_to_bronze_parquet(csv, out)
+    assert out.exists()
+
+
 def test_clean_accepts_valid_data(tmp_path):
     """DQ sanity: well-formed rows (o,c in [l,h], volume >= 0) pass through."""
     csv = tmp_path / "raw"

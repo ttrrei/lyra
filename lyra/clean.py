@@ -106,12 +106,21 @@ def _quality_checks(present: set[str]) -> dict[str, str]:
         # DQ3: volume, when present, must be finite and non-negative.
         "bad_volume": "volume IS NOT NULL AND (volume < 0 OR NOT isfinite(volume))",
     }
-    # DQ2: where both sides of a quote exist at a point, ask must be ≥ bid.
-    if {"bid_o", "bid_h", "bid_l", "bid_c", "ask_o", "ask_h", "ask_l", "ask_c"} <= present:
-        checks["bad_spread"] = " OR ".join(
-            f"bid_{p} IS NOT NULL AND ask_{p} IS NOT NULL AND ask_{p} < bid_{p}"
-            for p in ("o", "h", "l", "c")
-        )
+    # DQ2: at every point where BOTH sides of a quote are present, ask ≥ bid.
+    # Column-aware per point: a sub-clause is emitted only when both bid_<p>
+    # and ask_<p> columns exist (referencing an absent column under
+    # union_by_name would be a binder error). The per-clause NULL guard makes
+    # partial rows safe. DQ2 is enabled if ANY point has a bid/ask pair — this
+    # avoids the "all-or-nothing 8 columns" trap where a partial-quote input
+    # (e.g. only bid_o/ask_o) would silently skip spread validation. Only a
+    # genuinely quote-free input (no bid/ask column at all) omits DQ2.
+    point_clauses = [
+        f"bid_{p} IS NOT NULL AND ask_{p} IS NOT NULL AND ask_{p} < bid_{p}"
+        for p in ("o", "h", "l", "c")
+        if f"bid_{p}" in present and f"ask_{p}" in present
+    ]
+    if point_clauses:
+        checks["bad_spread"] = " OR ".join(point_clauses)
     return checks
 
 
