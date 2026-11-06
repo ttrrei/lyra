@@ -1,0 +1,45 @@
+# Lyra configuration — example template (in git, no secrets)
+#
+# Copy to config/config.yml (gitignored) and fill in real values.
+# Real PAR URLs, local paths and OCI auth never enter the repository.
+
+oci:
+  # Bucket + namespace (without the bucket, shown for documentation):
+  #   oci://<tenant>.ap-sydney-1.objectstorage.../n/<namespace>/b/lyra/o/
+  par_url_read:  "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/"   # read-only PAR
+  par_url_write: "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/"   # write PAR (push)
+  prefix: "lyra"          # all paths below this prefix
+
+local:
+  # OCI mirrors live OUTSIDE the repository by default (anti-footgun:
+  # alpha content must never be reachable from the git working tree).
+  # "workspace" is expanded to ~/.lyra/<workspace>. Override per-run with
+  # --data-root / --strategies-root / --runs-root if you must colocate.
+  workspace:  "default"      # → ~/.lyra/default/
+  data:       "data"         # relative to workspace (rebuildable cache)
+  strategies: "strategies"   # relative to workspace (OCI mirror)
+  runs:       "runs"         # relative to workspace (OCI mirror)
+  alpha:      "alpha"        # relative to workspace (alpha features code; B13)
+  tmp:        "data/tmp"     # scratch for DuckDB spills
+
+features:
+  # Optional: load alpha features from an OCI-mounted or local directory.
+  # Left empty → core standard features only.
+  extend_from: ""         # e.g. "oci://lyra/alpha/features" or "/mnt/oci/alpha/features"
+
+run:
+  # Cost model (applied to every fill). Spread/slippage are already in the
+  # fills; do not double-count here.
+  commission_round_trip: 0.0002   # flat fraction of entry fill
+  financing_per_day: 0.0001         # fraction of entry fill per TRADING day held (weekends & market holidays excluded, not calendar days)
+  stop_loss:             0.02     # mandatory 2% adverse-price stop (R4)
+
+databackend:
+  memory_limit: "1GB"
+  threads: 2
+  # spills go to local.tmp
+
+# Optional OCI SDK auth (used only when par_url_write is not enough).
+# The credentials file is NOT in git and NOT read from environment
+# variables (avoids shell-history leakage). See B10.
+# oci_auth_file: "~/.lyra/credentials"

@@ -1,0 +1,29 @@
+# 示例策略（example strategy）——不是 alpha，仅作结构与 validate 演示。
+# 真实策略按 R12 创建；元数据约定见 docs/proposals/oci-alpha-layout.md §2.3。
+version: 1
+id: momentum_breakout_v01
+direction: momentum_breakout
+hypothesis: >-
+  A breakout above the recent 12-bar high with range_position above 0.9
+  may continue for a short window; 2% hard stop caps fake-breakout losses.
+timeframe_minutes: 60
+
+# entry / exit / execution 结构沿用 nova 已验证 schema（R4 / R9）
+entry:
+  long:
+    all:
+      - {feature: range_high_12, op: eq, value: close}   # 突破 12-bar 高点
+      - {feature: range_position_24, op: gt, value: 0.9}  # 区间位置确认
+  short:
+    all:
+      - {feature: range_low_12, op: eq, value: close}
+      - {feature: range_position_24, op: lt, value: 0.1}
+exit:
+  stop_loss_pct: 0.02          # 2% 硬止损（I3）
+  take_profit_pct: 0.06        # 3R
+  max_holding_bars: 24
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

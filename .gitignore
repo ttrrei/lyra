@@ -1,0 +1,70 @@
+# =============================================================================
+# lyra .gitignore
+#
+# 原则（见 AGENTS.md / docs/proposals/oci-alpha-layout.md §3）：
+#   core 代码进 git；alpha 策略 + 本地 OCI 镜像 + 凭证 一律不进 git。
+#     B1  git 不出现任何 alpha 方向文件夹内容（hypothesis.md / lessons.md / vNN.yaml）
+#     B2  凭证不进 git
+#     B13 OCI 镜像默认在仓库外 ~/.lyra/<workspace>/…（可重建）
+#     B14 strategies/examples/ 是 git 里唯一的 strategies 子树
+#
+# 注意 gitignore 否定规则：父目录被忽略后子项无法再包含。
+# 因此用 `strategies/*`（忽略"子项"，不忽略目录本身）再 `!strategies/examples/` 反包含。
+# =============================================================================
+
+# --- 凭证 / 配置（B2） -------------------------------------------------------
+# 保留 config_example.yml 跟踪；真实配置（含 PAR URL / 凭证）不跟踪
+config/config.yml
+config/*.yml
+!config/config_example.yml
+# 本地 OCI 凭证
+*.credentials
+credentials.yml
+.lyra/
+
+# --- Alpha 策略（B1） --------------------------------------------------------
+# 只跟踪公开示例子树（B14）；忽略一切真实方向文件夹
+# （trend_continuation/、failed_breakout/、…、_new/）及其 vNN.yaml +
+# hypothesis.md + lessons.md。
+strategies/*
+!strategies/examples/
+!strategies/examples/**
+
+# --- 本地 OCI 镜像（B13，可重建） -------------------------------------------
+# 默认落在 ~/.lyra/<workspace>/…；若被 --inside-repo 落进仓库则忽略
+data/
+runs/
+features/
+alpha/
+tmp/
+
+# --- Python / 构建 / 工具链 --------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.tox/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+.coverage
+.coverage.*
+htmlcov/
+*.log
+nohup.out
+
+# 注：requirements.lock 是"跟踪"的（hld §6 锁定传递依赖），不忽略。
+
+# --- OS / 编辑器 -------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

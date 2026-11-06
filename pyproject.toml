@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lyra"
+version = "0.1.0"
+description = "Open-source research framework for universal trading strategies, keeping alpha in sync with OCI Object Storage."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [{name = "ttrrei"}]
+# 核心依赖刻意保持轻量（R10：≤ 15 个包）；
+# 具体版本锁在 requirements.lock（0002 起随代码逐步补全）。
+dependencies = [
+    "pydantic>=2.7",      # strategy YAML / config 模型
+    "pyyaml>=6.0",        # YAML 解析
+    "duckdb>=1.0",        # Hybrid 特征存储查询（R3）
+    "pyarrow>=15.0",      # Parquet I/O
+    "typer>=0.12",        # CLI
+    "oracledb>=2.0",      # OCI Object Storage（0002 起使用）
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4", "mypy>=1.10"]
+
+[project.scripts]
+lyra = "lyra.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["lyra*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
