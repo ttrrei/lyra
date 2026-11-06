@@ -24,15 +24,15 @@
 
 | 项 | 值 |
 |---|---|
-| 更新于 | 2026-11-06（#43） |
+| 更新于 | 2026-11-06（#44） |
 | 构建顺序 | `docs/hld.md` §8（0001→0009，唯一事实来源） |
-| 已完成 | **0001**（repo + OCI split，文档定案）；首次 commit `c8f3851`；**0002 代码完成**——`lyra/` 包（oci_client / pull / clean / aggregate / pipeline / cli / config）+ **22 个测试全绿**、pyflakes 干净、端到端已验证；**自检 + 批次4 对抗性 review 已完成**（发现并修复 5 个真 bug，含 md5 base64/hex 双编码导致 I20 幂等静默失效） |
-| 进行中 | **0002 收尾**：即将 commit（代码 + 测试 + 批次4 review） |
-| 下一步 | **0003 feature builder**（HLD §8）：per-instrument feature cards + Hybrid Parquet store，消费 0002 的 bronze（typed `timestamp[us]` 的 `time` 列、确定性列集）；首次 OCI 端到端 `lyra pull` 仍需真实 `data_par_url` |
-| 代码状态 | `lyra/` 包已存在且可 import；`lyra pull` / `lyra clean` / `lyra aggregate` / `lyra version` 均可跑通；bronze/5m/1h Parquet 具稳定 typed schema |
-| 代码交付顺序 | 0002 pull ✅ → 0003 feature builder → 0004 compiler → 0005 trade engine → 0006 metrics/runner → 0007 push/backup |
+| 已完成 | **0001**；**0002 全部完成并在真实数据上验证**——`lyra/` 包 + **24 个测试全绿**、pyflakes 干净、**真实 `lyra pull` 端到端跑通**（moneta 真实 PAR，12 GB / 4884 万行 bronze → 998 万 5m bars → 84 万 1h bars，21 标的，2020→2026）。批次4+5 对抗性 review 完成；真实数据修复已落地（DuckDB clean / I22 = 原生分辨率 1m 缺口合法 / pytz 声明 / Path 绑定 / COPY 行序） |
+| 进行中 | **0002 收尾**：即将 commit（DuckDB 重写 + 真实数据修复 + 批次5 review） |
+| 下一步 | **0003 feature builder**（HLD §8）：per-instrument feature cards + Hybrid Parquet store，消费 0002 的 bronze（现为 `TIMESTAMPTZ(UTC)` 的 `time`、含 bid/ask、本地已有 4884 万行真实数据可用） |
+| 代码状态 | `lyra/` 包在真实 12 GB 数据上端到端可跑；`lyra pull` / `clean` / `aggregate` / `version` 全通过；bronze/5m/1h Parquet 具稳定 typed schema；clean/aggregate 为 DuckDB 流式（4884 万行下内存平稳） |
+| 代码交付顺序 | 0002 pull ✅（真实数据已验证）→ 0003 feature builder → 0004 compiler → 0005 trade engine → 0006 metrics/runner → 0007 push/backup |
 | 未决问题 | **无**（O1–O5、O11–O15 全部已关闭） |
-| 待用户输入 | 真实 `data_par_url`（首次真实 OCI 端到端 `lyra pull` 用） |
+| 待用户输入 | ① 审阅批次5 发现 + 精确化后的 I22（缺口合法）② 0003（feature builder）方向 |
 
 ## 图例
 
@@ -93,6 +93,7 @@
 | 41 | review+fix | **0002 自检 + 批次3 对抗性 review**（用户要求；专项打 0002，逐条核对 moneta 源码/真实数据）。**自检 7 处**：S1 输入契约与 moneta 真实列不符（实际必需 `instrument,time,is_complete`，mid/bid/ask 可选，真实 15 列）🔴；S2 clean 语义漏 moneta `load_data.py` 三规则（is_complete 过滤 / (instrument,time) 去重 / 确定性存活行选择）🔴；S3"逐字节可复现"与未定义去重规则自相矛盾 + Parquet 文件字节本就不稳 🔴；S4 size 幂等太弱（moneta list 已取 md5 却未用）；S5 CLI 歧义；S6 缺 prefix 级 PAR / 非 1m 拒绝两句；S7 config 真实值位置未写明。**另抓到 0.1 不变量编号 I2–I6 与 hld §4 已占用编号冲突** → 重编 **I18–I22**。**批次3 红队 5 项**：A1 派生缓存陈旧（bronze 被删/损坏时静默丢数据）→ **raw 层唯一幂等，clean/aggregate 恒重算**；A2 bronze schema 未定义 → **显式定案**（7 列必含 / bid/ask 依源 / 不含 is_complete，0003 输入契约）；A3–A5 记录为接受边界。测试清单 9→14 | `docs/decisions/0002*`（v0.2→v0.3）、`docs/reviews/对抗性review-2026-11-06-批次3.md`+`.en.md`（新建）、状态块 |
 | 42 | doc(用户问) | 用户问"0002/0001 等文档提到的 moneta、nova 是前代仓库，入口文档是否说明了"。核对：README/AGENTS/background 有定义，但**决策文档内部首次出现处没有就地指路**（新窗口读 0002 时"moneta"可能是第一个看到的陌生词）。修复：① 0002 §2 背景开头加谱系指路行（中英，指 `docs/background.md`）；② AGENTS.md 头部加 **Lineage** 块：Moneta(1代,2026-10) → Nova(2代,2026-11, clean-room 重构) → **Lyra(3代,本仓库)**，前两代为本地只读参考（**只继承机制、独立重写，永不 import/修改/拷贝其运行时代码**，与 0002 §6 回滚边界一致），完整"为什么"在 background | `docs/decisions/0002*` §2、`AGENTS.md` |
 | 43 | code+test+review | **0002 代码实现 + 自检 + 批次4 对抗性 review（全过）**。① 实现 `lyra/` 包：`oci_client`（PAR prefix 列对象分页 + 对象流式下载 + path-traversal 防护 + PAR URL 脱敏 + **md5 归一化**）、`pull`（zip→flat CSV，`_N` 去重名，instrument 取列名不取文件名）、`clean`（is_complete 过滤 + (instrument,time) 确定性去重 + bronze schema）、`aggregate`（UTC time_bucket 5m/1h，first/last bar，`n_bars`，I22 校验）、`pipeline`（raw 唯一幂等 + clean/agg 恒重算，typed Parquet 落盘）、`cli`（`lyra pull/clean/aggregate/version`）、`config`（`data_par_url` 必需，push 2 个 PAR 预留不读取）；② **22 个测试全绿**（0002 承诺 14 个场景全覆盖 + 8 个边界/负例），pyflakes 干净，端到端 `FakePar` 验证（70+30 根 1m → bronze 100 / 5m 20 / 1h 3；重跑仅 1 次 list 请求）；③ **批次4 红队 11 项**：修复 5 个真 bug——**A1 md5 base64/hex 双编码恒失配**（I20 幂等静默退化为 size 回退，moneta 同款坑）/ A2 `pull.py` 未 import `Iterator` / A3 `INTERVAL '5 minutes'` 未加引号 + TIMESTAMPTZ 触发 pytz 崩溃 / A4 bronze `time` 落成 string 破坏 I18 稳定 schema / A10 空表 schema 漂移；A11 PAR 脱敏**复核后判定安全**（机密在 query `Signature` 已丢弃，`/p/<namespace>` 是公开标识符）；A5–A9 判定为正确行为或已清理。**无遗留未决项** | `lyra/*.py`（新建 8 个模块）、`tests/*.py`（新建 5 个测试文件 + conftest）、`docs/reviews/对抗性review-2026-11-06-批次4.md`+`.en.md`（新建）、状态块 |
+| 44 | code+test+review(真实数据) | **用户指示用 moneta 真实 PAR 跑真实端到端** → 暴露一批 **fixture 永远测不到** 的偏差（批次5）。① 从 moneta `config/setting.yml` 取真实 PAR（Garage bucket，166 objects / 1.59 GB，其中 `moneta_prices_m1.zip` 1.28 GB 主数据 + ~150 日增 zip）；② **真发现 A1（致命）**：纯 Python clean（`csv.DictReader` 逐行）在 **4884 万行 / 12 GB** 下不可行（实测卡死）→ **clean 重写为 DuckDB** `read_csv(union_by_name)+ROW_NUMBER 去重+COPY`（moneta `load_data.py` 同款，独立重实现），48M 行 ≈15 min 内存平稳；③ **真发现 A2（契约在真实数据下不成立）**：I22 原"逐对 1m"把真实 **73 万处** 市场缺口（周末/休市/无成交）全判违规 → 精确化为 **I22 = 原生分辨率 1m**（每标的最小间隔 ≈1m，缺口合法），21 标的 min gap 全 1.00 min → 0 违规；④ 真发现 A3：**pytz 是硬读依赖未声明**（输出 `TIMESTAMPTZ`，下游 fetch 崩）→ pyproject 加 `pytz>=2023.3`；⑤ 真发现 A4：`read_parquet(?)` 拒 `PosixPath` 绑定参数 → 统一 `str()`；⑥ 真发现 A5：`COPY` 无 ORDER BY 行序漂移破坏 I18 顺序承诺 → 加 ORDER BY。**真实 `lyra pull` 端到端成功**：163 zips → 183 CSVs → **bronze 48,846,896 行** → **5m 9,986,167 bars** → **1h 838,272 bars**（15m51s，21 标的，2020-01-02→2026-11-06）；`n_bars` 峰值 5 + 部分窗口（缺口）标记正确。**24 测试全绿**（新增 gapped-1m 接受 / 5m 原生分辨率拒绝 / COPY 确定性 / 空表 schema），pyflakes 干净。0002 文档升 v0.4（I21/I22 精确化 + 修订记录）。**这是"fixture 全绿 → 真实可用"的关键跨越** | `lyra/clean.py`+`aggregate.py`+`pipeline.py`+`cli.py`（DuckDB 重写）、`tests/test_clean.py`+`test_aggregate.py`、`pyproject.toml`（pytz）、`docs/decisions/0002*`（v0.3→v0.4）、`docs/reviews/对抗性review-2026-11-06-批次5.md`+`.en.md`（新建）、状态块 |
 
 ## 待办（截至 2026-11-05 收工）
 

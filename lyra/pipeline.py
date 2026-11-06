@@ -117,27 +117,40 @@ def run_pull(
     raw_csvs = pull.extract_zips_to_csv(zips_dir, csv_dir, clean_target=True)
 
     # 3) clean — ALWAYS recompute (A1). Deterministic (I18).
-    bronze_rows = clean_mod.clean_csv_to_bronze(csv_dir)
+    #    Streamed via DuckDB COPY (no full in-memory materialization) so real
+    #    12 GB / 48M-row data fits comfortably.
+    bronze_out = clean_mod.clean_csv_to_bronze_parquet(csv_dir, bronze_path)
 
     # 4) aggregate — ALWAYS recompute (A1). I21/I22 enforced inside.
-    if bronze_rows:
-        agg_result = agg.aggregate_bronze_rows(bronze_rows)
-    else:
-        agg_result = {"ohlcv_5m": [], "ohlcv_1h": []}
+    #    Streams straight to Parquet (COPY) — no multi-GB row materialization.
+    import duckdb as _duckdb
 
-    # 5) persist outputs (overwrite). Explicit column order ⇒ stable schema.
-    bronze_cols = tuple(bronze_rows[0].keys()) if bronze_rows else clean_mod.ALWAYS_PRESENT
-    bronze_out = _write_parquet(bronze_rows, bronze_path, columns=bronze_cols)
-    out_5 = _write_parquet(agg_result["ohlcv_5m"], p5, columns=agg.AGGREGATE_COLUMNS)
-    out_1 = _write_parquet(agg_result["ohlcv_1h"], p1, columns=agg.AGGREGATE_COLUMNS)
+    n_bronze = int(
+        _duckdb.connect(":memory:").execute(
+            "SELECT COUNT(*) FROM read_parquet(?)", [str(bronze_out)]
+        ).fetchone()[0]
+    )
+    if n_bronze:
+        paths = agg.aggregate_bronze_to_parquet(bronze_out, p5, p1)
+        p5, p1 = paths["ohlcv_5m"], paths["ohlcv_1h"]
+        counts = _duckdb.connect(":memory:").execute(
+            "SELECT (SELECT COUNT(*) FROM read_parquet(?)), (SELECT COUNT(*) FROM read_parquet(?))",
+            [str(p5), str(p1)],
+        ).fetchone()
+        bars_5m, bars_1h = int(counts[0]), int(counts[1])
+    else:
+        # Zero-row outputs with the aggregate schema (stable for 0003).
+        p5 = _write_parquet([], p5, columns=agg.AGGREGATE_COLUMNS)
+        p1 = _write_parquet([], p1, columns=agg.AGGREGATE_COLUMNS)
+        bars_5m = bars_1h = 0
 
     return PullResult(
         raw_zips=raw_zips,
         raw_csvs=raw_csvs,
         bronze_path=bronze_out,
-        ohlcv_5m_path=out_5,
-        ohlcv_1h_path=out_1,
-        bronze_rows=len(bronze_rows),
-        bars_5m=len(agg_result["ohlcv_5m"]),
-        bars_1h=len(agg_result["ohlcv_1h"]),
+        ohlcv_5m_path=p5,
+        ohlcv_1h_path=p1,
+        bronze_rows=int(n_bronze),
+        bars_5m=bars_5m,
+        bars_1h=bars_1h,
     )

@@ -155,8 +155,8 @@ oci:
 | I18 | **数据可复现**：同一 OCI 对象集合（md5 集合一致）+ 同一代码版本 → bronze / 5m / 1h Parquet 的**数据内容逐行一致**（值 + 行序）；不承诺 Parquet 文件字节一致（文件级字节随 arrow 版本可变，moneta 同样不承诺）。前提：clean 的过滤/去重/存活行选择全部确定性（§3.3 clean 语义），pull 按对象名排序处理（顺序无关） | 本 feature 新增（R8 在数据层的具体化） |
 | I19 | PAR URL 永不进入 git、日志、run 报告（脱敏为 host + path 前 2 段） | I12（凭证不进 git / 不进 run 报告）在数据层的延伸 |
 | I20 | 对象下载幂等：**md5 一致即跳过**（moneta list 已返回 md5）；md5 不可用时回退 size 判断；同键不同内容必须被重下 | moneta 机制 + 强化（I11 可重建性的下载侧保证） |
-| I21 | 聚合只用 `time_bucket` UTC 边界 + 窗口内已有 1m bar；`n_bars` 如实标记部分 bar；open/close 取窗口首/末 bar | moneta `aggregate_ohlcv`（本 feature 固化） |
-| I22 | 输入必须 1m 粒度 UTC；非 1m → 拒绝（防呆，I18 的前提） | 本 feature 新增 |
+| I21 | 聚合只用 `time_bucket` UTC 边界 + 窗口内已有 1m bar；`n_bars` 如实标记部分 bar（缺口合法）；open/close 取窗口首/末 bar。**`time` 实为 `TIMESTAMPTZ(UTC)`**（源带 `Z`，DuckDB 自动推断；下游读需 pytz，见 pyproject） | moneta `aggregate_ohlcv`（本 feature 固化）；**TIMESTAMPTZ 为真实数据端到端后确认（批次5 A7）** |
+| I22 | 输入**原生分辨率必须 = 1m UTC**（防呆，I18 的前提）。判据：每标的**最小** bar 间隔 ≈ 1m（59–61s）。**市场缺口（bar 缺失）是合法的**——真实 1m 数据周末/休市/无成交会缺 bar（本数据集 73 万处 5m+ 缺口），不得据此拒绝；**5m/1h 原生分辨率**（最小间隔 ≥ 5m）才拒绝 | 本 feature 新增；**真实数据端到端后精确化**（原始"逐对 1m"误拒合法缺口，批次5 修正） |
 | I1 | YAML 是唯一策略语言 | HLD §4（本 feature 不碰策略，天然满足） |
 
 ## 5. 测试
@@ -170,7 +170,7 @@ oci:
 | `test_pull_zip_to_flat_csv` | 嵌套 zip → 扁平 CSV；冲突 `_N`；重跑清顶层旧 CSV、子目录不动 |
 | `test_clean_is_complete_filter` | `is_complete` falsy / 缺失 → 行被过滤（moneta 语义） |
 | `test_clean_dedup_deterministic` | 同 `(instrument,time)` 多源重叠 → 按"payload 非空列数 → 源文件名 → 行序"取唯一存活行；两次运行结果一致（I18） |
-| `test_clean_non_1m_rejected` | 5m 粒度输入 → 明确拒绝（I22 防呆） |
+| `test_clean_non_1m_rejected` | 5m 原生分辨率输入（最小间隔 5m）→ 明确拒绝（I22 防呆） |
 | `test_aggregate_5m_1h_utc` | 跨 5m/1h 边界的开高低收正确；`n_bars` 标记部分 bar（I21） |
 | `test_aggregate_deterministic` | 同输入两次运行 Parquet **数据逐行一致**（I18，非文件字节） |
 | `test_clean_bronze_schema` | bronze 列 = 输入并集（必含 7 列）；`is_complete` 不带入 bronze（A2） |
@@ -202,3 +202,4 @@ oci:
 | 2026-11-06 | 0.1 | 初稿。定案：pull 用 PAR prefix URL（沿用 moneta 已验证机制）；O5 定案（PAR 用户侧管理 + 过期诊断 + 0009 doctor 体检）；yml 预留 pull/strategies/features 三个 PAR 位置（push 归 0007）。 |
 | 2026-11-06 | 0.2 | **自检 + 对抗性 review（批次3）修复**：① 输入契约改为 moneta 真实列契约（必需 `instrument,time,is_complete`；mid/bid/ask 可选；真实 15 列）；② clean 语义补齐 moneta `load_data.py` 三规则（is_complete 过滤 / (instrument,time) 去重 / 确定性存活行选择），防 `prices_*` backfill 与主 CSV 同键重叠；③ 可复现性不变量从"逐字节"修正为"**数据逐行一致**"（文件字节随 arrow 版本可变，moneta 同口径），并定义其前提（确定性 clean + pull 按名排序）；④ 下载幂等升级为 **md5 优先 / size 回退**（moneta list 已取 md5 却未用）；⑤ 新防呆 I22：非 1m 粒度输入拒绝；⑥ 明确 `data_par_url` 必须 prefix 级；⑦ CLI 澄清（clean/aggregate 是 pull 内部步骤的调试入口）；⑧ 不变量编号改 **I18–I22**（0.1 误用 I2–I6，与 hld §4 已占用编号冲突）；⑨ 测试清单 9→12（补 md5 不匹配重下、is_complete 过滤、去重确定性、非 1m 拒绝）。 |
 | 2026-11-06 | 0.3 | 批次3 红队两条真缺陷落地：**A1 派生缓存陈旧** → 定案只有 raw 层幂等，clean/aggregate 恒重算（否则 bronze 被删/损坏时静默丢数据）；**A2 bronze schema 未定义** → 显式定案 bronze 列 = 输入并集（必含 7 列，bid/ask 依源，**不含 `is_complete`**），作为 0003 输入契约；测试清单 12→14。A3–A5 记录为接受边界。 |
+| 2026-11-06 | 0.4 | **真实数据端到端（moneta 真实 PAR，12 GB / 4884 万行）后精确化契约 + 修 4 个 fixture 测不到的偏差**：① **clean 重写为 DuckDB**（纯 Python 在 48M 行不可行）；② **I22 判据改为"原生分辨率 = 1m"**（每标的最小间隔 ≈1m），**市场缺口合法**——原"逐对 1m"误拒 73 万处真实缺口；③ `time` 确认为 **TIMESTAMPTZ(UTC)**（源 `Z` 推断）+ 下游读需 **pytz**（补进 pyproject）；④ `read_parquet(?)` 绑定参数统一 `str()`；⑤ `COPY` 加 `ORDER BY` 稳定行序（I18）。测试 14→24（补 gapped-1m 接受、5m 原生分辨率拒绝、COPY 确定性、空表 schema）。 |

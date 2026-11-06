@@ -73,8 +73,9 @@ def test_clean_dedup_survivor_file_name_order(tmp_path):
     import datetime
 
     t = datetime.datetime(2026, 1, 2, 0, 0)
+    # Full 16-column row (instrument,is_complete,time + 13 payload cols).
     row = (f"XAU_USD,true,{t.strftime('%Y-%m-%d %H:%M:%S')},10,100,101,99,100,"
-           f"98,99,97,101,102,100,103")
+           f"98,99,97,101,102,100,103,101.5")
     (csv_dir / "b.csv").write_text(HEADER + "\n" + row + "\n")
     (csv_dir / "a.csv").write_text(HEADER + "\n" + row + "\n")
 
@@ -91,17 +92,19 @@ def test_clean_non_1m_rejected(tmp_path):
     csv_dir = tmp_path / "csv"
     csv_dir.mkdir()
     rows = []
-    for m in (0, 1, 5):  # gap of 4 minutes at 0:05 → non-1m
+    for m in (0, 5, 10):  # 5m-spaced bars → native resolution 5m, coarser than 1m
         t = datetime.datetime(2026, 1, 2, 0, m)
-        rows.append(f"XAU_USD,true,{t.strftime('%Y-%m-%d %H:%M:%S')},10,100,101,99,100,98,99,97,101,102,100,103")
+        rows.append(f"XAU_USD,true,{t.strftime('%Y-%m-%d %H:%M:%S')},10,100,101,99,100,98,99,97,101,102,100,103,101.5")
     (csv_dir / "XAU_USD.csv").write_text(HEADER + "\n" + "\n".join(rows) + "\n")
 
-    bronze = clean_mod.clean_csv_to_bronze(csv_dir)
-    assert len(bronze) == 3
+    import pyarrow.parquet as pq
+
+    bronze = clean_mod.clean_csv_to_bronze_parquet(csv_dir, tmp_path / "bronze.parquet")
+    assert pq.read_table(bronze).num_rows == 3
     from lyra import aggregate as agg
 
     with pytest.raises(agg.GranularityError):
-        agg.aggregate_bronze_rows(bronze)
+        agg.aggregate_bronze_to_parquet(bronze, tmp_path / "5m.parquet", tmp_path / "1h.parquet")
 
 
 def test_clean_bronze_schema(tmp_path):

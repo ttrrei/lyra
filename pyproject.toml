@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml>=6.0",        # YAML 解析
     "duckdb>=1.0",        # Hybrid 特征存储查询（R3）
     "pyarrow>=15.0",      # Parquet I/O
+    "pytz>=2023.3",       # reading TIMESTAMP WITH TIME ZONE in DuckDB (hard dep, verified 0002)
     "typer>=0.12",        # CLI
     "requests>=2.31",     # OCI PAR download (0002, moneta-proven mechanism)
 ]

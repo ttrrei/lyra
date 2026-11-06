@@ -59,19 +59,21 @@ def clean(
     data_root: str | None = typer.Option(None, "--data-root"),
 ) -> None:
     """DEBUG: re-run the clean step over the existing raw_csv/ (writes bronze, overwrites)."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
+    import duckdb as _duckdb
 
     _, root = _load(config, data_root)
     csv_dir = root / "raw_csv"
     if not csv_dir.exists():
         typer.secho(f"no raw_csv/ at {csv_dir} — run `lyra pull` first", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
-    rows = clean_mod.clean_csv_to_bronze(csv_dir)
     out = root / "all_data" / "all_data.parquet"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa.Table.from_pylist(rows) if rows else pa.table({c: [] for c in clean_mod.ALWAYS_PRESENT}), str(out))
-    typer.secho(f"cleaned {len(rows)} bronze rows -> {out}", fg=typer.colors.GREEN)
+    clean_mod.clean_csv_to_bronze_parquet(csv_dir, out)
+    n = int(
+        _duckdb.connect(":memory:")
+        .execute("SELECT COUNT(*) FROM read_parquet(?)", [str(out)])
+        .fetchone()[0]
+    )
+    typer.secho(f"cleaned {n} bronze rows -> {out}", fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -80,20 +82,25 @@ def aggregate(
     data_root: str | None = typer.Option(None, "--data-root"),
 ) -> None:
     """DEBUG: re-run the aggregate step over the existing bronze (overwrites 5m/1h)."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
+    import duckdb as _duckdb
 
     _, root = _load(config, data_root)
     bronze = root / "all_data" / "all_data.parquet"
     if not bronze.exists():
         typer.secho(f"no bronze at {bronze} — run `lyra pull` first", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
-    result = agg.aggregate_bronze(bronze)
-    (root / "ohlcv_5m").mkdir(parents=True, exist_ok=True)
-    (root / "ohlcv_1h").mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa.Table.from_pylist(result["ohlcv_5m"]) if result["ohlcv_5m"] else pa.table({c: [] for c in ["instrument", "time"]}), str(root / "ohlcv_5m" / "ohlcv_5m.parquet"))
-    pq.write_table(pa.Table.from_pylist(result["ohlcv_1h"]) if result["ohlcv_1h"] else pa.table({c: [] for c in ["instrument", "time"]}), str(root / "ohlcv_1h" / "ohlcv_1h.parquet"))
-    typer.secho(f"aggregated: {len(result['ohlcv_5m'])} 5m bars, {len(result['ohlcv_1h'])} 1h bars", fg=typer.colors.GREEN)
+    p5 = root / "ohlcv_5m" / "ohlcv_5m.parquet"
+    p1 = root / "ohlcv_1h" / "ohlcv_1h.parquet"
+    agg.aggregate_bronze_to_parquet(bronze, p5, p1)
+    n5, n1 = (
+        _duckdb.connect(":memory:")
+        .execute(
+            "SELECT (SELECT COUNT(*) FROM read_parquet(?)), (SELECT COUNT(*) FROM read_parquet(?))",
+            [str(p5), str(p1)],
+        )
+        .fetchone()
+    )
+    typer.secho(f"aggregated: {n5} 5m bars -> {p5}, {n1} 1h bars -> {p1}", fg=typer.colors.GREEN)
 
 
 @app.command()

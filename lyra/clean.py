@@ -1,135 +1,184 @@
 """Clean: flat CSVs → bronze 1m Parquet (moneta ``load_data.py`` semantics).
 
-Decision 0002 §3.3 / A2 / A1. Three deterministic rules (batch-3 A1, S2):
+Decision 0002 §3.3 / A2 / A1. Implemented in **DuckDB** because real data
+scales to 12 GB / ~10M rows where a Python loop is not an option (moneta's
+proven approach, re-implemented independently):
 
-1. **``is_complete`` filter** — rows where ``is_complete`` is falsy are
-   dropped (``COALESCE(is_complete, FALSE) = TRUE``).
-2. **Dedup on ``(instrument, time)``** — duplicates (e.g. a ``prices_*``
-   backfill overlapping the main CSV) resolve to a single **deterministic
-   survivor**: non-null *payload* column count (desc) → source file name →
-   original row order.
+1. **``is_complete`` filter** — ``COALESCE(is_complete, FALSE) = TRUE``.
+2. **Dedup on ``(instrument, time)``** — one deterministic survivor per key:
+   non-null *payload* column count desc → source file name → row order.
+   (moneta scores bid/ask only; scoring the full payload set is a strict
+   generalization — identical outcome when the two are equivalent.)
 3. **Bronze schema** — the union of input columns **minus** ``is_complete``
-   (it is consumed by step 1 and would be true for every bronze row).
+   (A2): always ``instrument,time,volume,mid_o,mid_h,mid_l,mid_c``, plus
+   ``bid_*/ask_*`` when the source carries them.
 
-Determinism (I18) is the whole point: the survivor rule must be total and
-reproducible, so two runs over the same inputs produce row-identical bronze.
+Determinism (I18): the ``ROW_NUMBER()`` ordering makes the survivor total
+and reproducible — thread count never influences the outcome.
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass, field
+import re
 from pathlib import Path
 from typing import Any
-
-from .pull import iter_flat_csvs, read_csv_rows
 
 # Bronze always-present columns (0002 A2). ``is_complete`` is deliberately
 # NOT among them — it is a clean input, not a bronze output.
 ALWAYS_PRESENT = ("instrument", "time", "volume", "mid_o", "mid_h", "mid_l", "mid_c")
 REQUIRED_INPUT = ("instrument", "time", "is_complete")
-# Payload columns considered for survivor ranking (excludes the keys + filter).
-PAYLOAD = ("volume", "mid_o", "mid_h", "mid_l", "mid_c",
-           "bid_o", "bid_h", "bid_l", "bid_c",
-           "ask_o", "ask_h", "ask_l", "ask_c")
+# Payload columns considered for survivor ranking (excludes keys + filter).
+PAYLOAD = (
+    "volume", "mid_o", "mid_h", "mid_l", "mid_c",
+    "bid_o", "bid_h", "bid_l", "bid_c",
+    "ask_o", "ask_h", "ask_l", "ask_c",
+)
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class CleanInputError(ValueError):
     """A flat CSV is missing a required input column (0002 §3.3)."""
 
 
-@dataclass
-class Row:
-    instrument: str
-    time: str
-    values: dict[str, Any] = field(default_factory=dict)
-    source_file: str = ""
-    row_index: int = 0
-
-    def nonnull_payload_count(self) -> int:
-        return sum(1 for col in PAYLOAD if self.values.get(col) not in (None, ""))
-
-    def survivor_key(self) -> tuple[int, str, int]:
-        # Min key wins: fewest nulls first, then lexicographic file, then row.
-        return (-self.nonnull_payload_count(), self.source_file, self.row_index)
+def _quote(path: Path) -> str:
+    s = str(path)
+    # Allow glob characters (the read_csv glob) but reject anything that
+    # could break out of the SQL string literal or traverse upward.
+    if not re.match(r"^[\w\s/.\-*]+$", s) or s.startswith("-"):
+        raise CleanInputError(f"unsafe path for clean: {path!r}")
+    return s
 
 
-def _truthy(value: Any) -> bool:
-    if value is None or value == "":
-        return False
-    if isinstance(value, str):
-        return value.strip().lower() in ("true", "1", "yes", "y", "t")
-    return bool(value)
-
-
-def _iter_rows(csv_dir: Path):
-    for path in iter_flat_csvs(csv_dir):
-        for index, raw in enumerate(read_csv_rows(path)):
-            yield path.name, index, raw
+def _clean_sql(csv_dir: Path, payload_present: set[str]) -> str:
+    score_cols = [f"({c} IS NOT NULL)::INT" for c in PAYLOAD if c in payload_present]
+    score = " + ".join(score_cols) if score_cols else "0"
+    # Survivors only: filter → score → deterministic row number.
+    return f"""
+        WITH raw AS (
+            SELECT *, filename AS _source_file
+            FROM read_csv('{_quote(csv_dir / "*.csv")}',
+                          header = TRUE, auto_detect = TRUE,
+                          union_by_name = TRUE, filename = TRUE)
+        ),
+        scored AS (
+            SELECT *, {score} AS _payload_score
+            FROM raw
+            WHERE COALESCE(is_complete, FALSE) = TRUE
+        ),
+        deduped AS (
+            SELECT *,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY instrument, time
+                       ORDER BY _payload_score DESC, _source_file ASC, time ASC
+                   ) AS _rn
+            FROM scored
+        )
+        SELECT * EXCLUDE (_rn, _payload_score, _source_file, filename, is_complete)
+        FROM deduped
+        WHERE _rn = 1
+    """
 
 
 def clean_csv_to_bronze(csv_dir: str | Path) -> list[dict[str, Any]]:
     """Apply the three clean rules and return bronze rows (list of dicts).
 
-    The bronze column set is the union of ``ALWAYS_PRESENT`` and any payload
-    columns actually seen, ordered deterministically; ``is_complete`` is
-    dropped. Rows are ordered by ``(instrument, time)`` for reproducibility.
+    A1: this ALWAYS recomputes — it never inspects an existing output.
+    Raises ``CleanInputError`` if any CSV lacks a required input column.
     """
-    csv_dir = Path(csv_dir)
-    survivors: dict[tuple[str, str], Row] = {}
-    observed_payload: set[str] = set()
+    import duckdb
 
-    for source_file, index, raw in _iter_rows(csv_dir):
-        # Validate required columns exist on this file's header.
-        present = {str(k) for k in raw.keys()}
-        missing = [c for c in REQUIRED_INPUT if c not in present]
+    csv_dir = Path(csv_dir)
+    if not csv_dir.exists() or not list(csv_dir.glob("*.csv")):
+        return []
+
+    con = duckdb.connect(":memory:")
+    try:
+        # Probe the first CSV for the required input contract (moneta's
+        # approach: a glob-level sniff is unreliable).
+        first = sorted(csv_dir.glob("*.csv"))[0]
+        cols = {
+            r[0].lower()
+            for r in con.execute(
+                "DESCRIBE SELECT * FROM read_csv(?, header=TRUE, auto_detect=TRUE) LIMIT 1",
+                [str(first)],
+            ).fetchall()
+        }
+        missing = [c for c in REQUIRED_INPUT if c not in cols]
         if missing:
             raise CleanInputError(
-                f"{source_file} is missing required column(s): {', '.join(missing)}"
+                f"{first.name} is missing required column(s): {', '.join(missing)}"
             )
+        # Payload columns actually present (union_by_name handles per-file
+        # differences; we score on the intersection we can name safely).
+        present = {c for c in PAYLOAD if c in cols}
 
-        if not _truthy(raw.get("is_complete")):
-            continue  # rule 1: is_complete filter
+        sql = _clean_sql(csv_dir, present)
+        out_cols = ["instrument", "time"] + [
+            c for c in ALWAYS_PRESENT if c not in ("instrument", "time")
+        ]
+        for c in sorted(present):
+            if c not in out_cols:
+                out_cols.append(c)
+        select = ", ".join(out_cols)
 
-        instrument = str(raw.get("instrument"))
-        time = str(raw.get("time"))
-        key = (instrument, time)
-
-        values = {str(k): v for k, v in raw.items() if str(k) not in ("is_complete", "instrument", "time")}
-        for col in PAYLOAD:
-            if col in values:
-                observed_payload.add(col)
-
-        row = Row(instrument=instrument, time=time, values=values,
-                  source_file=source_file, row_index=index)
-        current = survivors.get(key)
-        if current is None or row.survivor_key() < current.survivor_key():
-            survivors[key] = row  # rule 2: deterministic survivor
-
-    bronze_columns = list(ALWAYS_PRESENT)
-    for col in sorted(observed_payload):
-        if col not in bronze_columns:
-            bronze_columns.append(col)
-
-    bronze: list[dict[str, Any]] = []
-    for (instrument, time) in sorted(survivors.keys()):
-        row = survivors[(instrument, time)]
-        record = {"instrument": instrument, "time": time}
-        for col in bronze_columns:
-            if col in ("instrument", "time"):
-                continue
-            record[col] = row.values.get(col)
-        bronze.append(record)
-    return bronze
+        rows = con.sql(f"SELECT {select} FROM ({sql}) t").fetchall()
+        names = out_cols
+        return [dict(zip(names, r)) for r in rows]
+    finally:
+        con.close()
 
 
-def bronze_columns(bronze_rows: list[dict[str, Any]]) -> list[str]:
-    """Deterministic bronze column order (0002 A2)."""
-    if not bronze_rows:
-        return list(ALWAYS_PRESENT)
-    return list(bronze_rows[0].keys())
+def clean_csv_to_bronze_parquet(csv_dir: str | Path, out_path: str | Path) -> Path:
+    """A1: ALWAYS recompute and overwrite the bronze Parquet.
 
+    Streamed via DuckDB ``COPY`` (no full in-memory row materialization).
+    Returns the output path.
+    """
+    import duckdb
 
-def bronze_json(rows: list[dict[str, Any]]) -> str:
-    """A deterministic, human-readable serialization (for tests / previews)."""
-    return json.dumps(rows, ensure_ascii=False, sort_keys=True, indent=2)
+    csv_dir = Path(csv_dir)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if not csv_dir.exists() or not list(csv_dir.glob("*.csv")):
+        # Deterministic empty bronze with the always-present typed schema.
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        fields = [
+            pa.field(
+                c,
+                pa.timestamp("us") if c == "time" else (pa.float64() if c != "instrument" else pa.string()),
+            )
+            for c in ALWAYS_PRESENT
+        ]
+        pq.write_table(pa.table({f.name: pa.array([], type=f.type) for f in fields}), str(out_path))
+        return out_path
+
+    con = duckdb.connect(":memory:")
+    try:
+        first = sorted(csv_dir.glob("*.csv"))[0]
+        cols = {
+            r[0].lower()
+            for r in con.execute(
+                "DESCRIBE SELECT * FROM read_csv(?, header=TRUE, auto_detect=TRUE) LIMIT 1",
+                [str(first)],
+            ).fetchall()
+        }
+        missing = [c for c in REQUIRED_INPUT if c not in cols]
+        if missing:
+            raise CleanInputError(
+                f"{first.name} is missing required column(s): {', '.join(missing)}"
+            )
+        present = {c for c in PAYLOAD if c in cols}
+        inner = _clean_sql(csv_dir, present)
+        out_cols = ["instrument", "time"] + [
+            c for c in ALWAYS_PRESENT if c not in ("instrument", "time")
+        ]
+        for c in sorted(present):
+            if c not in out_cols:
+                out_cols.append(c)
+        select = ", ".join(out_cols)
+        con.execute(f"COPY (SELECT {select} FROM ({inner}) t) TO '{_quote(out_path)}' (FORMAT PARQUET)")
+    finally:
+        con.close()
+    return out_path

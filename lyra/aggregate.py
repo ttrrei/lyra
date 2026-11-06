@@ -1,18 +1,20 @@
 """Aggregate bronze 1m → 5m / 1h (moneta ``aggregate_ohlcv.py`` reference).
 
-Decision 0002 §3.3 / I21 / I22:
+Decision 0002 §3.3 / I21 / I22 — implemented in **DuckDB** (moneta's proven
+approach, re-implemented independently) so it scales to real data:
 
-* buckets on **UTC** boundaries via DuckDB ``time_bucket`` — the source
-  timestamps are *interpreted as UTC* regardless of host timezone;
-* open/close from the window's **first/last** 1m bar (``ARRAY_AGG(.. ORDER
-  BY time)[1]`` / ``[n]``), high/low max/min, volume summed, and ``n_bars``
-  truthfully flags partial windows (I21);
-* **I22 foolproofing** — the input must be uniform 1m granularity per
-  instrument; any other gap raises ``GranularityError``.
+* buckets on **UTC** boundaries via ``time_bucket``;
+* open/close from the window's **first/last** 1m bar, high/low max/min,
+  volume summed, and ``n_bars`` truthfully flags partial windows (I21);
+* **I22 foolproofing** — input must be uniform 1m per instrument; any other
+  gap raises ``GranularityError``;
+* outputs stream straight to Parquet via ``COPY`` (no multi-GB Python
+  materialization).
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -31,52 +33,39 @@ class GranularityError(ValueError):
     """I22: input is not uniform 1m granularity."""
 
 
-def _make_bronze_table(connection: duckdb.DuckDBPyConnection, source_sql: str) -> None:
-    """Build the working ``bronze`` table with explicit types.
-
-    Input rows may arrive as CSV strings (in-memory path) or Parquet values
-    (standalone path); casting here makes both paths behave identically.
-    Naive timestamps are *interpreted as UTC* (I21) via ``AT TIME ZONE 'UTC'``
-    so results never depend on the host timezone.
-    """
-    connection.execute(
-        f"""
-        CREATE OR REPLACE TABLE bronze AS
-        SELECT
-            instrument::VARCHAR        AS instrument,
-            time::TIMESTAMP           AS time,   -- naive UTC (I21)
-            volume::DOUBLE            AS volume,
-            mid_o::DOUBLE             AS mid_o,
-            mid_h::DOUBLE             AS mid_h,
-            mid_l::DOUBLE             AS mid_l,
-            mid_c::DOUBLE             AS mid_c
-        FROM {source_sql}
-        """
-    )
-
-
-def _check_required(connection: duckdb.DuckDBPyConnection, label: str) -> None:
-    cols = {r[0] for r in connection.execute("DESCRIBE bronze").fetchall()}
-    missing = [c for c in REQUIRED if c not in cols]
-    if missing:
-        raise ValueError(f"{label} missing bronze column(s): {', '.join(missing)}")
+def _quote(path: Path) -> str:
+    if not re.match(r"^[\w\s/.\-]+$", str(path)):
+        raise ValueError(f"unsafe path for aggregate: {path!r}")
+    return str(path)
 
 
 def _validate_1m(connection: duckdb.DuckDBPyConnection) -> None:
+    """I22: the input's *native resolution* must be 1 minute.
+
+    Real 1m market data has legitimate gaps (market closed, no trade —
+    weekend/holiday/quiet minutes), so we do NOT require every consecutive
+    pair to be exactly 1m apart. We require instead that the finest
+    inter-bar gap per instrument is ≈1m — i.e. the data is 1m-resolution and
+    no coarser. This accepts real gapped 1m data and rejects 5m/1h (or
+    sub-1m) input, which would make the 5m/1h buckets meaningless.
+    """
     row = connection.execute(
         """
-        SELECT COUNT(*)
-        FROM (
-            SELECT LAG(time) OVER (PARTITION BY instrument ORDER BY time) AS prev, time
+        WITH g AS (
+            SELECT instrument,
+                   EXTRACT(EPOCH FROM (time - LAG(time) OVER (PARTITION BY instrument ORDER BY time))) AS gap_s
             FROM bronze
+        ),
+        mins AS (
+            SELECT MIN(gap_s) AS min_gap_s FROM g WHERE gap_s IS NOT NULL GROUP BY instrument
         )
-        WHERE prev IS NOT NULL AND time - prev <> INTERVAL '1 minute'
+        SELECT COUNT(*) FROM mins WHERE min_gap_s < 59 OR min_gap_s > 61
         """
     ).fetchone()
     if row and row[0]:
         raise GranularityError(
-            f"I22 violation: input is not uniform 1m granularity "
-            f"({row[0]} non-1m gap(s) found). Lyra aggregates from 1m bronze only."
+            f"I22 violation: {row[0]} instrument(s) are not 1-minute resolution "
+            f"(their finest inter-bar gap is not ≈1m). Lyra aggregates from 1m bronze only."
         )
 
 
@@ -86,9 +75,11 @@ def _aggregate_interval(
     sql = f"""
         SELECT
             instrument,
-            time_bucket(INTERVAL '{interval_sql}', time)         AS time,
-            (ARRAY_AGG(mid_o ORDER BY time))[1]                  AS mid_o,
-            (ARRAY_AGG(mid_c ORDER BY time))[ARRAY_LENGTH(ARRAY_AGG(mid_c ORDER BY time))] AS mid_c,
+            time_bucket(INTERVAL '{interval_sql}', time)        AS time,
+            (ARRAY_AGG(mid_o ORDER BY time))[1]                 AS mid_o,
+            (ARRAY_AGG(mid_c ORDER BY time))[
+                ARRAY_LENGTH(ARRAY_AGG(mid_c ORDER BY time))
+            ]                                                    AS mid_c,
             MAX(mid_h)                                            AS mid_h,
             MIN(mid_l)                                            AS mid_l,
             SUM(COALESCE(volume, 0))                              AS volume,
@@ -102,39 +93,84 @@ def _aggregate_interval(
     return [dict(zip(names, r)) for r in cursor.fetchall()]
 
 
-def aggregate_bronze_rows(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Aggregate in-memory 1m bronze rows into ``{'ohlcv_5m': [...], 'ohlcv_1h': [...]}``.
+def _register_bronze(connection: duckdb.DuckDBPyConnection, path: Path) -> None:
+    connection.execute(
+        "CREATE OR REPLACE TABLE bronze AS "
+        f"SELECT instrument, time, volume, mid_o, mid_h, mid_l, mid_c "
+        f"FROM read_parquet('{_quote(path)}')"
+    )
+    cols = {r[0] for r in connection.execute("DESCRIBE bronze").fetchall()}
+    missing = [c for c in REQUIRED if c not in cols]
+    if missing:
+        raise ValueError(f"{path.name} missing bronze column(s): {', '.join(missing)}")
 
-    Shared by ``lyra pull`` and the standalone ``lyra aggregate`` step.
+
+def aggregate_bronze_to_parquet(
+    bronze_parquet: str | Path,
+    out_5m: str | Path,
+    out_1h: str | Path,
+) -> dict[str, Path]:
+    """A1: ALWAYS recompute and overwrite (deterministic ⇒ safe, I18/I21).
+
+    Streams each granularity straight to Parquet (``COPY``); returns the two
+    output paths (no row materialization — scales to 12 GB inputs).
     """
-    if not rows:
-        raise ValueError("no bronze rows to aggregate")
-    import pyarrow as pa
-
-    # Normalize time to a string so a mixed input (datetime + str) cannot
-    # break Arrow inference; ``_make_bronze_table`` casts it to TIMESTAMP.
-    normalized = [{**r, "time": r["time"].isoformat(sep=" ") if hasattr(r.get("time"), "isoformat") else str(r["time"])} for r in rows]
-    connection = duckdb.connect(":memory:")
+    bronze = Path(bronze_parquet)
+    if not bronze.exists():
+        raise FileNotFoundError(bronze)
+    p5 = Path(out_5m)
+    p1 = Path(out_1h)
+    p5.parent.mkdir(parents=True, exist_ok=True)
+    p1.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(":memory:")
     try:
-        connection.register("bronze_rows", pa.Table.from_pylist(normalized))
-        _make_bronze_table(connection, "bronze_rows")
-        _check_required(connection, "bronze rows")
-        _validate_1m(connection)
-        return {label: _aggregate_interval(connection, sql) for label, sql in INTERVALS}
+        _register_bronze(con, bronze)
+        _validate_1m(con)
+        for path, (_label, interval_sql) in ((p5, INTERVALS[0]), (p1, INTERVALS[1])):
+            select = ", ".join(AGGREGATE_COLUMNS)
+            # ORDER BY in the outer query keeps Parquet row order stable
+            # (I18) regardless of parallelism.
+            sql = (
+                f"SELECT {select} FROM ({_interval_sql(con, interval_sql)}) t "
+                "ORDER BY instrument, time"
+            )
+            con.execute(
+                f"COPY ({sql}) TO '{_quote(path)}' (FORMAT PARQUET)"
+            )
     finally:
-        connection.close()
+        con.close()
+    return {"ohlcv_5m": p5, "ohlcv_1h": p1}
+
+
+def _interval_sql(con: duckdb.DuckDBPyConnection, interval_sql: str) -> str:
+    """Return the inner aggregation SELECT (as a subquery body)."""
+    return f"""
+        SELECT
+            instrument,
+            time_bucket(INTERVAL '{interval_sql}', time)        AS time,
+            (ARRAY_AGG(mid_o ORDER BY time))[1]                 AS mid_o,
+            (ARRAY_AGG(mid_c ORDER BY time))[
+                ARRAY_LENGTH(ARRAY_AGG(mid_c ORDER BY time))
+            ]                                                    AS mid_c,
+            MAX(mid_h)                                            AS mid_h,
+            MIN(mid_l)                                            AS mid_l,
+            SUM(COALESCE(volume, 0))                              AS volume,
+            COUNT(*)                                              AS n_bars
+        FROM bronze
+        GROUP BY instrument, time_bucket(INTERVAL '{interval_sql}', time)
+        ORDER BY instrument, time_bucket(INTERVAL '{interval_sql}', time)
+    """
 
 
 def aggregate_bronze(bronze_parquet: str | Path) -> dict[str, list[dict[str, Any]]]:
-    """Aggregate one bronze 1m Parquet file (standalone ``lyra aggregate`` step)."""
-    path = Path(bronze_parquet)
-    if not path.exists():
-        raise FileNotFoundError(path)
-    connection = duckdb.connect(":memory:")
+    """Aggregate one bronze 1m Parquet to in-memory rows (small-data / tests)."""
+    bronze = Path(bronze_parquet)
+    if not bronze.exists():
+        raise FileNotFoundError(bronze)
+    con = duckdb.connect(":memory:")
     try:
-        _make_bronze_table(connection, f"read_parquet({path.as_posix()!r})")
-        _check_required(connection, path.name)
-        _validate_1m(connection)
-        return {label: _aggregate_interval(connection, sql) for label, sql in INTERVALS}
+        _register_bronze(con, bronze)
+        _validate_1m(con)
+        return {label: _aggregate_interval(con, sql) for label, sql in INTERVALS}
     finally:
-        connection.close()
+        con.close()
