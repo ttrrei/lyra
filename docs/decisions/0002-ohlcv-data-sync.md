@@ -58,20 +58,29 @@ feature 的 PAR 位置**（0007 使用，本 feature 只占位、不使用）。
 **CLI**（`lyra/` 包随本 feature 创建）：
 
 ```
-lyra pull [--data-root DIR]     # 拉取原始 OHLCV（zip/CSV）→ 本地 data/
-lyra clean  (内部步骤)          # 校验 schema + 落 bronze 1m Parquet
-lyra aggregate (内部步骤)       # 1m → 5m / 1h（UTC 边界，n_bars 标记）
+lyra pull [--data-root DIR]     # 唯一用户入口：拉取 + 解压 + clean + aggregate
+lyra clean   <raw_csv_dir>      # 调试用独立入口（复用 pull 内部步骤）
+lyra aggregate <bronze>         # 调试用独立入口（复用 pull 内部步骤）
 ```
+
+`clean` / `aggregate` 不是独立交付物，是 `lyra pull` 的内部步骤
+（可单独调用仅为调试）；用户日常工作流只有一条命令：`lyra pull`。
+
+**重跑语义（防派生缓存陈旧）**：**只有 raw 下载层做幂等跳过
+（I20）**；`clean` 与 `aggregate` 每次 `lyra pull` **恒重算并覆盖
+输出**（不做"输出已存在即跳过"）——bronze/5m/1h 全部是 raw 的
+确定性函数（I18），重算成本 ≈ 一次 DuckDB 扫描，而"输出已存在即
+跳过"会在 bronze 被删/损坏时**静默丢数据**（批次3 A1）。
 
 **代码新增**：
 
 | 文件 | 职责 |
 |---|---|
-| `lyra/config.py` | 加载 `config/config_example.yml` 结构（真实值在本地 `config.yml`） |
-| `lyra/oci_client.py` | PAR 列对象（分页）+ 对象下载（流式、retry、size 幂等、path-traversal 防护）——机制沿用 moneta |
+| `lyra/config.py` | 加载 config 结构；真实值在 **`config/config.yml`（gitignored）**，仓库内只有 `config_example.yml`（B10） |
+| `lyra/oci_client.py` | PAR 列对象（分页）+ 对象下载（流式、retry、**md5 优先 / size 回退** 幂等、path-traversal 防护）——机制沿用 moneta，幂等判断比 moneta 强（moneta 仅用 size，list 已取 md5 却未用） |
 | `lyra/pull.py` | 拉取 + 解压 + 扁平化（moneta `extract_all_zips_to_csv` 等价） |
-| `lyra/clean.py` | schema 校验 → bronze 1m Parquet（列契约见 §3.3） |
-| `lyra/aggregate.py` | 1m → 5m/1h（moneta 等价，`n_bars` 保留） |
+| `lyra/clean.py` | **moneta `load_data.py` 等价语义**：① `is_complete` 过滤 ② 按 `(instrument, time)` 去重 ③ **确定性存活行选择**（payload 非空列数降序 → 源文件名 → 原行序）→ bronze 1m Parquet（契约见 §3.3） |
+| `lyra/aggregate.py` | 1m → 5m/1h（moneta 等价，`time_bucket` UTC 边界，`n_bars` 保留） |
 | `lyra/cli.py` | typer 入口（`lyra` command） |
 | `tests/` | §5 全部用例 |
 
@@ -97,14 +106,38 @@ oci:
 
 ### 3.3 边界
 
-- **输入契约**：OCI 上为 zip 归档，内含 CSV（moneta 同构：
-  `instrument,time,mid_o,mid_h,mid_l,mid_c,volume`，UTC 时间，
-  1m 粒度，instrument 命名继承 moneta `BASE_QUOTE`，O14）。
+- **输入契约**（与 moneta 真实数据核对过）：
+  - OCI 上为 zip 归档，内含 CSV；
+  - **必需列**：`instrument, time, is_complete`（moneta
+    `load_data.py` 的硬校验）；
+  - **可选列**（缺了 NULL 填充）：`volume, mid_o, mid_h, mid_l,
+    mid_c, bid_*, ask_*`（真实 CSV 共 15 列）；
+  - `time` 为 **UTC、1m 粒度**；**非 1m 粒度输入 → 拒绝并报错**
+    （聚合语义依赖 1m bronze，防呆）；
+  - `instrument` 命名继承 moneta `BASE_QUOTE`（O14），完整清单在
+    首次 pull 后从数据文件枚举确认（moneta 实数 21 个）；
+  - **`data_par_url` 必须是 prefix 级** PAR（不是 bucket 级），
+    防止把 push 目录（strategies/features）一并拉进本地 data/。
+- **clean 语义**（moneta `load_data.py` 等价；确定性是 I18 的前提）：
+  1. `COALESCE(is_complete, FALSE) = TRUE` 过滤；
+  2. 按 `(instrument, time)` 去重；重复行按**确定性存活行选择**取一行：
+     payload 非空列数降序 → 源文件名 → 原行序（moneta 原文规则；
+     防 `prices_*` backfill 与主 CSV 同键重叠）；
+  3. 落 bronze 1m Parquet。
+- **bronze schema（显式定义）**：bronze 1m Parquet 的列 = **输入
+  CSV 列的并集**：
+  - 必有：`instrument, time, volume, mid_o, mid_h, mid_l, mid_c`；
+  - 依源：`bid_*, ask_*`（moneta 数据源有则保留）；
+  - **不含 `is_complete`**（clean 已消费；bronze 内该行恒为 true，
+    无信息量）。
+  此 schema 是 0003 feature builder 的输入契约。
 - **输出契约**：
   - `data/raw_zips/`（原始归档，重放来源）、
-  - `data/raw_csv/`（扁平 CSV）、
+  - `data/raw_csv/`（扁平 CSV；**重跑前清顶层旧 CSV**（moneta 行为），
+    子目录不动）、
   - `data/all_data/all_data.parquet`（bronze 1m）、
-  - `data/ohlcv_5m/`、`data/ohlcv_1h/`（聚合，含 `n_bars`）。
+  - `data/ohlcv_5m/`、`data/ohlcv_1h/`（聚合，`time_bucket` UTC
+    边界，`n_bars` 如实标记部分 bar）。
   全部在 `~/.lyra/<workspace>/` 或 `--data-root` 指定处（B13），
   **永不进 git**（B1）。
 - **凭证边界**：PAR URL 只出现在 `config.yml`（gitignored）；
@@ -116,10 +149,11 @@ oci:
 
 | # | 不变量 | 来源 |
 |---|---|---|
-| I? | 同一 PAR 内容 + 同一代码版本 → 本地 Parquet 逐字节可复现（pull/clean/aggregate 全确定性，无随机、无时钟写入数据） | 本 feature 新增（R8 在数据层的具体化） |
-| I? | PAR URL 永不进入 git、日志、run 报告（脱敏为 host + path 前 2 段） | 0001 凭证边界延伸 |
-| I? | 对象下载幂等（size 一致即跳过），重跑不改变已有本地文件 | moneta 已验证机制 |
-| I? | 聚合只用 UTC 边界 + 窗口内已有 1m bar；`n_bars` 如实标记部分 bar | moneta `aggregate_ohlcv` |
+| I18 | **数据可复现**：同一 OCI 对象集合（md5 集合一致）+ 同一代码版本 → bronze / 5m / 1h Parquet 的**数据内容逐行一致**（值 + 行序）；不承诺 Parquet 文件字节一致（文件级字节随 arrow 版本可变，moneta 同样不承诺）。前提：clean 的过滤/去重/存活行选择全部确定性（§3.3 clean 语义），pull 按对象名排序处理（顺序无关） | 本 feature 新增（R8 在数据层的具体化） |
+| I19 | PAR URL 永不进入 git、日志、run 报告（脱敏为 host + path 前 2 段） | I12（凭证不进 git / 不进 run 报告）在数据层的延伸 |
+| I20 | 对象下载幂等：**md5 一致即跳过**（moneta list 已返回 md5）；md5 不可用时回退 size 判断；同键不同内容必须被重下 | moneta 机制 + 强化（I11 可重建性的下载侧保证） |
+| I21 | 聚合只用 `time_bucket` UTC 边界 + 窗口内已有 1m bar；`n_bars` 如实标记部分 bar；open/close 取窗口首/末 bar | moneta `aggregate_ohlcv`（本 feature 固化） |
+| I22 | 输入必须 1m 粒度 UTC；非 1m → 拒绝（防呆，I18 的前提） | 本 feature 新增 |
 | I1 | YAML 是唯一策略语言 | HLD §4（本 feature 不碰策略，天然满足） |
 
 ## 5. 测试
@@ -127,14 +161,19 @@ oci:
 | 测试 | 场景 |
 |---|---|
 | `test_oci_list_pagination` | 分页列表：多页 `nextStartWith` 取全、循环保护 |
-| `test_oci_download_idempotent` | 已存在且 size 一致 → 跳过、不发请求 |
+| `test_oci_download_idempotent_md5` | md5 一致 → 跳过、不发请求（I20） |
+| `test_oci_download_md5_mismatch` | 同 name 同 size 但 md5 不同 → 必须重下（I20 强化点） |
 | `test_oci_unsafe_name_rejected` | `../evil`、绝对路径、`a:/b` 对象名被拒；`EUR..USD.csv` 合法通过 |
-| `test_pull_zip_to_flat_csv` | 嵌套 zip → 扁平 CSV；冲突 `_N`；重跑清旧 |
-| `test_clean_schema_validation` | 缺列 / 类型错 → 明确报错；全绿 → bronze Parquet |
-| `test_aggregate_5m_1h_utc` | 跨 5m/1h 边界的开高低收正确；`n_bars` 标记部分 bar |
-| `test_aggregate_deterministic` | 同输入两次运行 Parquet 逐字节一致 |
+| `test_pull_zip_to_flat_csv` | 嵌套 zip → 扁平 CSV；冲突 `_N`；重跑清顶层旧 CSV、子目录不动 |
+| `test_clean_is_complete_filter` | `is_complete` falsy / 缺失 → 行被过滤（moneta 语义） |
+| `test_clean_dedup_deterministic` | 同 `(instrument,time)` 多源重叠 → 按"payload 非空列数 → 源文件名 → 行序"取唯一存活行；两次运行结果一致（I18） |
+| `test_clean_non_1m_rejected` | 5m 粒度输入 → 明确拒绝（I22 防呆） |
+| `test_aggregate_5m_1h_utc` | 跨 5m/1h 边界的开高低收正确；`n_bars` 标记部分 bar（I21） |
+| `test_aggregate_deterministic` | 同输入两次运行 Parquet **数据逐行一致**（I18，非文件字节） |
+| `test_clean_bronze_schema` | bronze 列 = 输入并集（必含 7 列）；`is_complete` 不带入 bronze（A2） |
+| `test_clean_recompute_overwrites` | 删 bronze 后重跑 `lyra pull`（raw 全幂等跳过）→ bronze 仍被重建（A1） |
 | `test_par_expiry_diagnostic` | 403/404 → 报错含 "PAR may have expired" 提示（O5） |
-| `test_par_url_redacted_in_logs` | 日志 / 异常消息中无完整 PAR URL |
+| `test_par_url_redacted_in_logs` | 日志 / 异常消息中无完整 PAR URL（I19） |
 
 ## 6. 回滚
 
@@ -158,3 +197,5 @@ oci:
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-11-06 | 0.1 | 初稿。定案：pull 用 PAR prefix URL（沿用 moneta 已验证机制）；O5 定案（PAR 用户侧管理 + 过期诊断 + 0009 doctor 体检）；yml 预留 pull/strategies/features 三个 PAR 位置（push 归 0007）。 |
+| 2026-11-06 | 0.2 | **自检 + 对抗性 review（批次3）修复**：① 输入契约改为 moneta 真实列契约（必需 `instrument,time,is_complete`；mid/bid/ask 可选；真实 15 列）；② clean 语义补齐 moneta `load_data.py` 三规则（is_complete 过滤 / (instrument,time) 去重 / 确定性存活行选择），防 `prices_*` backfill 与主 CSV 同键重叠；③ 可复现性不变量从"逐字节"修正为"**数据逐行一致**"（文件字节随 arrow 版本可变，moneta 同口径），并定义其前提（确定性 clean + pull 按名排序）；④ 下载幂等升级为 **md5 优先 / size 回退**（moneta list 已取 md5 却未用）；⑤ 新防呆 I22：非 1m 粒度输入拒绝；⑥ 明确 `data_par_url` 必须 prefix 级；⑦ CLI 澄清（clean/aggregate 是 pull 内部步骤的调试入口）；⑧ 不变量编号改 **I18–I22**（0.1 误用 I2–I6，与 hld §4 已占用编号冲突）；⑨ 测试清单 9→12（补 md5 不匹配重下、is_complete 过滤、去重确定性、非 1m 拒绝）。 |
+| 2026-11-06 | 0.3 | 批次3 红队两条真缺陷落地：**A1 派生缓存陈旧** → 定案只有 raw 层幂等，clean/aggregate 恒重算（否则 bronze 被删/损坏时静默丢数据）；**A2 bronze schema 未定义** → 显式定案 bronze 列 = 输入并集（必含 7 列，bid/ask 依源，**不含 `is_complete`**），作为 0003 输入契约；测试清单 12→14。A3–A5 记录为接受边界。 |

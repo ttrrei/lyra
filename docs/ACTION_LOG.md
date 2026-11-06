@@ -24,15 +24,15 @@
 
 | 项 | 值 |
 |---|---|
-| 更新于 | 2026-11-06（#40） |
+| 更新于 | 2026-11-06（#41） |
 | 构建顺序 | `docs/hld.md` §8（0001→0009，唯一事实来源） |
 | 已完成 | **0001**（repo + OCI split，文档定案）；首次 commit `c8f3851`（文档骨架 + LICENSE + pyproject + examples） |
-| 进行中 | **0002 决策文档已写**（`docs/decisions/0002-ohlcv-data-sync.md` 中英，状态=提案待审批）；**O5 已定案**（PAR 用户侧管理 + 过期诊断 + 0009 doctor）；`config_example.yml` 已预留 3 个 PAR 位置（data/strategies/features） |
-| 下一步 | **0002 代码**：用户审批决策文档 + 提供真实 `data_par_url` → 实现 `lyra/` 包（oci_client / pull / clean / aggregate / cli）+ 测试全绿 |
+| 进行中 | **0002 决策文档 v0.3**（中英）：经**自检 + 批次3 对抗性 review** 后定稿——moneta 真实契约核对（15 列 / is_complete 过滤 / 确定性去重）、不变量 **I18–I22**、bronze schema 显式化、raw 层唯一幂等 + clean/aggregate 恒重算、14 个测试场景；**O5 已定案**；`config_example.yml` 已预留 3 个 PAR 位置 |
+| 下一步 | **0002 代码**：用户审批 v0.3 → 实现 `lyra/` 包（oci_client / pull / clean / aggregate / cli）+ 14 个测试全绿（fixture 数据先行，OCI 端到端待真实 PAR） |
 | 代码状态 | 尚无源码；`lyra/` 包将在 0002 随代码创建 |
 | 代码交付顺序 | 0002 pull → 0003 feature builder → 0004 compiler → 0005 trade engine → 0006 metrics/runner（在 fixture 数据上）→ 0007 push/backup |
-| 未决问题 | **无**（open-questions O1–O5、O11–O15 现已全部关闭，O5 于 #40 关闭） |
-| 待用户输入 | ① 审批 0002 决策文档 ② 提供真实 `data_par_url`（OCI 端到端测试需要） |
+| 未决问题 | **无**（O1–O5、O11–O15 全部已关闭） |
+| 待用户输入 | ① 审批 0002 v0.3（重点：§3.3 契约 + §4 I18–I22 + §5 测试清单）② 真实 `data_par_url`（OCI 端到端测试时） |
 
 ## 图例
 
@@ -89,7 +89,8 @@
 | 37 | doc | 用户问"AGENTS.md 是否足以让新对话窗口快速了解背景与进度"——审查后确认**契约部分足够，但缺三样**：①当前进度（0001 完成 / 0002 是下一个 / 尚无代码）②**双语成对规则 + ACTION_LOG 中英必须同步更新**（新窗口最易漏的约定）③一句话核心循环 + hld §8 单一事实来源点名。已补 `## Where we are (read first)` + `## Documentation conventions (load-bearing)` 两节 | `AGENTS.md` |
 | 38 | doc(用户反馈) | 用户指出 #37 把"进度感"写死在 AGENTS.md 里**会过期、每次开新对话前都得手改**，不对。定案：**ACTION_LOG 的 `## 当前状态 / Current state` 块是进度的唯一事实来源**（全文唯一允许原地更新的区块，随每次日志追加同步刷新；日志本体仍 append-only）。AGENTS.md `## Where we are` 改为**只指路**（指状态块 + hld §8 + 核心循环），不再写任何会过期的进度事实；working style 的"动手前扫描"改为"先状态块、后最近 10 行" | `docs/ACTION_LOG.md`/`.en.md`（新增状态块 + 维护规则 #5）、`AGENTS.md` |
 | 39 | decision(用户) | 用户（防呆对抗性检查后）定案：**"刷状态块"从维护惯例升级为强制规则**——每次执行任何工作（文档/代码/配置/策略/review），必须在同一次改动里 ① 追加 ACTION_LOG 行 + ② 刷新文件头 `## 当前状态` 块；缺其一 = 改动不完整，不得收尾、不得 commit。落点：AGENTS.md **Non-negotiables 第 1 条**（一行版，新窗口最先读到）+ Working style（完整版含判定标准）+ 两份 ACTION_LOG 维护规则 #5（强制措辞）。动机：新对话开场要读大量文档，存在失焦风险，状态块是唯一免读全文即可定位"项目在哪"的入口 | `AGENTS.md`、`docs/ACTION_LOG.md`/`.en.md` 维护规则 #5 |
-| 40 | doc+decision | **0002 决策文档落地**（中英，状态=提案待审批）：① 扫 moneta `pipeline/extract_oci.py` + `aggregate_ohlcv.py` 摸清已验证机制（PAR prefix 列对象分页 / 对象流式下载 / size 幂等 / path-traversal 防护 / UTC 边界聚合 + `n_bars`）；② **定案 pull 用 PAR prefix URL**（沿用 moneta 机制，零 SDK 凭证；push 侧 signer 与否留 0007 再评估）；③ **O5 定案**：PAR 用户侧管理 + `lyra pull` 403/404 过期诊断 + 0009 doctor 体检；④ **用户要求的 PAR 预留**：`config_example.yml` `oci:` 段改为 3 个位置——`data_par_url`（0002 用）/ `strategies_par_url` + `features_par_url`（0007 用，本 feature 只占位不读取）；⑤ 定案新不变量：数据层可复现性（同 PAR+同代码 → 逐字节一致）、PAR URL 日志脱敏 | `docs/decisions/0002-ohlcv-data-sync.md`+`.en.md`（新建）、`config/config_example.yml`、`docs/open-questions.md`/`.en.md`（O5 关闭）、状态块 |
+| 40 | doc+decision | **0002 决策文档落地**（中英，状态=提案待审批）：① 扫 moneta `pipeline/extract_oci.py` + `aggregate_ohlcv.py` 摸清已验证机制（PAR prefix 列对象分页 / 对象流式下载 / size 幂等 / path-traversal 防护 / UTC 边界聚合 + `n_bars`）；② **定案 pull 用 PAR prefix URL**（沿用 moneta 机制，零 SDK 凭证；push 侧 signer 与否留 0007 再评估）；③ **O5 定案**：PAR 用户侧管理 + `lyra pull` 403/404 过期诊断 + 0009 doctor 体检；④ **用户要求的 PAR 预留**：`config_example.yml` `oci:` 段改为 3 个位置——`data_par_url`（0002 用）/ `strategies_par_url` + `features_par_url`（0007 用，本 feature 只占位不读取）；⑤ 定案新不变量：数据层可复现性（同 PAR+同代码 → 逐字节一致【#41 已修正为逐行一致】）、PAR URL 日志脱敏 | `docs/decisions/0002-ohlcv-data-sync.md`+`.en.md`（新建）、`config/config_example.yml`、`docs/open-questions.md`/`.en.md`（O5 关闭）、状态块 |
+| 41 | review+fix | **0002 自检 + 批次3 对抗性 review**（用户要求；专项打 0002，逐条核对 moneta 源码/真实数据）。**自检 7 处**：S1 输入契约与 moneta 真实列不符（实际必需 `instrument,time,is_complete`，mid/bid/ask 可选，真实 15 列）🔴；S2 clean 语义漏 moneta `load_data.py` 三规则（is_complete 过滤 / (instrument,time) 去重 / 确定性存活行选择）🔴；S3"逐字节可复现"与未定义去重规则自相矛盾 + Parquet 文件字节本就不稳 🔴；S4 size 幂等太弱（moneta list 已取 md5 却未用）；S5 CLI 歧义；S6 缺 prefix 级 PAR / 非 1m 拒绝两句；S7 config 真实值位置未写明。**另抓到 0.1 不变量编号 I2–I6 与 hld §4 已占用编号冲突** → 重编 **I18–I22**。**批次3 红队 5 项**：A1 派生缓存陈旧（bronze 被删/损坏时静默丢数据）→ **raw 层唯一幂等，clean/aggregate 恒重算**；A2 bronze schema 未定义 → **显式定案**（7 列必含 / bid/ask 依源 / 不含 is_complete，0003 输入契约）；A3–A5 记录为接受边界。测试清单 9→14 | `docs/decisions/0002*`（v0.2→v0.3）、`docs/reviews/对抗性review-2026-11-06-批次3.md`+`.en.md`（新建）、状态块 |
 
 ## 待办（截至 2026-11-05 收工）
 
