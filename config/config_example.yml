@@ -45,6 +45,14 @@ run:
   stop_loss:             0.02     # mandatory 2% adverse-price stop (R4)
 
 databackend:
-  memory_limit: "1GB"
-  threads: 2
-  # spills go to local.tmp
+  # DuckDB resource limits (0002 batch-7 D3 — applied via
+  # SET max_memory / threads / temp_directory on every pipeline connection;
+  # without these DuckDB takes 80% of host RAM by default and a low-RAM box
+  # running 48M rows would be OOM-killed).
+  # NOTE: the real moneta dataset (48.8M rows) needs a ~10 GB working set
+  # for aggregate (batch-6 A6). Keep memory_limit >= 16GB on the machine
+  # that runs `lyra pull` on the full dataset; lower it only if you run a
+  # smaller instrument subset.
+  memory_limit: "16GB"  # DuckDB ceiling before it spills to temp_directory
+  threads: 4            # parallel threads (omit to use DuckDB default)
+  tmp: "tmp"            # spill directory, relative to the data root

@@ -128,8 +128,31 @@ oci:
   - `time` is **UTC, 1m granularity**; **non-1m input → rejected with a
     clear error** (aggregation semantics depend on 1m bronze;
     foolproofing);
-  - `instrument` naming per moneta `BASE_QUOTE` (O14); the full list is
-    enumerated from the data files after the first pull (moneta has 21);
+  - `instrument` naming per moneta `BASE_QUOTE` (O14); **the full list
+    (O14 deliverable, verified on the batch-5/6 real data — 21
+    instruments)**:
+
+    | # | instrument | # | instrument |
+    |---|---|---|---|
+    | 1 | AUD_USD | 12 | NZD_USD |
+    | 2 | BCO_USD | 13 | SPX500_USD |
+    | 3 | BTC_USD | 14 | UK100_GBP |
+    | 4 | CN50_USD | 15 | US30_USD |
+    | 5 | DE30_EUR | 16 | USD_CAD |
+    | 6 | ETH_USD | 17 | USD_CHF |
+    | 7 | EUR_USD | 18 | USD_JPY |
+    | 8 | GBP_USD | 19 | WTICO_USD |
+    | 9 | HK33_HKD | 20 | XAG_USD |
+    | 10 | JP225_USD | 21 | XAU_USD |
+    | 11 | NAS100_USD | | |
+
+    **The authoritative source is the data itself**
+    (`SELECT DISTINCT instrument FROM bronze`, or
+    `Catalog.instruments()`); this table is a 2026-11-06 enumeration
+    snapshot of the real moneta data, provided for 0003's tests and
+    validation cards. The list is **extensible** (a new instrument appearing
+    in the data takes effect without code changes — the whole 0002 pipeline
+    generalizes on the `instrument` column and never hard-codes the list).
   - **`data_par_url` must be a prefix-level** PAR (not bucket-level), so
     push directories (strategies/features) are never pulled into local
     `data/`.
@@ -243,3 +266,4 @@ oci:
 | 2026-11-06 | 0.3 | Batch-3 red team's two real defects landed: **A1 stale derived cache** → settled: only the raw layer is idempotent; clean/aggregate always recompute (otherwise deleting/corrupting bronze silently loses data); **A2 bronze schema undefined** → settled explicitly: bronze columns = input union (7 always-present, bid/ask source-dependent, **no `is_complete`**), as the 0003 input contract; test list 12→14. A3–A5 recorded as accepted boundaries. |
 | 2026-11-06 | 0.4 | **After the real end-to-end run (moneta's real PAR, 12 GB / 48.8M rows): contract refinement + 4 fixture-untestable fixes** — ① **clean rewritten in DuckDB** (pure Python infeasible at 48M rows); ② **I22 criterion changed to "native resolution = 1m"** (per-instrument minimum gap ≈1m) with **market gaps legitimate** — the original "every-pair 1m" wrongly rejected 730k real gaps; ③ `time` confirmed as **TIMESTAMPTZ(UTC)** (inferred from source `Z`) + downstream reads need **pytz** (added to pyproject); ④ `read_parquet(?)` bind params wrapped in `str()`; ⑤ `COPY` gains `ORDER BY` for stable row order (I18). Tests 14→24 (added gapped-1m accepted, 5m-native rejected, COPY determinism, empty-table schema). |
 | 2026-11-06 | 0.5 | **Integrity audit + DuckDB efficient read/write / catalog (batch-6)** — ① **three-layer integrity verification all pass**: bronze/5m/1h footers readable with `num_rows` matching the success report + **full row-group decompression scan** (484/484 pages decode cleanly, rows scanned == footer) + raw 163/163 zips match the remote PAR per-object by **md5 AND size** → **confirms the earlier system interruptions left no truncation / page corruption / silent failure**; ② **read path unified on DuckDB external tables / VIEWS** — `_register_bronze` changed from `CREATE TABLE` (materialized the full 48M rows) to `CREATE VIEW` (streaming, A2); ③ **new `lyra/catalog.py`** — a persistent DuckDB catalog (`~/.lyra/default/data/catalog.duckdb`, outside the repo, pure schema metadata) with `bronze`/`ohlcv_5m`/`ohlcv_1h` VIEW named entry points, auto-built at the end of `lyra pull` and rebuildable via the `lyra catalog` CLI (A3); ④ **honest efficiency bound** — aggregate's grouping working set peaks ≈10 GB at 48M rows (inherent to DuckDB hash aggregation, not a bug, not streaming-removable); 0003 must plan memory around this (A6). Real-data regression: after the view change, re-running aggregate yields 5m/1h bars row-identical to batch-5 (I18 holds). Tests 24→30 (added 6 catalog tests, including the VIEW-not-TABLE assertion). |
+| 2026-11-06 | 0.6 | **Batch-7 external red-team: all 9 findings accepted and fixed** (0002 first full "second AI" review): ① **D1 (Major)** `_quote` regex rejected Windows paths → SQL single-quote escaping + control-char rejection (R8 portability); ② **D2 (Major)** `upsert_views` had no lock guard → `try/except` + `warnings.warn` ("best-effort" became code, not just a comment); ③ **D3 (Moderate)** `databackend.memory_limit`/`tmp` never reached DuckDB → new `DatabackendConfig` + `open_limited_duckdb()` (`SET max_memory`/`threads`/`temp_directory`), wired through the full pipeline; **same-round footgun fixed**: `config_example.yml` 1 GB example → 16 GB (real data needs ~10 GB working set; 1 GB would OOM); ④ **D4 (Moderate)** O1 doc gap → `open-questions` now records the ruling (0002 drops the directory-level snapshot_id; single-file external tables + raw md5 provenance); ⑤ **D5 (Moderate)** 21-instrument list never written down → §3.3 now carries the table + `Catalog.instruments()` interface (data is authoritative; list is extensible); ⑥ **D6 (Moderate)** `_validate_1m` opaque error → now names offending instruments + measured `min_gap_s`; **rejected** the "relax to multiples of 60s" suggestion (5m-native 300s is a multiple of 60s and would slip through); ⑦ **D7 (Minor)** empty-table naive timestamp → `pa.timestamp("us", tz="UTC")`; ⑧ **D8 (Minor)** catalog relative paths → `Path.resolve()`; ⑨ **D9 (Minor)** no zip-bomb guard → `MAX_EXTRACTED_MEMBER_BYTES` (8 GB; largest real member is 575 MB) + `ZipBombError`. **38 tests green** (+8 new), pyflakes clean. Batch-7 review doc (ZH+EN) gained the disposition table. |

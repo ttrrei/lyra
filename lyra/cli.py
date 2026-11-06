@@ -12,6 +12,7 @@ import typer
 from . import __version__, aggregate as agg, clean as clean_mod
 from .config import (
     ConfigError,
+    databackend_from_dict,
     load_config,
     local_from_dict,
     oci_from_dict,
@@ -30,8 +31,9 @@ def _load(
     data = load_config(config_path)
     oci = oci_from_dict(data)
     local = local_from_dict(data)
+    db = databackend_from_dict(data)
     root = resolve_data_root(local, data_root)
-    return oci, root
+    return oci, root, db
 
 
 @app.command()
@@ -41,11 +43,11 @@ def pull(
 ) -> None:
     """Download raw archives (PAR, idempotent) then clean + aggregate (always recompute)."""
     try:
-        oci, root = _load(config, data_root)
+        oci, root, db = _load(config, data_root)
     except ConfigError as exc:
         typer.secho(f"config error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
-    result = pipeline.run_pull(oci, root)
+    result = pipeline.run_pull(oci, root, db=db)
     typer.secho(f"raw zips : {len(result.raw_zips)}", fg=typer.colors.GREEN)
     typer.secho(f"raw csvs : {len(result.raw_csvs)}", fg=typer.colors.GREEN)
     typer.secho(f"bronze   : {result.bronze_rows} rows -> {result.bronze_path}", fg=typer.colors.GREEN)
@@ -61,13 +63,13 @@ def clean(
     """DEBUG: re-run the clean step over the existing raw_csv/ (writes bronze, overwrites)."""
     import duckdb as _duckdb
 
-    _, root = _load(config, data_root)
+    _, root, db = _load(config, data_root)
     csv_dir = root / "raw_csv"
     if not csv_dir.exists():
         typer.secho(f"no raw_csv/ at {csv_dir} — run `lyra pull` first", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
     out = root / "all_data" / "all_data.parquet"
-    clean_mod.clean_csv_to_bronze_parquet(csv_dir, out)
+    clean_mod.clean_csv_to_bronze_parquet(csv_dir, out, root, db)
     n = int(
         _duckdb.connect(":memory:")
         .execute("SELECT COUNT(*) FROM read_parquet(?)", [str(out)])
@@ -84,14 +86,14 @@ def aggregate(
     """DEBUG: re-run the aggregate step over the existing bronze (overwrites 5m/1h)."""
     import duckdb as _duckdb
 
-    _, root = _load(config, data_root)
+    _, root, db = _load(config, data_root)
     bronze = root / "all_data" / "all_data.parquet"
     if not bronze.exists():
         typer.secho(f"no bronze at {bronze} — run `lyra pull` first", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
     p5 = root / "ohlcv_5m" / "ohlcv_5m.parquet"
     p1 = root / "ohlcv_1h" / "ohlcv_1h.parquet"
-    agg.aggregate_bronze_to_parquet(bronze, p5, p1)
+    agg.aggregate_bronze_to_parquet(bronze, p5, p1, root, db)
     n5, n1 = (
         _duckdb.connect(":memory:")
         .execute(
@@ -112,7 +114,7 @@ def catalog(
     """Show (or refresh) the DuckDB catalog views that reference the Parquet layers."""
     from .catalog import Catalog, default_catalog_path
 
-    _, root = _load(config, data_root)
+    _, root, _db = _load(config, data_root)
     cat = Catalog(default_catalog_path(root))
     if refresh:
         from .catalog import upsert_views

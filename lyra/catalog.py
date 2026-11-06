@@ -58,8 +58,14 @@ class Catalog:
         Missing Parquet files are skipped (so a partial pipeline run still
         registers whatever is present). Returns the list of view names that
         were created.
+
+        D8 (batch-7): the data root is resolved to an **absolute** path before
+        any view is registered, so views stay valid no matter which directory
+        a later connection (0003, a notebook, a script) opens the catalog
+        from. D1: the file path is embedded as a SQL single-quoted literal
+        with the standard quote-doubling escape (control chars rejected).
         """
-        root = Path(data_root)
+        root = Path(data_root).resolve()
         created: list[str] = []
         con = duckdb.connect(str(self.path))
         try:
@@ -68,14 +74,15 @@ class Catalog:
                 if not parquet.exists():
                     continue
                 # Safe: the subpath is from a fixed whitelist; the file path
-                # is validated before embedding in SQL.
+                # is escaped before embedding in SQL.
                 if not _SAFE_SUBPATH.match(sub):
                     raise ValueError(f"unsafe catalog subpath: {sub!r}")
-                if not re.match(r"^[\w\s/.\-:~]+$", str(parquet)):
+                escaped = str(parquet).replace("'", "''")
+                if any(ord(ch) < 0x20 for ch in str(parquet)):
                     raise ValueError(f"unsafe catalog path: {parquet!r}")
                 con.execute(
                     f"CREATE OR REPLACE VIEW {view_name} AS "
-                    f"SELECT * FROM read_parquet('{parquet}')"
+                    f"SELECT * FROM read_parquet('{escaped}')"
                 )
                 created.append(view_name)
         finally:
@@ -100,6 +107,25 @@ class Catalog:
                 list(names),
             ).fetchall()
             return [{"schema": r[0], "view": r[1]} for r in rows]
+        finally:
+            con.close()
+
+
+    def instruments(self) -> list[str]:
+        """The distinct instruments present in bronze (D5, batch-7).
+
+        0002's O14 deliverable as a live query: the authoritative instrument
+        set is the data itself; this makes it a one-liner for 0003 and for
+        humans. Returns [] if the catalog or bronze view is absent.
+        """
+        if not self.path.exists():
+            return []
+        con = duckdb.connect(str(self.path), read_only=True)
+        try:
+            rows = con.execute(
+                "SELECT DISTINCT instrument FROM bronze ORDER BY instrument"
+            ).fetchall()
+            return [r[0] for r in rows]
         finally:
             con.close()
 

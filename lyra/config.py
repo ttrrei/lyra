@@ -38,6 +38,21 @@ class LocalConfig:
     tmp: str = "data/tmp"
 
 
+@dataclass(frozen=True)
+class DatabackendConfig:
+    """DuckDB resource limits (D3, batch-7).
+
+    ``memory_limit`` is applied as ``SET max_memory`` on every pipeline
+    connection and ``tmp`` (resolved under the data root) as
+    ``SET temp_directory``, so a low-RAM machine spills to disk instead of
+    being OOM-killed. ``threads`` is applied the same way (optional).
+    """
+
+    memory_limit: str = "16GB"
+    threads: int | None = None
+    tmp: str = "tmp"
+
+
 def load_config(config_path: str | Path) -> dict:
     """Parse a YAML config file into a dict (raises ``ConfigError`` on problems)."""
     path = Path(config_path)
@@ -79,6 +94,33 @@ def local_from_dict(data: dict) -> LocalConfig:
         runs=str(local.get("runs", "runs")),
         alpha=str(local.get("alpha", "alpha")),
         tmp=str(local.get("tmp", "data/tmp")),
+    )
+
+
+def databackend_from_dict(data: dict) -> DatabackendConfig:
+    """Parse the optional ``databackend`` section (D3, batch-7).
+
+    Absent/invalid sections fall back to sane defaults (DuckDB's own default
+    is 80% of host RAM — we keep that default memory_limit conservative by
+    NOT setting it when the user did not configure one… but we DO set it to
+    16GB as an explicit ceiling so a runaway query cannot eat 32GB+ on a
+    64GB box).
+    """
+    db = data.get("databackend")
+    if db is None:
+        return DatabackendConfig()
+    if not isinstance(db, dict):
+        raise ConfigError("'databackend' must be a mapping")
+    threads = db.get("threads")
+    if threads is not None:
+        try:
+            threads = int(threads)
+        except (TypeError, ValueError):
+            raise ConfigError(f"databackend.threads must be an integer: {threads!r}")
+    return DatabackendConfig(
+        memory_limit=str(db.get("memory_limit", "16GB")),
+        threads=threads,
+        tmp=str(db.get("tmp", "tmp")),
     )
 
 

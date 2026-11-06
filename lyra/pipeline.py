@@ -49,13 +49,14 @@ def _write_parquet(rows: list[dict], path: Path, columns: tuple[str, ...] | None
     cols = list(columns) if columns else (list(rows[0].keys()) if rows else ["instrument", "time"])
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
-        # Empty input: same typed schema as the non-empty path.
+        # D7 (batch-7): empty path uses the SAME ``timestamp[us, tz=UTC]`` as
+        # the non-empty DuckDB path (TIMESTAMPTZ, I18 schema stability).
         _NUMERIC = {"volume", "mid_o", "mid_h", "mid_l", "mid_c", "bid_o", "bid_h",
                     "bid_l", "bid_c", "ask_o", "ask_h", "ask_l", "ask_c", "n_bars"}
         fields = [
             pa.field(
                 c,
-                pa.timestamp("us") if c == "time" else (pa.float64() if c in _NUMERIC else pa.string()),
+                pa.timestamp("us", tz="UTC") if c == "time" else (pa.float64() if c in _NUMERIC else pa.string()),
             )
             for c in cols
         ]
@@ -99,6 +100,7 @@ def run_pull(
     oci: OciConfig,
     data_root: str | Path,
     transport: oci_client.Transport | None = None,
+    db=None,
 ) -> PullResult:
     """Execute the full ``lyra pull`` pipeline into *data_root*."""
     data_root = Path(data_root)
@@ -118,22 +120,20 @@ def run_pull(
 
     # 3) clean — ALWAYS recompute (A1). Deterministic (I18).
     #    Streamed via DuckDB COPY (no full in-memory materialization) so real
-    #    12 GB / 48M-row data fits comfortably.
-    bronze_out = clean_mod.clean_csv_to_bronze_parquet(csv_dir, bronze_path)
+    #    12 GB / 48M-row data fits comfortably. Resource-bounded (D3).
+    bronze_out = clean_mod.clean_csv_to_bronze_parquet(csv_dir, bronze_path, data_root, db)
 
     # 4) aggregate — ALWAYS recompute (A1). I21/I22 enforced inside.
     #    Streams straight to Parquet (COPY) — no multi-GB row materialization.
-    import duckdb as _duckdb
-
     n_bronze = int(
-        _duckdb.connect(":memory:").execute(
+        clean_mod.open_limited_duckdb(db, data_root).execute(
             "SELECT COUNT(*) FROM read_parquet(?)", [str(bronze_out)]
         ).fetchone()[0]
     )
     if n_bronze:
-        paths = agg.aggregate_bronze_to_parquet(bronze_out, p5, p1)
+        paths = agg.aggregate_bronze_to_parquet(bronze_out, p5, p1, data_root, db)
         p5, p1 = paths["ohlcv_5m"], paths["ohlcv_1h"]
-        counts = _duckdb.connect(":memory:").execute(
+        counts = clean_mod.open_limited_duckdb(db, data_root).execute(
             "SELECT (SELECT COUNT(*) FROM read_parquet(?)), (SELECT COUNT(*) FROM read_parquet(?))",
             [str(p5), str(p1)],
         ).fetchone()
@@ -146,9 +146,21 @@ def run_pull(
 
     # 5) register the DuckDB catalog (metadata layer over the Parquet files)
     #    so 0003+ query stable named views instead of re-opening globs.
-    #    Best-effort: a catalog failure must not fail the data pipeline.
+    #    D2 (batch-7): the "best-effort" promise MUST be enforced — if the
+    #    catalog file is locked by another process (DuckDB's exclusive file
+    #    lock) or otherwise unavailable, warn and continue: the data layers
+    #    are already on disk and the catalog is rebuildable.
+    import warnings
+
     from .catalog import upsert_views
-    upsert_views(data_root)
+    try:
+        upsert_views(data_root)
+    except Exception as exc:  # noqa: BLE001 - deliberate best-effort boundary
+        warnings.warn(
+            f"catalog registration failed (data pipeline succeeded): {exc}; "
+            f"rebuild later with `lyra catalog --refresh`",
+            stacklevel=2,
+        )
 
     return PullResult(
         raw_zips=raw_zips,

@@ -117,8 +117,27 @@ oci:
     mid_c, bid_*, ask_*`（真实 CSV 共 15 列）；
   - `time` 为 **UTC、1m 粒度**；**非 1m 粒度输入 → 拒绝并报错**
     （聚合语义依赖 1m bronze，防呆）；
-  - `instrument` 命名继承 moneta `BASE_QUOTE`（O14），完整清单在
-    首次 pull 后从数据文件枚举确认（moneta 实数 21 个）；
+  - `instrument` 命名继承 moneta `BASE_QUOTE`（O14）；**完整清单（O14
+    交付物，批次5/6 真实数据已验证，共 21 个）**：
+
+    | # | instrument | # | instrument |
+    |---|---|---|---|
+    | 1 | AUD_USD | 12 | NZD_USD |
+    | 2 | BCO_USD | 13 | SPX500_USD |
+    | 3 | BTC_USD | 14 | UK100_GBP |
+    | 4 | CN50_USD | 15 | US30_USD |
+    | 5 | DE30_EUR | 16 | USD_CAD |
+    | 6 | ETH_USD | 17 | USD_CHF |
+    | 7 | EUR_USD | 18 | USD_JPY |
+    | 8 | GBP_USD | 19 | WTICO_USD |
+    | 9 | HK33_HKD | 20 | XAG_USD |
+    | 10 | JP225_USD | 21 | XAU_USD |
+    | 11 | NAS100_USD | | |
+
+    **权威来源是数据本身**（`SELECT DISTINCT instrument FROM bronze`，或
+    `Catalog.instruments()`）；此表是 2026-11-06 真实 moneta 数据的枚举
+    快照，供 0003 编写测试与验证卡片时引用。清单可扩展（新标的进数据即
+    生效，无需改代码——0002 全链路按 `instrument` 列泛化，不硬编码清单）。
   - **`data_par_url` 必须是 prefix 级** PAR（不是 bucket 级），
     防止把 push 目录（strategies/features）一并拉进本地 data/。
 - **clean 语义**（moneta `load_data.py` 等价；确定性是 I18 的前提）：
@@ -221,3 +240,4 @@ oci:
 | 2026-11-06 | 0.3 | 批次3 红队两条真缺陷落地：**A1 派生缓存陈旧** → 定案只有 raw 层幂等，clean/aggregate 恒重算（否则 bronze 被删/损坏时静默丢数据）；**A2 bronze schema 未定义** → 显式定案 bronze 列 = 输入并集（必含 7 列，bid/ask 依源，**不含 `is_complete`**），作为 0003 输入契约；测试清单 12→14。A3–A5 记录为接受边界。 |
 | 2026-11-06 | 0.4 | **真实数据端到端（moneta 真实 PAR，12 GB / 4884 万行）后精确化契约 + 修 4 个 fixture 测不到的偏差**：① **clean 重写为 DuckDB**（纯 Python 在 48M 行不可行）；② **I22 判据改为"原生分辨率 = 1m"**（每标的最小间隔 ≈1m），**市场缺口合法**——原"逐对 1m"误拒 73 万处真实缺口；③ `time` 确认为 **TIMESTAMPTZ(UTC)**（源 `Z` 推断）+ 下游读需 **pytz**（补进 pyproject）；④ `read_parquet(?)` 绑定参数统一 `str()`；⑤ `COPY` 加 `ORDER BY` 稳定行序（I18）。测试 14→24（补 gapped-1m 接受、5m 原生分辨率拒绝、COPY 确定性、空表 schema）。 |
 | 2026-11-06 | 0.5 | **完整性审计 + DuckDB 高效读写 / catalog（批次6）**：① **完整性三层验证全过**——bronze/5m/1h footer 可读且 `num_rows` 与成功报告一致 + **全 row-group 解压扫描**（484/484 page 解码成功、扫到行数 == footer）+ raw 163/163 zip 与远端 PAR 逐对象 **md5+size** 全等 → **确认前面的系统中断无截断 / page 损坏 / 静默失败**；② **读路径统一为 DuckDB 外部表 / VIEW**——`_register_bronze` 由 `CREATE TABLE`（物化全表 48M 行）改为 `CREATE VIEW`（流式，A2）；③ **新增 `lyra/catalog.py`**——持久化 DuckDB catalog（`~/.lyra/default/data/catalog.duckdb`，仓库外，纯 schema 元数据），`bronze/ohlcv_5m/ohlcv_1h` 三 VIEW 命名入口，`lyra pull` 末步自动建、`lyra catalog` CLI 可重建（A3）；④ **诚实标注效率上界**——aggregate 分组工作集在 48M 行下实测峰值 ≈10 GB（DuckDB 哈希聚合固有形态，非 bug，非流式可消除），0003 设计大 feature 面时须据此规划（A6）。真实数据回归：视图改造后重跑 aggregate，5m/1h bars 与批次5 逐行一致（I18 成立）。测试 24→30（新增 catalog 6 个，含 VIEW 非 TABLE 断言）。 |
+| 2026-11-06 | 0.6 | **批次7 外部红队 9 项全接受并修复**（0002 首次"第二个 AI"全面审查）：① **D1（Major）**`_quote` 正则阻断 Windows 路径 → 改 SQL 单引号转义 + 控制字符拒绝（R8 可移植性）；② **D2（Major）** `upsert_views` 无锁保护 → `try/except` + `warnings.warn`（"Best-effort"从注释变成代码）；③ **D3（Moderate）** `databackend.memory_limit`/`tmp` 未传入 DuckDB → 新增 `DatabackendConfig` + `open_limited_duckdb()`（`SET max_memory`/`threads`/`temp_directory`），全链路接入；**同轮修脚枪**：`config_example.yml` 的 1GB 示例改 16GB（真实数据需 ~10GB 工作集，1GB 会 OOM）；④ **D4（Moderate）** O1 文档断层 → `open-questions` 补裁决（0002 废弃目录级 snapshot_id，单文件外部表 + raw md5 溯源）；⑤ **D5（Moderate）** 21 标的清单未落盘 → §3.3 补清单表 + `Catalog.instruments()` 接口（权威来源是数据本身，清单可扩展）；⑥ **D6（Moderate）** `_validate_1m` 报错无明细 → 改返回违规标的 + 实测 min_gap_s；**拒绝"放宽到 60s 倍数"建议**（5m 原生 300s 恰是倍数会误放）；⑦ **D7（Minor）** 空表 naive timestamp → 统一 `pa.timestamp("us", tz="UTC")`；⑧ **D8（Minor）** catalog 相对路径 → `Path.resolve()`；⑨ **D9（Minor）** 无解压炸弹防御 → `MAX_EXTRACTED_MEMBER_BYTES`（8GB，真实最大 575MB）+ `ZipBombError`。**38 测试全绿**（新增 8 个），pyflakes 干净。批次7 review 文档（中英双份）补处置表 |

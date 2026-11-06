@@ -14,11 +14,12 @@ approach, re-implemented independently) so it scales to real data:
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
 import duckdb
+
+from . import clean as _clean_mod
 
 INTERVALS: tuple[tuple[str, str], ...] = (
     ("ohlcv_5m", "5 minutes"),
@@ -34,9 +35,16 @@ class GranularityError(ValueError):
 
 
 def _quote(path: Path) -> str:
-    if not re.match(r"^[\w\s/.\-]+$", str(path)):
+    """SQL single-quoted string literal (D1, batch-7: Windows-safe + escaped).
+
+    Accepts Windows drive letters / backslashes / spaces (R8 portability);
+    injection is prevented by the standard SQL escape — doubling ``'`` to
+    ``''`` — with control characters rejected outright.
+    """
+    s = str(path)
+    if any(ord(ch) < 0x20 for ch in s) or "\x7f" in s:
         raise ValueError(f"unsafe path for aggregate: {path!r}")
-    return str(path)
+    return "'" + s.replace("'", "''") + "'"
 
 
 def _validate_1m(connection: duckdb.DuckDBPyConnection) -> None:
@@ -49,7 +57,7 @@ def _validate_1m(connection: duckdb.DuckDBPyConnection) -> None:
     no coarser. This accepts real gapped 1m data and rejects 5m/1h (or
     sub-1m) input, which would make the 5m/1h buckets meaningless.
     """
-    row = connection.execute(
+    rows = connection.execute(
         """
         WITH g AS (
             SELECT instrument,
@@ -57,15 +65,25 @@ def _validate_1m(connection: duckdb.DuckDBPyConnection) -> None:
             FROM bronze
         ),
         mins AS (
-            SELECT MIN(gap_s) AS min_gap_s FROM g WHERE gap_s IS NOT NULL GROUP BY instrument
+            SELECT instrument, MIN(gap_s) AS min_gap_s
+            FROM g WHERE gap_s IS NOT NULL GROUP BY instrument
         )
-        SELECT COUNT(*) FROM mins WHERE min_gap_s < 59 OR min_gap_s > 61
+        SELECT instrument, min_gap_s FROM mins
+        WHERE min_gap_s < 59 OR min_gap_s > 61
+        ORDER BY instrument
         """
-    ).fetchone()
-    if row and row[0]:
+    ).fetchall()
+    if rows:
+        # D6 (batch-7): the error must name the offending instrument(s) with
+        # their measured finest gap — not just a count — so the user can act.
+        detail = "; ".join(
+            f"{instr}: finest gap = {gap:.1f}s" for instr, gap in rows[:10]
+        )
+        more = f" (+{len(rows) - 10} more)" if len(rows) > 10 else ""
         raise GranularityError(
-            f"I22 violation: {row[0]} instrument(s) are not 1-minute resolution "
-            f"(their finest inter-bar gap is not ≈1m). Lyra aggregates from 1m bronze only."
+            f"I22 violation: {len(rows)} instrument(s) are not 1-minute resolution "
+            f"(finest inter-bar gap not ≈1m). Offenders: {detail}{more}. "
+            f"Lyra aggregates from 1m bronze only."
         )
 
 
@@ -99,7 +117,7 @@ def _register_bronze(connection: duckdb.DuckDBPyConnection, path: Path) -> None:
     connection.execute(
         "CREATE OR REPLACE VIEW bronze AS "
         f"SELECT instrument, time, volume, mid_o, mid_h, mid_l, mid_c "
-        f"FROM read_parquet('{_quote(path)}')"
+        f"FROM read_parquet({_quote(path)})"
     )
     cols = {r[0] for r in connection.execute("DESCRIBE bronze").fetchall()}
     missing = [c for c in REQUIRED if c not in cols]
@@ -111,6 +129,8 @@ def aggregate_bronze_to_parquet(
     bronze_parquet: str | Path,
     out_5m: str | Path,
     out_1h: str | Path,
+    data_root: str | Path | None = None,
+    db=None,
 ) -> dict[str, Path]:
     """A1: ALWAYS recompute and overwrite (deterministic ⇒ safe, I18/I21).
 
@@ -124,7 +144,7 @@ def aggregate_bronze_to_parquet(
     p1 = Path(out_1h)
     p5.parent.mkdir(parents=True, exist_ok=True)
     p1.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(":memory:")
+    con = _clean_mod.open_limited_duckdb(db, data_root)
     try:
         _register_bronze(con, bronze)
         _validate_1m(con)
@@ -137,19 +157,19 @@ def aggregate_bronze_to_parquet(
                 "ORDER BY instrument, time"
             )
             con.execute(
-                f"COPY ({sql}) TO '{_quote(path)}' (FORMAT PARQUET)"
+                f"COPY ({sql}) TO {_quote(path)} (FORMAT PARQUET)"
             )
     finally:
         con.close()
     return {"ohlcv_5m": p5, "ohlcv_1h": p1}
 
 
-def aggregate_bronze(bronze_parquet: str | Path) -> dict[str, list[dict[str, Any]]]:
+def aggregate_bronze(bronze_parquet: str | Path, data_root: str | Path | None = None, db=None) -> dict[str, list[dict[str, Any]]]:
     """Aggregate one bronze 1m Parquet to in-memory rows (small-data / tests)."""
     bronze = Path(bronze_parquet)
     if not bronze.exists():
         raise FileNotFoundError(bronze)
-    con = duckdb.connect(":memory:")
+    con = _clean_mod.open_limited_duckdb(db, data_root)
     try:
         _register_bronze(con, bronze)
         _validate_1m(con)

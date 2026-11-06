@@ -10,7 +10,7 @@
 
 | # | Question | Lean | Status |
 |---|---|---|---|
-| O1 | snapshot_id: integer or timestamp? | integer | awaiting `0002` decision |
+| O1 | snapshot_id: integer or timestamp? | **settled (0002 v0.5)**: 0002 **drops the directory-level snapshot_id** in favor of **single-file external tables** (`all_data.parquet` / `ohlcv_5m.parquet` / `ohlcv_1h.parquet`) + a DuckDB catalog of named views; data provenance is the **raw-layer OCI object md5** set (I20). The integer-vs-timestamp question is **closed by the mechanism being dropped** (batch-7 D4: ACTION_LOG had claimed O1 closed while this file still said "awaiting 0002" — a doc gap now fixed) | **closed** (`0002` v0.5 + batch-7 D4) |
 | O2 | `runs/` grouped by strategy_id or by date? | strategy_id | awaiting `0007` decision |
 | O3 | alpha features sub-grouped by family? | no (filename = registered name) | awaiting `0003` decision |
 | O4 | `index/*.json` mirrored into git as read-only? | no (0001 I15: all of `runs/` + alpha paths never in git; index is derived, rebuildable) | **closed** (0001) |
@@ -59,3 +59,4 @@
 | 2026-11-06 | 0.2 | O4 closed (0001 I15 already bounds index out of git); added **O11-O15**: cross-generation generation-number formula, naming collision, Active Branch Cap, 21-instrument code list, financing day definition (all from the batch-2 adversarial review; pending user decision or later-feature closure). |
 | 2026-11-06 | 0.3 | User decisions: **O11** closed (max+1), **O12** closed (`_1`/`_2` suffix), **O13** closed (**Active Branch Cap = 8**), **O14** closed (inherit moneta BASE_QUOTE format; full list enumerated in 0002), **O15** closed (trading days, weekends+holidays excluded); **O11-O15 all closed**. |
 | 2026-11-06 | 0.4 | **O5 closed** (settled in `0002` §2: user-managed PARs + `lyra pull` expiry diagnostic + 0009 doctor health check). **O1–O5 and O11–O15 are now all closed; no open questions remain.** |
+| 2026-11-06 | 0.5 | **O1 formally closed here** (batch-7 D4): 0002 v0.5 already dropped the directory-level snapshot_id (single-file external tables + raw md5 provenance), but this file still read "awaiting 0002", contradicting ACTION_LOG's "O1 closed" — the ruling is now recorded here, closing the gap. O2/O3 still await 0007 / 0003 respectively. |

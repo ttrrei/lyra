@@ -14,6 +14,17 @@ import zipfile
 from pathlib import Path
 from typing import Iterator
 
+# D9 (batch-7): refuse to extract a single member whose DECLARED size
+# exceeds this. Real moneta members max out at ~575 MB (BTC_USD), so 8 GB
+# leaves a 14x margin while still catching corruption or adversarial zips.
+# The declared (compressed) size of a real member is always < its extracted
+# size, so legitimate data can never hit this ceiling.
+MAX_EXTRACTED_MEMBER_BYTES = 8 * 1024 * 1024 * 1024
+
+
+class ZipBombError(ValueError):
+    """A zip member declares an extracted size beyond the safety ceiling."""
+
 
 def iter_zip_csvs(zips_dir: Path):
     """Yield ``(zip_path, zipinfo)`` for every CSV member of every zip.
@@ -78,6 +89,16 @@ def extract_zips_to_csv(
                 continue  # corrupt archive — skip, don't abort
             preferred = Path(info.filename).name
             dest = unique_target(target_dir, preferred)
+            # D9 (batch-7): refuse to expand a member whose declared extracted
+            # size exceeds the ceiling — a corrupt or adversarial zip that
+            # claims tens of GB would otherwise write the disk full before
+            # the CRC check could fire (CRCs only verify after full read).
+            if info.file_size > MAX_EXTRACTED_MEMBER_BYTES:
+                raise ZipBombError(
+                    f"{zip_path.name}:{info.filename} declares {info.file_size / 1e9:.1f} GB "
+                    f"extracted size (> {MAX_EXTRACTED_MEMBER_BYTES / 1e9:.0f} GB ceiling); "
+                    f"refusing to extract"
+                )
             with archive.open(info) as src, dest.open("wb") as out:
                 while True:
                     chunk = src.read(64 * 1024)

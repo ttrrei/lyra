@@ -40,13 +40,45 @@ class CleanInputError(ValueError):
     """A flat CSV is missing a required input column (0002 §3.3)."""
 
 
+def open_limited_duckdb(
+    db=None,
+    data_root: str | Path | None = None,
+):
+    """Open an in-memory DuckDB with the resource limits from config (D3).
+
+    Applies ``SET max_memory`` / ``SET threads`` (when provided) and
+    ``SET temp_directory`` (``<data_root>/<databackend.tmp>``, created on
+    demand) so a low-RAM machine spills to disk instead of being OOM-killed.
+    Shared by clean and aggregate so every pipeline connection is bounded.
+    """
+    import duckdb
+
+    con = duckdb.connect(":memory:")
+    if db is not None:
+        if db.memory_limit:
+            con.execute(f"SET max_memory = '{db.memory_limit}'")
+        if db.threads is not None:
+            con.execute(f"SET threads = {int(db.threads)}")
+    if data_root is not None:
+        tmp_dir = Path(data_root) / (db.tmp if db is not None else "tmp")
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_str = str(tmp_dir).replace("'", "''")
+        con.execute(f"SET temp_directory = '{tmp_str}'")
+    return con
+
+
 def _quote(path: Path) -> str:
+    """SQL single-quoted string literal for a path/glob (D1/D7, batch-7).
+
+    Windows-safe (accepts drive letters, backslashes, spaces — R8
+    portability) and injection-safe: the only escape is the standard SQL
+    rule of doubling a single quote (``'`` → ``''``); control characters
+    are rejected outright so no quote can be smuggled in another way.
+    """
     s = str(path)
-    # Allow glob characters (the read_csv glob) but reject anything that
-    # could break out of the SQL string literal or traverse upward.
-    if not re.match(r"^[\w\s/.\-*]+$", s) or s.startswith("-"):
+    if any(ord(ch) < 0x20 for ch in s) or "\x7f" in s:
         raise CleanInputError(f"unsafe path for clean: {path!r}")
-    return s
+    return "'" + s.replace("'", "''") + "'"
 
 
 def _clean_sql(csv_dir: Path, payload_present: set[str]) -> str:
@@ -56,7 +88,7 @@ def _clean_sql(csv_dir: Path, payload_present: set[str]) -> str:
     return f"""
         WITH raw AS (
             SELECT *, filename AS _source_file
-            FROM read_csv('{_quote(csv_dir / "*.csv")}',
+            FROM read_csv({_quote(csv_dir / "*.csv")},
                           header = TRUE, auto_detect = TRUE,
                           union_by_name = TRUE, filename = TRUE)
         ),
@@ -79,19 +111,21 @@ def _clean_sql(csv_dir: Path, payload_present: set[str]) -> str:
     """
 
 
-def clean_csv_to_bronze(csv_dir: str | Path) -> list[dict[str, Any]]:
+def clean_csv_to_bronze(
+    csv_dir: str | Path,
+    data_root: str | Path | None = None,
+    db=None,
+) -> list[dict[str, Any]]:
     """Apply the three clean rules and return bronze rows (list of dicts).
 
     A1: this ALWAYS recomputes — it never inspects an existing output.
     Raises ``CleanInputError`` if any CSV lacks a required input column.
     """
-    import duckdb
-
     csv_dir = Path(csv_dir)
     if not csv_dir.exists() or not list(csv_dir.glob("*.csv")):
         return []
 
-    con = duckdb.connect(":memory:")
+    con = open_limited_duckdb(db, data_root)
     try:
         # Probe the first CSV for the required input contract (moneta's
         # approach: a glob-level sniff is unreliable).
@@ -128,33 +162,37 @@ def clean_csv_to_bronze(csv_dir: str | Path) -> list[dict[str, Any]]:
         con.close()
 
 
-def clean_csv_to_bronze_parquet(csv_dir: str | Path, out_path: str | Path) -> Path:
+def clean_csv_to_bronze_parquet(
+    csv_dir: str | Path,
+    out_path: str | Path,
+    data_root: str | Path | None = None,
+    db=None,
+) -> Path:
     """A1: ALWAYS recompute and overwrite the bronze Parquet.
 
     Streamed via DuckDB ``COPY`` (no full in-memory row materialization).
     Returns the output path.
     """
-    import duckdb
-
     csv_dir = Path(csv_dir)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not csv_dir.exists() or not list(csv_dir.glob("*.csv")):
-        # Deterministic empty bronze with the always-present typed schema.
+        # D7 (batch-7): the empty path MUST use the same ``timestamp[us, tz=UTC]``
+        # as the non-empty DuckDB path (TIMESTAMPTZ, I18 schema stability).
         import pyarrow as pa
         import pyarrow.parquet as pq
 
         fields = [
             pa.field(
                 c,
-                pa.timestamp("us") if c == "time" else (pa.float64() if c != "instrument" else pa.string()),
+                pa.timestamp("us", tz="UTC") if c == "time" else (pa.float64() if c != "instrument" else pa.string()),
             )
             for c in ALWAYS_PRESENT
         ]
         pq.write_table(pa.table({f.name: pa.array([], type=f.type) for f in fields}), str(out_path))
         return out_path
 
-    con = duckdb.connect(":memory:")
+    con = open_limited_duckdb(db, data_root)
     try:
         first = sorted(csv_dir.glob("*.csv"))[0]
         cols = {
@@ -178,7 +216,7 @@ def clean_csv_to_bronze_parquet(csv_dir: str | Path, out_path: str | Path) -> Pa
             if c not in out_cols:
                 out_cols.append(c)
         select = ", ".join(out_cols)
-        con.execute(f"COPY (SELECT {select} FROM ({inner}) t) TO '{_quote(out_path)}' (FORMAT PARQUET)")
+        con.execute(f"COPY (SELECT {select} FROM ({inner}) t) TO {_quote(out_path)} (FORMAT PARQUET)")
     finally:
         con.close()
     return out_path
