@@ -26,6 +26,9 @@ by 0007; 0002 only reserves, never uses them).
 
 ## 2. Background
 
+> The full three-generation story (moneta → nova → lyra) lives in
+> `docs/background.en.md`; this section only cites moneta's data pipeline.
+
 - **How moneta does it** (`pipeline/extract_oci.py`, production-proven):
   1. reads `oci.par_url` from `config/setting.yml` (a **PAR prefix URL**);
   2. lists objects with

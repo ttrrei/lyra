@@ -24,7 +24,7 @@
 
 | 项 | 值 |
 |---|---|
-| 更新于 | 2026-11-06（#41） |
+| 更新于 | 2026-11-06（#42） |
 | 构建顺序 | `docs/hld.md` §8（0001→0009，唯一事实来源） |
 | 已完成 | **0001**（repo + OCI split，文档定案）；首次 commit `c8f3851`（文档骨架 + LICENSE + pyproject + examples） |
 | 进行中 | **0002 决策文档 v0.3**（中英）：经**自检 + 批次3 对抗性 review** 后定稿——moneta 真实契约核对（15 列 / is_complete 过滤 / 确定性去重）、不变量 **I18–I22**、bronze schema 显式化、raw 层唯一幂等 + clean/aggregate 恒重算、14 个测试场景；**O5 已定案**；`config_example.yml` 已预留 3 个 PAR 位置 |
@@ -91,6 +91,7 @@
 | 39 | decision(用户) | 用户（防呆对抗性检查后）定案：**"刷状态块"从维护惯例升级为强制规则**——每次执行任何工作（文档/代码/配置/策略/review），必须在同一次改动里 ① 追加 ACTION_LOG 行 + ② 刷新文件头 `## 当前状态` 块；缺其一 = 改动不完整，不得收尾、不得 commit。落点：AGENTS.md **Non-negotiables 第 1 条**（一行版，新窗口最先读到）+ Working style（完整版含判定标准）+ 两份 ACTION_LOG 维护规则 #5（强制措辞）。动机：新对话开场要读大量文档，存在失焦风险，状态块是唯一免读全文即可定位"项目在哪"的入口 | `AGENTS.md`、`docs/ACTION_LOG.md`/`.en.md` 维护规则 #5 |
 | 40 | doc+decision | **0002 决策文档落地**（中英，状态=提案待审批）：① 扫 moneta `pipeline/extract_oci.py` + `aggregate_ohlcv.py` 摸清已验证机制（PAR prefix 列对象分页 / 对象流式下载 / size 幂等 / path-traversal 防护 / UTC 边界聚合 + `n_bars`）；② **定案 pull 用 PAR prefix URL**（沿用 moneta 机制，零 SDK 凭证；push 侧 signer 与否留 0007 再评估）；③ **O5 定案**：PAR 用户侧管理 + `lyra pull` 403/404 过期诊断 + 0009 doctor 体检；④ **用户要求的 PAR 预留**：`config_example.yml` `oci:` 段改为 3 个位置——`data_par_url`（0002 用）/ `strategies_par_url` + `features_par_url`（0007 用，本 feature 只占位不读取）；⑤ 定案新不变量：数据层可复现性（同 PAR+同代码 → 逐字节一致【#41 已修正为逐行一致】）、PAR URL 日志脱敏 | `docs/decisions/0002-ohlcv-data-sync.md`+`.en.md`（新建）、`config/config_example.yml`、`docs/open-questions.md`/`.en.md`（O5 关闭）、状态块 |
 | 41 | review+fix | **0002 自检 + 批次3 对抗性 review**（用户要求；专项打 0002，逐条核对 moneta 源码/真实数据）。**自检 7 处**：S1 输入契约与 moneta 真实列不符（实际必需 `instrument,time,is_complete`，mid/bid/ask 可选，真实 15 列）🔴；S2 clean 语义漏 moneta `load_data.py` 三规则（is_complete 过滤 / (instrument,time) 去重 / 确定性存活行选择）🔴；S3"逐字节可复现"与未定义去重规则自相矛盾 + Parquet 文件字节本就不稳 🔴；S4 size 幂等太弱（moneta list 已取 md5 却未用）；S5 CLI 歧义；S6 缺 prefix 级 PAR / 非 1m 拒绝两句；S7 config 真实值位置未写明。**另抓到 0.1 不变量编号 I2–I6 与 hld §4 已占用编号冲突** → 重编 **I18–I22**。**批次3 红队 5 项**：A1 派生缓存陈旧（bronze 被删/损坏时静默丢数据）→ **raw 层唯一幂等，clean/aggregate 恒重算**；A2 bronze schema 未定义 → **显式定案**（7 列必含 / bid/ask 依源 / 不含 is_complete，0003 输入契约）；A3–A5 记录为接受边界。测试清单 9→14 | `docs/decisions/0002*`（v0.2→v0.3）、`docs/reviews/对抗性review-2026-11-06-批次3.md`+`.en.md`（新建）、状态块 |
+| 42 | doc(用户问) | 用户问"0002/0001 等文档提到的 moneta、nova 是前代仓库，入口文档是否说明了"。核对：README/AGENTS/background 有定义，但**决策文档内部首次出现处没有就地指路**（新窗口读 0002 时"moneta"可能是第一个看到的陌生词）。修复：① 0002 §2 背景开头加谱系指路行（中英，指 `docs/background.md`）；② AGENTS.md 头部加 **Lineage** 块：Moneta(1代,2026-10) → Nova(2代,2026-11, clean-room 重构) → **Lyra(3代,本仓库)**，前两代为本地只读参考（**只继承机制、独立重写，永不 import/修改/拷贝其运行时代码**，与 0002 §6 回滚边界一致），完整"为什么"在 background | `docs/decisions/0002*` §2、`AGENTS.md` |
 
 ## 待办（截至 2026-11-05 收工）
 

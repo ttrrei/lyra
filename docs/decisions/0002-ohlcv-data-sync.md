@@ -25,6 +25,9 @@ feature 的 PAR 位置**（0007 使用，本 feature 只占位、不使用）。
 
 ## 2. 背景
 
+> 三代谱系（moneta → nova → lyra）的完整"为什么"在
+> `docs/background.md`；本节只引用其中 moneta 的数据管线部分。
+
 - **moneta 怎么做的**（`pipeline/extract_oci.py`，已生产验证）：
   1. 从 `config/setting.yml` 读 `oci.par_url`（一个 **PAR prefix URL**）；
   2. `GET <par_url>/?fields=name,size,md5,timeModified&limit=1000`

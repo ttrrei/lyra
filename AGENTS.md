@@ -4,6 +4,12 @@ Lyra is the clean, lightweight successor to Nova and Moneta. This contract
 takes precedence over any inherited Nova or Moneta proposal. Read
 `docs/hld.md` and `docs/requirements.md` before changing scope.
 
+> **Lineage**: Moneta (1st gen, 2026-10) → Nova (2nd gen, 2026-11, clean-room
+> rebuild) → **Lyra (3rd gen, this repo)**. Both are local read-only
+> reference repos — never import from, modify, or copy their runtime code
+> (mechanisms may be *inherited*, re-implemented independently). The full
+> "why" is in `docs/background.md`.
+
 ## Where we are (read first)
 
 - **Progress has ONE source of truth: the `## 当前状态 / Current state`
