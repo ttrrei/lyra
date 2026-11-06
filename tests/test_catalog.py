@@ -303,6 +303,33 @@ def test_open_limited_duckdb_applies_settings():
         con.close()
 
 
+def test_instruments_returns_empty_on_broken_catalog(tmp_path):
+    """F1 (self-review 2026-11-06): a catalog whose bronze view points at a
+    deleted Parquet must degrade to [] (the documented contract) rather than
+    raise — a missing data file is not an API-level error.
+
+    Setup: create a real 1-row parquet, create a view over it in a throwaway
+    catalog, then delete the parquet so the view is dangling.
+    """
+    import os
+
+    fake = tmp_path / "bronze.parquet"
+    con0 = duckdb.connect()
+    con0.execute(
+        f"COPY (SELECT 'AUD_USD' AS instrument, TIMESTAMP '2020-01-01' AS time) "
+        f"TO '{fake}' (FORMAT PARQUET)"
+    )
+    con0.close()
+    catalog_path = tmp_path / "catalog.duckdb"
+    con = duckdb.connect(str(catalog_path))
+    con.execute(
+        f"CREATE VIEW bronze AS SELECT * FROM read_parquet('{fake}')")
+    con.close()
+    os.unlink(fake)  # view is now dangling
+    c = Catalog(catalog_path)
+    assert c.instruments() == []
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys
     sys.exit(pytest.main([__file__, "-q"]))

@@ -126,6 +126,10 @@ class Catalog:
                 "SELECT DISTINCT instrument FROM bronze ORDER BY instrument"
             ).fetchall()
             return [r[0] for r in rows]
+        except duckdb.Error:
+            # Bronze view present but its Parquet is missing/unreadable —
+            # degrade to [] rather than raising, matching the docstring.
+            return []
         finally:
             con.close()
 
