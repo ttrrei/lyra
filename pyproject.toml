@@ -20,6 +20,7 @@ dependencies = [
     "pytz>=2023.3",       # reading TIMESTAMP WITH TIME ZONE in DuckDB (hard dep, verified 0002)
     "typer>=0.12",        # CLI
     "requests>=2.31",     # OCI PAR download (0002, moneta-proven mechanism)
+    "TA-Lib>=0.8.2",      # 0003 K1: standard indicator C core (both prior generations locked 0.8.2)
 ]
 
 [project.optional-dependencies]

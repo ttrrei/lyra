@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import typer
 
+from pathlib import Path
+
 from . import __version__, aggregate as agg, clean as clean_mod
 from .config import (
     ConfigError,
@@ -191,6 +193,46 @@ def oanda(
                 fg=typer.colors.GREEN)
     if not dry_run:
         typer.echo("next: run `lyra pull` to clean+aggregate the new CSVs.")
+
+
+@app.command()
+def features(
+    config: str = typer.Option("config/config.yml", "--config"),
+    data_root: str | None = typer.Option(None, "--data-root"),
+    minutes: int = typer.Option(0, "--minutes", help="Timeframe: 5 or 60 (0 = both). 0003 K2: per-instrument wide tables."),
+    instrument: str | None = typer.Option(None, "--instrument", help="Restrict to one instrument (debug); default = all in the data (K5)"),
+    alpha_dir: str | None = typer.Option(None, "--alpha-dir", help="Alpha feature directory (R3.2); default = config local.alpha (may be empty)"),
+) -> None:
+    """Compute the 0003 feature wide tables (always recompute + overwrite)."""
+    from . import catalog as catmod
+    from . import features as feat
+
+    _, root, _db = _load(config, data_root)
+
+    # Alpha extension point (R3.2 / I16): resolve from CLI or config, fall back
+    # to an empty (non-existent) directory → core-only registry, unchanged (I16).
+    if alpha_dir is None:
+        try:
+            data = load_config(config or "config/config.yml")
+            local = local_from_dict(data)
+            alpha_dir = getattr(local, "alpha", None) or ""
+        except ConfigError:
+            alpha_dir = ""
+    alpha = Path(alpha_dir) if alpha_dir else Path(root) / "_no_alpha_dir_"
+    reg = feat.load_from(alpha)
+
+    frames = [5, 60] if minutes not in (5, 60) else [minutes]
+    insts = [instrument] if instrument else None
+    for m in frames:
+        result = feat.run_features(root, m, reg, instruments=insts)
+        typer.secho(f"features {m}m : {len(result.instruments)} instruments, "
+                    f"{result.total_rows} rows → {result.paths[0].parent}", fg=typer.colors.GREEN)
+        typer.echo(f"version_string = {result.version_string}")
+    # D1: keep the named catalog entry points in sync with the new files.
+    cat = catmod.upsert_views(root)
+    made = cat.upsert_feature_views(root)
+    if made:
+        typer.echo(f"catalog views: {', '.join(made)}")
 
 
 @app.command()

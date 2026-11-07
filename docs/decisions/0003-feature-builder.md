@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0003` |
 | 标题 | Feature Builder（标准特征 + alpha 扩展点） |
-| 状态 | **提案**（待用户审批） |
+| 状态 | **已实施**（0003 代码落地，96 测试通过，真实数据 E2E 通过） |
 | Owner | `ttrrei` |
 | 创建日期 | `2026-11-07` |
 | 相关提案 | — |
@@ -137,12 +137,13 @@
   `SELECT ... FROM ohlcv_<m> WHERE instrument = ? ORDER BY time`，
   算完该标的即落盘并释放，**严禁**一次性把 21 标的全量读进一个
   DataFrame（998 万行 × 60 列峰值 >12 GB，低配机必 OOM）；
-- 输出：`data/features/<minutes>m/<instrument>.parquet`
-  （**单文件，无 `<snapshot_id>` 目录层级**——对齐 0002 D4 已废弃
-  的目录级 snapshot 体系；恒重算恒覆盖，无陈旧目录堆积，D1）。
+- 输出：`data/features/ohlcv_<layer>/<instrument>.parquet`
+  （`<layer>` = `5m` / `1h`，对齐 0002 聚合层命名；**单文件，无
+  `<snapshot_id>` 目录层级**——对齐 0002 D4 已废弃的目录级 snapshot 体系；
+  恒重算恒覆盖，无陈旧目录堆积，D1）。
   版本信息走 **Parquet 文件元数据**（`feature_version`、参数集
   sha256、生成时间戳），不依赖路径层级。列 = 输入 OHLCV 列
-  （K2 复制）+ 全部注册特征列，pandas → `pyarrow` 写 Parquet，
+  （K2 复制）+ 全部注册特征列，DuckDB（或纯 Python）→ `pyarrow` 写 Parquet，
   行序 = 输入行序（`ORDER BY time` 读入，0002 I18 同款确定性）；
 - **Catalog 接入（D1）**：在 0002 的 `Catalog`（DuckDB 外部表）
   中注册 `features_5m` / `features_1h` 视图（与 `bronze`/`ohlcv_5m`/
@@ -463,7 +464,7 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | `test_deterministic_rerun` | 同输入、**同环境**重跑 → 特征值逐位一致（F4 严格层） |
 | `test_wide_table_self_sufficient` | 宽表含全部 OHLCV 列，单文件可独立查询（F3/K2） |
 | `test_feature_version_in_metadata` | 版本标识（FEATURE_VERSION/参数 sha256/数值栈版本）变 → Parquet 元数据里的版本串变（**非目录层级**，D1） |
-| `test_output_single_file_no_snapshot_dir` | 输出为 `features_<m>/<instrument>.parquet` 单文件，**无** `<snapshot_id>` 子目录；重跑恒覆盖不堆积（D1） |
+| `test_output_single_file_no_snapshot_dir` | 输出为 `features/ohlcv_<layer>/<instrument>.parquet` 单文件（`<layer>` = `5m`/`1h`），**无** `<snapshot_id>` 子目录；重跑恒覆盖不堆积（D1） |
 | `test_per_instrument_streaming` | 数据流按标的逐个循环：单标的工作集峰值受控（<300MB 量级断言），非全量 21 标的同驻（D5） |
 | `test_f4_same_env_bitwise_cross_env_allclose` | 同环境重跑逐位一致（F4 严格层）；文档化"跨平台 allclose(1e-12)"为可维护上限（F4/D6） |
 | `test_universal_21_instruments` | 21 标的同特征同参数、算法逐点一致（K5） |
@@ -506,3 +507,4 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | 2026-11-07 | 0.7 | **批次2 外部红队 D1–D8 处置（按用户接受/挂起/拒绝三级：接受 5 = D1/D3/D5/D6/D8，挂起 2 = D4/D7，拒绝 1 = D2）**：① **D1（接受）**——§3.1 废除 `<snapshot_id>` 目录层级与"market snapshot id"幽灵派生项（0002 D4 已废弃目录级 snapshot、市场层无该实体），改单文件 `features_<m>/<instrument>.parquet` + 版本入 Parquet 元数据；补 **Catalog 接入**（注册 `features_5m/1h` 视图，0004 经 Catalog 查列不扫盘）；测试改 `test_feature_version_in_metadata` + 新增 `test_output_single_file_no_snapshot_dir`。② **D5（接受）**——§3.1 补**数据流控制律**：强制 per-instrument 循环、单标的工作集受控、严禁全量 21 标同驻；新增 `test_per_instrument_streaming`。③ **D6（收紧）**——F4 由"bitwise"收紧为**同环境 bitwise + 跨平台 allclose(1e-12)** 两级；新增 `test_f4_same_env_bitwise_cross_env_allclose`。④ **D3（收紧）**——F2 删除"缺口传播闭包"幽灵概念（0002 DQ1 保证 mid_* 零 NULL 且无缺口占位行，实测 998 万行 0 NULL），改为 NULL 只允许来自 warm-up 前缀 ∪ 派生特征已定义零分母；`test_warmup_null_semantics` 同步。⑤ **D4（挂起+过程门禁）**——决策文档≠实现规格，§3.4 加 **D4 过程门禁**：实施前必须为每个自研语义/结构特征补精确数学定义 + 所有除法特征补零分母兜底（`denom==0 → NULL/0`，不被 Gate 4 当 NaN 泄漏）。⑥ **D2（拒绝其核心主张，据实澄清）**——K1 澄清：TA-Lib 0.8.2 是**官方 PyPI 包**（`ta-lib/ta-lib-python`，非 fork），**实测 wheel 经 auditwheel 打包 C runtime**（`ta_lib.libs/libta-lib-*.so`，外部仅依赖 `libc.so.6`），pip 即开箱可用、无需系统 C 库编译 → **不构成 R8 破坏**；残留"某平台无 wheel"风险记为实施期环境验证项。⑦ **D7（挂起+过程门禁）**——alpha 扩展点补 API 契约（`registry.register(...)` 入口 + compute 纯 NumPy 签名 + 加载 fail-fast 不静默跳过 + alpha 版本归属），细节落实施 spec。⑧ **D8（接受）**——§1 输入口径由"bronze/5m/1h"改为"5m/1h 聚合层"（0003 只消费 0002 聚合层，不碰 bronze 1m）。另修 **v0.5 遗留不一致**：`test_supertrend_k7_management` 语义（自研四项管理）与 v0.6 K7 降级矛盾 → 改 `test_supertrend_registry_params`（库实现管理纪律）。测试 25→**28**（+3：输出单文件/per-instrument/F4 两级；改 2：warmup_null、supertrend 管理；改 1：snapshot→metadata） |
 | 2026-11-07 | 0.8 | **扩充标准指标集（用户批准"推荐范围"；外部建议清单的 5/10/14/20 等参数一律不采用，全部重排到 K8 网格 {6,12,24,60,120}）**：§3.4 新增 **13 族**标准指标——NATR（`atr/close`）、MACD（**精选三元组** 6_12_6/6_24_6/12_60_12，非全网格展开）、ROC、STOCH（%K/%D）、BBANDS（**%B+带宽**，不用原始上下轨）、ADX/PLUS_DI/MINUS_DI（趋势强度族，仅 24/60）、CCI、WILLR、MFI、CMO（均仅 24/60）、OBV（**斜率**非绝对值）、LINEARREG_SLOPE（归一化斜率）、KAMA（自适应均线）。参数面纪律：MACD 精选三元组、趋势强度/动量/震荡族只取 2 点、BBANDS/OBV 取无量纲形态（呼应 K8 防过拟合动机）。**缓做族**（有理由）：PPO/TRIX/ULTOSC/AROON/STDDEV（冗余或利基）、CORREL/BETA（单标的宇宙无基准）、HT_*/CDL*（过拟合/需先预筛）。D4 门禁补 5 个新除法特征（natr_*/bband_pctb_*/bband_bw_*/lrslope_*/mfi_*）；`test_grid_only_windows` 扩范围覆盖全部新族；**+6 测试**（MACD/ROC+STOCH/BBANDS/趋势动量族/量流族/NATR 一致性）。**触发 I13**：特征集变更 → **FEATURE_VERSION +1**。同步 R3.1（requirements 中英权威清单）。测试 28→**34**（中英一致） |
 | 2026-11-07 | 0.9 | **补全 P0 基础指标缺口（用户确认；外部 P0/P1/P2 清单中 P0 缺口的 8 项落地，参数全按 K8 网格）**：§3.4 新增 6 族标准指标——DEMA（6/24/60）、TEMA（6/24/60）、HMA（24/60）、MOM（6/24/60）、StdDev（24/60）、Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）；结构族补 **Donchian @60**（`prior60_high/low/range`，同 prior24 的 `shift(1)` 排当前 bar 口径）+ **Efficiency Ratio @60**（`path_eff_60`）。**撤销 v0.8 对 STDDEV 的缓做**（用户拍板：STDDEV 与 Z-Score 的"价格围绕均值的离散/位置"维度与 ATR（TR 基准）/BBANDS（%B 相对位置）不完全重叠，P0 要求覆盖）；缓做清单同步增补：Keltner（=EMA±2×ATR，BBANDS 覆盖）、Choppiness（ATR+Donchian 组合变换）、Relative Volume/VWMA（rel_quote_activity 覆盖）、P1 全族（AROON/TRIX/CMF/EFI/PVT/SMI/TSI/VHF/QQE/RSX/Ichimoku/HeikinAshi/InsideBar/Fractal/Squeeze/Schaff——参数面过大或需自研，留第二批待 0003 基础版跑通后评估）。D4 门禁补 `zscore_*`（第 6 个新除法特征，N 根全平价 → 滚动标准差 0）；`test_grid_only_windows` 扩范围；**+3 测试**（dema_tema_hma / mom_stddev_zscore / prior60_path_eff60）。**触发 I13**：特征集再变更 → **FEATURE_VERSION 再 +1**（v0.8 已 +1，累计 +2）。同步 R3.1（requirements v0.12 中英）。测试 34→**37**（中英一致） |
+| 2026-11-07 | 1.0 | **0003 实施落地（用户批准"可以实现 0003 的内容了"）**：`lyra/registry.py`（K3 Registry/FeatureSpec，`window_params` 与 `params` 分离使 K8 守卫不误伤 nbdev/multiplier）+ `lyra/indicators.py`（TA-Lib 纯 NumPy 边界 + moneta/nova Supertrend golden 参考 + zscore）+ `lyra/features.py`（`build_registry()` 116 特征、`compute_features`、`load_from` alpha（D7 fail-fast + I16 core 不变）、`run_features` D5 per-instrument 流水线、Parquet 元数据版本）全部落地。**实施期据实修正（均不改特征清单/参数，不触发 I13）**：① NATR 实现为 `atr/close`（**非** `talib.NATR`——后者 ×100，违背 §3.4 与 `test_natr_consistency` 的无量纲契约）；② `rel_quote_activity` 实现为 `volume/SMA(volume,24)`（无量纲，与 nova 实证公式一致，取代早期讨论稿的 `×1e9` 变体）；③ **warm-up 前缀按实测精确化**（MACD = slow+fast−2、STOCH = fastk+slowd−2、DEMA/TEMA 保持安全上界、HMA = n+5、`shift6_atr` = ATR_NORM=24、`rsi_divergence` = 48）——`warmup_bars` 是 F2 断言的安全下界，取实测最大前缀。④ 输出路径 `data/features/ohlcv_5m|1h/<instrument>.parquet`（对齐 0002 聚合层命名 `<minutes>m`，目录名用层名而非分钟数）。**新增工程件**：`lyra features` CLI（恒重算恒覆盖，`--minutes 5|60` / `--instrument` / `--alpha-dir`）、Catalog `features_5m/1h` 视图（D1，glob `features/ohlcv_*/\*.parquet`）、`pyproject.toml` 加 `TA-Lib>=0.8.2` 依赖。**37 项文档测试全部实现并通过**（`tests/test_registry.py` / `test_indicators.py` / `test_features.py`，另 +1 真实数据 E2E），0002 套件 58 项仍全绿（合计 **96**）。**状态：提案 → 已实施**；`test_real_data_one_instrument`（SPX500_USD 1h，40435 行，124 列）实测通过。 |

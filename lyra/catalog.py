@@ -89,6 +89,35 @@ class Catalog:
             con.close()
         return created
 
+    def upsert_feature_views(self, data_root: str | Path) -> list[str]:
+        """Register the 0003 feature wide-table views (D1).
+
+        ``features_5m`` / ``features_1h`` each read every
+        ``<data_root>/features/<layer>/*.parquet`` via a single ``read_parquet``
+        glob — one named entry point for the 0004 compiler regardless of how
+        many instruments are present (K5: the data itself is authoritative).
+        Layers with no Parquet files are skipped (partial runs register what
+        exists, same rule as :meth:`upsert`).
+        """
+        root = Path(data_root).resolve()
+        created: list[str] = []
+        con = duckdb.connect(str(self.path))
+        try:
+            for view, sub in (("features_5m", "features/ohlcv_5m"),
+                              ("features_1h", "features/ohlcv_1h")):
+                files = sorted((root / sub).glob("*.parquet")) if (root / sub).is_dir() else []
+                if not files:
+                    continue
+                escaped = str(root / sub / "*.parquet").replace("'", "''")
+                con.execute(
+                    f"CREATE OR REPLACE VIEW {view} AS "
+                    f"SELECT * FROM read_parquet('{escaped}')"
+                )
+                created.append(view)
+        finally:
+            con.close()
+        return created
+
     def views(self) -> list[dict[str, object]]:
         """List the registered views (name, column count, base file)."""
         if not self.path.exists():
