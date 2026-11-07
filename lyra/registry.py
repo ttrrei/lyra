@@ -62,6 +62,12 @@ class FeatureSpec:
     # ``params`` so non-window constants (BBANDS nbdev, STOCH matype, PSAR
     # af/maximum, Supertrend multiplier) are not mistaken for off-grid windows.
     window_params: tuple[int, ...] = ()
+    # K7 — True for features whose compute is *not* a TA-Lib call (e.g. the
+    # Heikin Ashi recursive transform, cross-column compositions). Self-
+    # implemented features must still satisfy the K7 discipline: params
+    # explicit in ``params`` (no hardcoding), contract documented on the spec,
+    # golden/purity regression test, and any semantic change → I13 +1.
+    self_implemented: bool = False
     compute: Callable[..., Any] | None = None
 
 
@@ -82,6 +88,7 @@ class Registry:
         family: str,
         params: Mapping[str, Any] | None = None,
         window_params: tuple[int, ...] | list[int] | None = None,
+        self_implemented: bool = False,
     ) -> FeatureSpec:
         """Register a feature. Raises :class:`RegistryError` on a name clash (F5)."""
         if name in self._specs:
@@ -107,6 +114,7 @@ class Registry:
             family=family,
             params=dict(params or {}),
             window_params=tuple(window_params or ()),
+            self_implemented=self_implemented,
             compute=compute,
         )
         self._specs[name] = spec

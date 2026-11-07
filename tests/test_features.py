@@ -80,7 +80,7 @@ def test_grid_only_windows():
 def test_feature_count_matches_r31(ctx, data):
     reg, cols = _compute(ctx)
     # R3.1 / §3.4 fixed list — 116 features (F1 drift guard)
-    assert len(reg) == 116
+    assert len(reg) == 120
     # and every computed column is present in the wide table
     assert set(cols) == set(reg.names())
 
@@ -126,6 +126,45 @@ def test_supertrend_registry_params():
     assert spec.params["atr_window"] == 24          # in-grid
     assert spec.params["multiplier"] == 3.0         # explicit, not hardcoded
     assert 24 in spec.window_params
+
+
+# --- Heikin Ashi (K7 self-implementation) ----------------------------------
+
+def test_heikin_asi_known_values(ctx, data):
+    """K7 golden test: independent textbook reference vs the shipped recursive
+    transform. After the ~16-bar convergence window the seed dependence is
+    below 1e-9, so compare from bar 32 (well past warmup_bars=16)."""
+    reg, cols = _compute(ctx)
+    o, h, l, c = ctx.o, ctx.h, ctx.l, ctx.c
+    n = len(c)
+    # Independent pure-Python reference (textbook definition).
+    ha_c = (o + h + l + c) / 4.0
+    ha_o = np.empty(n)
+    ha_o[0] = (o[0] + c[0]) / 2.0
+    for i in range(1, n):
+        ha_o[i] = (ha_o[i - 1] + ha_c[i - 1]) / 2.0
+    ha_h = np.maximum(h, np.maximum(ha_o, ha_c))
+    ha_l = np.minimum(l, np.minimum(ha_o, ha_c))
+    s = 32
+    for name, ref in (("ha_o", ha_o), ("ha_h", ha_h), ("ha_l", ha_l), ("ha_c", ha_c)):
+        got = cols[name]
+        assert np.allclose(got[s:], ref[s:], rtol=0, atol=1e-9), name
+    # Invariants hold at every bar (no NaN): ha_h >= max(o,h,l,c) is NOT
+    # required, but ha_h >= ha_l and ha_h/ha_l sandwich the *heikin* close:
+    assert np.all(cols["ha_h"] >= cols["ha_l"])
+    assert np.all(cols["ha_h"] >= cols["ha_c"])
+    assert np.all(cols["ha_l"] <= cols["ha_c"])
+
+
+def test_heikin_asi_k7_management():
+    """K7 discipline: self_implemented=True, no window params (recursion,
+    not a fixed window), warmup_bars is the documented convergence bound."""
+    reg = features.build_registry()
+    for name in ("ha_o", "ha_h", "ha_l", "ha_c"):
+        spec = reg.get(name)
+        assert spec.self_implemented is True, name
+        assert spec.window_params == (), name  # no window → K8 N/A
+        assert spec.warmup_bars >= 16, name
 
 
 # --- PSAR ------------------------------------------------------------------
@@ -226,7 +265,7 @@ def test_wide_table_self_sufficient(ctx, data):
     names = set(table.column_names)
     for req in ("mid_o", "mid_h", "mid_l", "mid_c", "volume", "n_bars", "time"):
         assert req in names
-    assert len(table.column_names) == 116 + 8
+    assert len(table.column_names) == 120 + 8
 
 
 def _input_dict(data):
@@ -269,7 +308,7 @@ def test_per_instrument_streaming(ctx, data):
     built = features.build_instrument(_fake_con(data), "TEST", 60, reg)
     # the built working set holds exactly one instrument's row count
     assert built["n"] == data["n"]
-    assert len(built["cols"]) == 116
+    assert len(built["cols"]) == 120
 
 
 def _fake_con(data):
@@ -300,7 +339,7 @@ def test_universal_21_instruments(data):
     reg = features.build_registry()
     # every instrument runs against this one registry — no per-instrument
     # algorithm/parameter fork exists in the code path (D5 loop is uniform).
-    assert len(reg) == 116
+    assert len(reg) == 120
     # and the compute functions are pure (same input → same output), so
     # instrument A and B differ only in their input data, never in the math.
     a = features.Ctx(o=np.full(50, 1.0), h=np.full(50, 1.0), l=np.full(50, 1.0),
@@ -385,5 +424,5 @@ def test_real_data_one_instrument(tmp_path):
     res = features.run_features(root, 60, reg, instruments=["SPX500_USD"])
     assert res.total_rows > 0
     t = pq.read_table(res.paths[0])
-    assert len(t.column_names) == 124   # 116 + 8
+    assert len(t.column_names) == 128   # 120 + 8
     assert t.schema.metadata[b"feature_version"] == str(features.FEATURE_VERSION).encode()

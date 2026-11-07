@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0003` |
 | 标题 | Feature Builder（标准特征 + alpha 扩展点） |
-| 状态 | **已实施**（0003 代码落地，96 测试通过，真实数据 E2E 通过） |
+| 状态 | **已实施**（0003 代码落地，98 测试通过，真实数据 E2E 通过；v1.1 新增 Heikin Ashi） |
 | Owner | `ttrrei` |
 | 创建日期 | `2026-11-07` |
 | 相关提案 | — |
@@ -343,6 +343,7 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
 | Z-Score | `zscore_24 / zscore_60` | 24/60（K8） | 派生（`(close − SMA(close,n)) / STDDEV(close,n)`，标准化价格位置，无量纲；分母为已定义零分母） |
 | PSAR | `psar / psar_bullish / psar_bearish` | (0.02, 0.2)（K8 例外：非窗口参数） | `talib.SAR` + 方向标志 |
 | Supertrend | `supertrend / supertrend_bullish / supertrend_bearish` | (ATR 窗口 24, multiplier 3) | `talib.SUPERTREND`（K1，库实现）+ moneta/nova 自研参考作 golden 交叉锚点 |
+| Heikin Ashi | `ha_o / ha_h / ha_l / ha_c` | 无窗口参数（递归变换，收敛 ~16 bar） | **K7 自研**（TA-Lib 无此指标）；递归 `ha_c=(o+h+l+c)/4`、`ha_o=(ha_o[i-1]+ha_c[i-1])/2`、`ha_h=max(h,ha_o,ha_c)`、`ha_l=min(l,ha_o,ha_c)`；warmup_bars=16 |
 | 语义 | `sma_cross_up_6_24 / sma_cross_down_6_24 / sma_alignment_6_24 / rsi_divergence_up / rsi_divergence_down` | 引用已注册列（6/24） | 派生（已注册列的确定性谓词） |
 | 结构 | `prior24_high / prior24_low / prior24_range / prior24_range_pos / prior24_width / prior60_high / prior60_low / prior60_range / breakout_up / breakout_down / failed_breakout_up / failed_breakout_down / shift6_atr / bar_range_atr / rel_quote_activity / utc_hour / path_eff_24 / path_eff_60` | 6 / 24 / 60（均网格内） | numpy/pandas 向量化（K1）；**v0.9 补 prior60_***（Donchian @60）+ `path_eff_60`（Efficiency Ratio @60） |
 
@@ -475,6 +476,8 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | `test_atr_normalization_basis_atr24` | 所有 ATR 归一化特征分母 == `atr_24`（K6，防 nova 混用反例） |
 | `test_supertrend_path_dependent_from_head` | 从数据头起算；中途起算结果可不同（路径依赖显式接受，warm-up NULL 保留，K4） |
 | `test_supertrend_registry_params` | Supertrend（库实现）管理纪律：ATR 窗口取网格点、multiplier 显式入注册表（非硬编码于函数体）+ golden 值与 moneta/nova 参考实现逐点偏差 < 1e-12（K7 的库实现等价纪律，非"自研四项管理"——后者是未触发条件护栏） |
+| `test_heikin_asi_known_values` | **v1.1**：Heikin Ashi 递归变换 golden test——独立纯 Python 教科书参考 vs shipped，从 bar 32 起逐点 < 1e-9（seed 依赖 ~16 bar 后收敛）；不变式 `ha_h ≥ ha_c ≥ ha_l` 全程成立（K7） |
+| `test_heikin_asi_k7_management` | **v1.1**：K7 管理纪律——`self_implemented=True` 标记 + `window_params=()`（递归非窗口，K8 N/A）+ `warmup_bars ≥ 16` 三项断言 |
 
 ## 6. 回滚
 
@@ -508,3 +511,4 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | 2026-11-07 | 0.8 | **扩充标准指标集（用户批准"推荐范围"；外部建议清单的 5/10/14/20 等参数一律不采用，全部重排到 K8 网格 {6,12,24,60,120}）**：§3.4 新增 **13 族**标准指标——NATR（`atr/close`）、MACD（**精选三元组** 6_12_6/6_24_6/12_60_12，非全网格展开）、ROC、STOCH（%K/%D）、BBANDS（**%B+带宽**，不用原始上下轨）、ADX/PLUS_DI/MINUS_DI（趋势强度族，仅 24/60）、CCI、WILLR、MFI、CMO（均仅 24/60）、OBV（**斜率**非绝对值）、LINEARREG_SLOPE（归一化斜率）、KAMA（自适应均线）。参数面纪律：MACD 精选三元组、趋势强度/动量/震荡族只取 2 点、BBANDS/OBV 取无量纲形态（呼应 K8 防过拟合动机）。**缓做族**（有理由）：PPO/TRIX/ULTOSC/AROON/STDDEV（冗余或利基）、CORREL/BETA（单标的宇宙无基准）、HT_*/CDL*（过拟合/需先预筛）。D4 门禁补 5 个新除法特征（natr_*/bband_pctb_*/bband_bw_*/lrslope_*/mfi_*）；`test_grid_only_windows` 扩范围覆盖全部新族；**+6 测试**（MACD/ROC+STOCH/BBANDS/趋势动量族/量流族/NATR 一致性）。**触发 I13**：特征集变更 → **FEATURE_VERSION +1**。同步 R3.1（requirements 中英权威清单）。测试 28→**34**（中英一致） |
 | 2026-11-07 | 0.9 | **补全 P0 基础指标缺口（用户确认；外部 P0/P1/P2 清单中 P0 缺口的 8 项落地，参数全按 K8 网格）**：§3.4 新增 6 族标准指标——DEMA（6/24/60）、TEMA（6/24/60）、HMA（24/60）、MOM（6/24/60）、StdDev（24/60）、Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）；结构族补 **Donchian @60**（`prior60_high/low/range`，同 prior24 的 `shift(1)` 排当前 bar 口径）+ **Efficiency Ratio @60**（`path_eff_60`）。**撤销 v0.8 对 STDDEV 的缓做**（用户拍板：STDDEV 与 Z-Score 的"价格围绕均值的离散/位置"维度与 ATR（TR 基准）/BBANDS（%B 相对位置）不完全重叠，P0 要求覆盖）；缓做清单同步增补：Keltner（=EMA±2×ATR，BBANDS 覆盖）、Choppiness（ATR+Donchian 组合变换）、Relative Volume/VWMA（rel_quote_activity 覆盖）、P1 全族（AROON/TRIX/CMF/EFI/PVT/SMI/TSI/VHF/QQE/RSX/Ichimoku/HeikinAshi/InsideBar/Fractal/Squeeze/Schaff——参数面过大或需自研，留第二批待 0003 基础版跑通后评估）。D4 门禁补 `zscore_*`（第 6 个新除法特征，N 根全平价 → 滚动标准差 0）；`test_grid_only_windows` 扩范围；**+3 测试**（dema_tema_hma / mom_stddev_zscore / prior60_path_eff60）。**触发 I13**：特征集再变更 → **FEATURE_VERSION 再 +1**（v0.8 已 +1，累计 +2）。同步 R3.1（requirements v0.12 中英）。测试 34→**37**（中英一致） |
 | 2026-11-07 | 1.0 | **0003 实施落地（用户批准"可以实现 0003 的内容了"）**：`lyra/registry.py`（K3 Registry/FeatureSpec，`window_params` 与 `params` 分离使 K8 守卫不误伤 nbdev/multiplier）+ `lyra/indicators.py`（TA-Lib 纯 NumPy 边界 + moneta/nova Supertrend golden 参考 + zscore）+ `lyra/features.py`（`build_registry()` 116 特征、`compute_features`、`load_from` alpha（D7 fail-fast + I16 core 不变）、`run_features` D5 per-instrument 流水线、Parquet 元数据版本）全部落地。**实施期据实修正（均不改特征清单/参数，不触发 I13）**：① NATR 实现为 `atr/close`（**非** `talib.NATR`——后者 ×100，违背 §3.4 与 `test_natr_consistency` 的无量纲契约）；② `rel_quote_activity` 实现为 `volume/SMA(volume,24)`（无量纲，与 nova 实证公式一致，取代早期讨论稿的 `×1e9` 变体）；③ **warm-up 前缀按实测精确化**（MACD = slow+fast−2、STOCH = fastk+slowd−2、DEMA/TEMA 保持安全上界、HMA = n+5、`shift6_atr` = ATR_NORM=24、`rsi_divergence` = 48）——`warmup_bars` 是 F2 断言的安全下界，取实测最大前缀。④ 输出路径 `data/features/ohlcv_5m|1h/<instrument>.parquet`（对齐 0002 聚合层命名 `<minutes>m`，目录名用层名而非分钟数）。**新增工程件**：`lyra features` CLI（恒重算恒覆盖，`--minutes 5|60` / `--instrument` / `--alpha-dir`）、Catalog `features_5m/1h` 视图（D1，glob `features/ohlcv_*/\*.parquet`）、`pyproject.toml` 加 `TA-Lib>=0.8.2` 依赖。**37 项文档测试全部实现并通过**（`tests/test_registry.py` / `test_indicators.py` / `test_features.py`，另 +1 真实数据 E2E），0002 套件 58 项仍全绿（合计 **96**）。**状态：提案 → 已实施**；`test_real_data_one_instrument`（SPX500_USD 1h，40435 行，124 列）实测通过。 |
+| 2026-11-07 | 1.1 | **新增 Heikin Ashi 族（用户指令"如果可以把这个也加进去"；TA-Lib 无此指标 → 触发 K7 自研路径）**：§3.4 表新增 `ha_o / ha_h / ha_l / ha_c` 4 列（递归变换，无窗口参数 → K8 网格 N/A；warmup_bars=16 为递归收敛安全下界，seed 依赖 ~16 bar 后 < 1e-9）；**K7 管理纪律全部适用**：参数显式入注册表（`self_implemented: True` 标记，本次实施中把该标记落到 `FeatureSpec`/`Registry.register` 的显式字段上，0003 v0.6 K7 降级为条件护栏后首次实际触发）+ 契约卡（递归定义 + seed 规则 + 收敛界）+ golden test `test_heikin_asi_known_values`（独立纯 Python 教科书参考 vs shipped，从 bar 32 起逐点 < 1e-9）+ `test_heikin_asi_k7_management`（self_implemented=True / window_params=() / warmup_bars>=16 三项断言）。**触发 I13**：特征集变更（+4 列）→ **FEATURE_VERSION +1（2→3）**。测试 38→**40**（中英一致），0002 的 58 项仍全绿（**合计 98**）。缓做清单的 P1 族 HeikinAshi 项移除（已落地，非遗忘） |

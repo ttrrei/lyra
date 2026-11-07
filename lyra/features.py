@@ -49,7 +49,7 @@ from .registry import FeatureKind, Registry, RegistryError
 # I13: any change to a registered feature's computation or parameters must
 # bump this. 0003 shipped v0.8 (+1 over the v0.7 baseline) and v0.9 (+1), so
 # the first implementation baseline is 2.
-FEATURE_VERSION = 2
+FEATURE_VERSION = 3
 
 #: The K8 window grid (0003 K8, aligned to moneta ``catalogue.py``).
 GRID = (6, 12, 24, 60, 120)
@@ -216,6 +216,30 @@ def build_registry() -> Registry:
         "supertrend_bearish", lambda ctx, s: indicators.supertrend_bearish(ctx.h, ctx.l, ctx.c, 24, 3.0),
         kind=FeatureKind.STATE, unit="state", warmup_bars=24, family="supertrend",
         params={"atr_window": 24, "multiplier": 3.0}, window_params=(24,),
+    )
+
+    # --- Heikin Ashi (K7 self-implementation; TA-Lib has no HA — no window) -
+    # Recursion converges in ~16 bars regardless of seed → warmup_bars=16.
+    ha = lambda ctx: indicators.heikin_asi(ctx.o, ctx.h, ctx.l, ctx.c)
+    reg.register(
+        "ha_o", lambda ctx, s: ha(ctx)[0],
+        kind=FeatureKind.VALUE, unit="price", warmup_bars=16, family="heikin_asi",
+        self_implemented=True,
+    )
+    reg.register(
+        "ha_h", lambda ctx, s: ha(ctx)[1],
+        kind=FeatureKind.VALUE, unit="price", warmup_bars=16, family="heikin_asi",
+        self_implemented=True,
+    )
+    reg.register(
+        "ha_l", lambda ctx, s: ha(ctx)[2],
+        kind=FeatureKind.VALUE, unit="price", warmup_bars=16, family="heikin_asi",
+        self_implemented=True,
+    )
+    reg.register(
+        "ha_c", lambda ctx, s: ha(ctx)[3],
+        kind=FeatureKind.VALUE, unit="price", warmup_bars=16, family="heikin_asi",
+        self_implemented=True,
     )
 
     # --- semantic (deterministic predicates on registered columns) ---------

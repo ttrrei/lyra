@@ -75,13 +75,14 @@
   - Z-Score（标准化价格位置）：24, 60
   - Efficiency Ratio @60（v0.8 已有 eff_24）：60
   - Donchian @60（prior60_high / prior60_low，v0.8 已有 prior24_*）：60
+- **v1.1 新增**：Heikin Ashi（`ha_o / ha_h / ha_l / ha_c`，K7 自研，递归变换无窗口参数，warmup 16）
 - **缓做（有理由，非遗忘）**：
   - Keltner（= EMA±2×ATR，BBANDS 已覆盖"均值±n 波动带"信号）
   - Choppiness（= 100×LOG(SUM(TR)/MAXHIGH−MINLOW)，是 ATR+Donchian 组合变换，非独立信号）
   - Relative Volume / VWMA（v0.8 rel_quote_activity 已覆盖相对量信号）
   - PPO（MACD 归一化变体，冗余）；TRIX / ULTOSC / AROON / TSI / SMI（利基动量变体，参数面过大）
   - CMF / EFI / PVT / VHF（量价/方向比，与 MFI/OBV 信号重叠）
-  - Vortex / QQE / RSX / VFI / Squeeze / Schaff / Ichimoku / Heikin Ashi / Inside Bar / Williams Fractal（需自研或参数面爆炸）
+  - Vortex / QQE / RSX / VFI / Squeeze / Schaff / Ichimoku / Inside Bar / Williams Fractal（需自研或参数面爆炸；Heikin Ashi 已于 v1.1 落地）
   - CORREL / BETA（单标的宇宙无自然基准序列）
   - HT_*（过拟合风险）；CDL*（需先做统计预筛）
 - 语义 / 结构：`sma_cross_up_6_24 / sma_cross_down_6_24`、
@@ -293,3 +294,4 @@ YAML 文件。初始 12 个方向继承自 nova：`trend_continuation`、
 | 2026-11-07 | 0.10 | **R3.1 两项更新（用户指令）**：① **网格加 120** → {6,12,24,60,120}，**与 moneta `catalogue.py` 权威网格对齐**；ATR/RSI/SMA/EMA 各补 `*_120` 变体。② **Supertrend 改库实现**——实测推翻前代认知：moneta/nova 头注释"TA-Lib ships no Supertrend"系旧版本误解，两代锁定的 **TA-Lib 0.8.2 实测内置 `SUPERTREND`**；真实数据双库 parity（SPX500_USD 1h，5000 bar）自研版与 `talib.SUPERTREND` **逐 bar 100% 一致** → R3.1 Supertrend 行由"自研"改"`talib.SUPERTREND` 库实现 + moneta/nova 自研参考作 golden 交叉锚点"。同步 0003 v0.6（K1/K7/K8 + §3.4 + 测试 25） |
 | 2026-11-07 | 0.11 | **R3.1 扩充标准指标集（用户批准"推荐范围"）**：新增 NATR / MACD（精选三元组 6_12_6/6_24_6/12_60_12）/ ROC / STOCH（%K/%D）/ BBANDS（%B+带宽，不用原始上下轨）/ ADX+PLUS_DI+MINUS_DI / CCI / WILLR / MFI / CMO / OBV（斜率）/ LINEARREG_SLOPE / KAMA 共 **13 族**；窗口参数一律取 K8 网格 {6,12,24,60,120}（外部建议清单的 5/10/14/20 不采用）。参数面纪律：MACD 精选三元组非全网格展开、趋势强度/动量/震荡族只取 24/60、BBANDS/OBV 取无量纲形态。**缓做**（有理由）：PPO/TRIX/ULTOSC/AROON/STDDEV、CORREL/BETA（无基准序列）、HT_*/CDL*。**触发 I13：FEATURE_VERSION +1**。同步 0003 v0.8（§3.4 + D4 门禁 + 测试 34） |
 | 2026-11-07 | 0.12 | **R3.1 v0.9 补全 P0 缺口（8 项）**：DEMA(6/24/60)、TEMA(6/24/60)、HMA(24/60)、MOM(6/24/60)、Rolling StdDev(24/60)、Z-Score(24/60)、Efficiency Ratio @60、Donchian @60（prior24_* 基础上补 prior60_*）。**缓做新增**：Keltner（=EMA±2×ATR，BBANDS 已覆盖）、Choppiness（=ATR+Donchian 组合变换）、Relative Volume/VWMA（rel_quote_activity 已覆盖）、P1 全族（参数面过大或需自研，留第二批）。**触发 I13：FEATURE_VERSION +1**（v0.8 已 +1，本次再 +1 = 累计 +2）。同步 0003 v0.9（§3.4 + 测试 +6） |
+| 2026-11-07 | 0.13 | **R3.1 新增 Heikin Ashi（用户指令；0003 v1.1）**：`ha_o / ha_h / ha_l / ha_c` 4 列，K7 自研（TA-Lib 无此指标），递归变换无窗口参数（K8 N/A），warmup_bars=16（递归收敛安全下界）；K7 管理纪律全部适用（`self_implemented: True` 注册表标记 + 契约卡 + golden test + I13）。缓做清单的 Heikin Ashi 项移除（已落地）。**触发 I13：FEATURE_VERSION +1（2→3）**。同步 0003 v1.1（§3.4 + 测试 +2） |

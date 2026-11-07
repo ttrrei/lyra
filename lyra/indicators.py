@@ -279,6 +279,37 @@ def supertrend_reference(h, l, c, atr: np.ndarray, mult: float = 3.0) -> Tuple[n
 # Derived (SMA + STDDEV composition)
 # ---------------------------------------------------------------------------
 
+def heikin_asi(
+    o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Heikin Ashi OHLC (K7 self-implementation — no library ships it).
+
+    Recursive transform of the *observed* OHLC into smoothed (heikin) bars:
+
+        ha_c[i] = (o[i] + h[i] + l[i] + c[i]) / 4
+        ha_o[i] = (ha_o[i-1] + ha_c[i-1]) / 2       (seed: ha_o[0] = (o[0]+c[0])/2)
+        ha_h[i] = max(h[i], ha_o[i], ha_c[i])
+        ha_l[i] = min(l[i], ha_o[i], ha_c[i])
+
+    No window parameter (window_params=()) → K8 grid guard N/A. The recursion
+    converges in ~16 bars regardless of seed, so warmup_bars=16 is a safe
+    lower bound for the F2 assertion. Path-dependent from the data head (K4).
+    """
+    o = np.asarray(o, dtype=np.float64)
+    h = np.asarray(h, dtype=np.float64)
+    l = np.asarray(l, dtype=np.float64)
+    c = np.asarray(c, dtype=np.float64)
+    n = len(c)
+    ha_c = (o + h + l + c) / 4.0
+    ha_o = np.empty(n)
+    ha_o[0] = (o[0] + c[0]) / 2.0
+    for i in range(1, n):
+        ha_o[i] = (ha_o[i - 1] + ha_c[i - 1]) / 2.0
+    ha_h = np.maximum(h, np.maximum(ha_o, ha_c))
+    ha_l = np.minimum(l, np.minimum(ha_o, ha_c))
+    return ha_o, ha_h, ha_l, ha_c
+
+
 def zscore(c: np.ndarray, n: int) -> np.ndarray:
     """(close − SMA(close, n)) / STDDEV(close, n) — dimensionless price position.
 
