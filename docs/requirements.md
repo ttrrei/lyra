@@ -92,6 +92,7 @@
   - QQE / RSX / VFI / Squeeze / Schaff / Ichimoku / Inside Bar / Williams Fractal（需自研或参数面爆炸；Heikin Ashi 已于 v1.1 落地）
   - CORREL / BETA（单标的宇宙无自然基准序列）
   - HT_*（过拟合风险）；CDL*（需先做统计预筛）
+  - **v1.3 显式缓做 5 组**（Ehlers 周期/滤波族、截面相对强弱、多周期、OHLC 波动率估计器、Connors RSI/累计RSI(2)）——各组的被挡原则 / 缓做理由 / **解锁门槛**详见 `decisions/0003-feature-builder.md` §3.4 "v1.3 显式缓做 5 组" 表（中英成对）；其中**截面组是用户标注的最高优先级候选**，R9 扩展为多标的后应最先纳入
 - 语义 / 结构：`sma_cross_up_6_24 / sma_cross_down_6_24`、
   `sma_alignment_6_24 ∈ {-1, 0, 1}`、`rsi_divergence_up / down`、
   `psar_bullish / bearish`、`supertrend_bullish / bearish`

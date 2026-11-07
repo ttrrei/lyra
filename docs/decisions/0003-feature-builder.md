@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0003` |
 | 标题 | Feature Builder（标准特征 + alpha 扩展点） |
-| 状态 | **已实施**（0003 代码落地，104 测试通过，真实数据 E2E 通过；v1.1 新增 Heikin Ashi；v1.2 引入 tulipy 跨库对照组 K1b；v1.3 新增 TRIX/TSI/VHF/Vortex/Aroon 6 族 + pandas-ta-classic 提升为主要对照组） |
+| 状态 | **已实施**（0003 代码落地，104 测试通过，真实数据 E2E 通过；v1.1 新增 Heikin Ashi；v1.2 引入 tulipy 跨库对照组 K1b；v1.3 新增 TRIX/TSI/VHF/Vortex/Aroon 6 族 + pandas-ta-classic 提升为主要对照组；v1.3 补文档级自检与对抗性自检 §5b + 缓做 5 组完整落表 §3.4） |
 | Owner | `ttrrei` |
 | 创建日期 | `2026-11-07` |
 | 相关提案 | — |
@@ -415,6 +415,16 @@ Choppiness（= 100·LOG(SUM(TR)/MAXHIGH−MINLOW)，是 ATR+Donchian 组合
 Heikin Ashi / Inside Bar / Williams Fractal（需自研或参数面爆炸）、
 CMF / EFI / PVT（量价/方向比，与 MFI/OBV 信号重叠）。
 
+**v1.3 显式缓做 5 组（用户研究清单的 10 维中，未纳入第一批的组；逐条给被挡原则 + 理由 + 解锁门槛）**：
+
+| 组 | 被挡原则 | 缓做理由 | 解锁门槛（满足则移出本清单 + I13 +1） |
+|---|---|---|---|
+| **4. Ehlers 周期/滤波族**（Super Smoother / Roofing / Bandpass / Cyber Cycle / Decycler / Fisher·Inverse Fisher / Laguerre RSI / Schaff / Kalman 斜率） | K7 自研复杂度 + K8 参数面 + 可解释性 | ① 绝大多数需**自研**（TA-Lib 无），触发 K7 全套管理纪律（契约卡 + golden test + `self_implemented` 标记 + I13）；② 参数 2–4 个且相互耦合（如 Schaff 的 EMA fast/slow/cycle），全网格展开违反 K8 防过拟合初衷；③ 属周期/滤波变换，日级噪声大、解释性差，用户自己在备注里标注"先少量引入" | 0004 compiler 就绪后，先挑 1–2 个低滞后趋势滤波器（如 Super Smoother / Kalman 斜率）做小范围试点；验证有边际增益再扩 |
+| **9. 相对强弱/市场背景（截面）族**（相对 XJO 超额收益 / 滚动 beta·相关性 / 行业相对强弱 / 截面分位 / 市场宽度 / 截面离散度） | **R9 单标的宇宙** | 跨截面特征**天然需要 ≥2 标的同时在场**（rank/百分位/相关性都要"相对宇宙"才有定义域）；R9 当前是单标的宇宙（CORREL/BETA 同被此条挡下）。单标的下硬加 = 造出无定义域的伪信号 | R9 扩展为多标的联合运行（0005/0006 范围）后，截面组才有意义。**注意：用户在研究清单里标注"这组对 LightGBM 帮助最大"——是最高优先级候选，门槛一解锁就应最先纳入** |
+| **10. 多周期族**（日线指标的周线版本 / resample 后滞后一根） | **依赖 0004 时序对齐语义** | "把 M30/日线指标投影到 1h bar"必须回答"用上一根还是当前 bar、如何对齐、如何防前视"——这是**时序对齐语义**，属 0004 compiler 责任域，不在 0003 单 bar 特征基座范围。提前塞入 = 把 0004 复杂度下沉到 0003，违反"每层只做一层事" | 0004 compiler 交付时序对齐原语后，多周期作为 0004 之上的组合特征实现 |
+| **6. OHLC 波动率估计器**（Parkinson / Garman-Klass / Rogers-Satchell / Yang-Zhang / 半方差 / 短长波动率比） | 信息维度重叠 + 复杂度预算 | 这 5 个都是**无偏波动率估计**，与 ATR/NATR 同属"波动率"维度，1h CFD bar 上与 ATR 相关性高、边际信息量小；一次加 5 个同维无参数列会撑大特征空间、抬升 0004/0005 搜索成本。**注意：用户标注"OHLC 估计比收盘到收盘更高效，是明显的新维度"——此组是我上一轮理由与用户判断冲突最明显的一条，见下文对抗性自检 A5** | 0006 metrics 实测若显示 ATR 归一化在特定方向有偏，再针对性补 1 个（优先 Garman-Klass），而非一次加 5 个 |
+| **5b. Connors RSI / 累计 RSI(2)**（偏短线均值回归的动量变体） | **K8 网格违反** | Connors RSI 经典用法 `RSI(RSI(RSI close), 2)` 内层窗口 **2 不在 K8 网格 {6,12,24,60,120}**；用 K8 的 6 做内层则语义已变（≠Connors RSI）且与已有 `rsi_6` 信息维度重叠（仅多套两层 RSI、无新信息）。两头不讨好。**注意：用户标注"Connors RSI 与常规 RSI(14) 信息不同"——冲突点见对抗性自检 A5** | 若未来引入"允许 <6 的均值回归专用窗口"（需单独决策 + 过拟合防护），再评估 |
+
 **v1.3 新增标准指标族（趋势强度/效率，6 族，2026-11-07）**：TRIX（趋势平滑动量，
 24/60）、TSI（双 EMA 动量，24_12/60_24 精选）、VHF（波动率效率，24/60）、
 Vortex（方向强度 VI+/VI−，24/60）、Aroon（趋势年龄 UP/DOWN，24/60）。理由：
@@ -531,7 +541,33 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | `test_crosscheck_all_mapped`（tulipy） | **v1.2**（v1.3 降为次级锚点）：K1b 跨库对照——tulipy（C 后端，独立实现，2019-04 后未更新）vs 我们的 TA-Lib 后端，对 MAP 内每个特征交叉验证。`exact` 组断言 tail-reldiff < 1e-6；`definitional` 组只断言有限；`no_lib` 组（plus_di/minus_di/lrslope/supertrend/ha_o）文档化跳过。**尾部对齐**（tulipy 裁剪 warm-up 前缀返回短数组，与 TA-Lib 保留 NaN 前缀相反）。tulipy 缺失时 `importorskip` 自动跳过 |
 | `test_crosscheck_skips_unknown_features`（tulipy） | **v1.2**：K1b 对照组健壮性——被 0004 重命名出注册表的映射特征被干净跳过（非 KeyError），未映射特征静默忽略 |
 | `test_v13_family_known_values_and_invariants` | **v1.3**：TRIX 无量纲比率/零平动量趋零、TSI∈[-100,100]、VHF∈[0,1]、Vortex∈[0,100]、Aroon∈[0,100]、各特征 warmup 与 K8 网格（24/60 或 fast/slow 二元组） |
-| `test_v13_family_registry_params` | **v1.3**：14 个新特征的 `indicator`/`window_params`/`warmup_bars` 符合 K8；AROOON UP/DOWN window 为 n 本身 |
+| `test_v13_family_registry_params` | **v1.3**：14 个新特征的 `indicator`/`window_params`/`warmup_bars` 符合 K8；Aroon UP/DOWN window 为 n 本身 |
+
+## 5b. 自检与对抗性自检（v1.3，2026-11-08）
+
+### 自检（脚本级，全部通过）
+| 检查项 | 结果 |
+|---|---|
+| 测试套件 | **104 passed**（0002 的 58 + 0003 的 46 含真实数据 E2E + ptc 主对照 2），pyflakes 干净 |
+| K8 网格 | 14 个新特征 `window_params` 全部 ∈ {6,12,24,60,120} ✓ |
+| I13 | FEATURE_VERSION 3→4 ✓ |
+| K7 | 14 个新特征全部 `self_implemented=False`（TA-Lib 背书，非自研）✓ |
+| D4 平价序列 | 6 族平价序列尾部 finite、无 Inf/NaN 泄漏 ✓ |
+| 因果性（无 lookahead） | 尾部扰动（bar≥150）不影响前值（bar 24–148）——trix/tsi/vhf/vortex/aroon 全过 ✓ |
+| vortex p/m 拆分 | `vortex_p`=[0]=VI+、`vortex_m`=[1]=VI−，与 TA-Lib VORTEX 返回序一致 ✓ |
+| 真实数据 | SPX500_USD 1h 134/134 特征全 present，新 6 族值合理（trix_24=-0.025、vhf_24=0.66、aroon_up_24=91.7）✓ |
+
+### 对抗性自检（文档级，2026-11-08 补做——此前 v1.3 只做脚本级，本轮补文档级）
+逐条 接受/挂起/拒绝。
+
+| # | 发现 | 类别 | 处置 |
+|---|---|---|---|
+| **A1** | **文档缺口**：上一轮口头给出的 5 组缓做理由（Ehlers/截面/多周期/OHLC 波动率/Connors）在 0003 + requirements 中英 4 处**全部未落**（grep 全 0）——只存在于对话，未进文档 | 🔴 已修 | **接受并已修**：本轮在 0003 §3.4 新增"v1.3 显式缓做 5 组"表（组/被挡原则/理由/解锁门槛）+ requirements R3.1 缓做清单加指针，中英成对 |
+| **A2** | **TSI ptc 映射**：`tsi_24_12`/`tsi_60_24` 映射到 ptc `TSI_f_s_13`（ptc 硬编码 signal=13），与我们的 (fast,slow) 签名不同 → 已正确标 `definitional`，非 bug | 🟢 无风险 | **接受（现状正确）**：签名差异已在 MAP 注释 + definitional 组标注 |
+| **A3** | **Aroon 命名互换**：ptc `AROONU`=我们的 AROON_DOWN。风险点=策略代码若误信 ptc 语义会把 up/down 读反 | 🟢 无风险（shipped 正确） | **接受（现状正确）**：shipped `aroon_up_*`=TA-Lib `AROON_UP`（正确），互换只存在于 cross-check 映射侧并已注释；**建议**在 0004 消费方首次引用 aroon 时补一条"以 TA-Lib 语义为准"的提醒 |
+| **A4** | **`test_crosscheck_ptc_covers_tulipy_gaps` 覆盖范围弱**：只断言 3 个 gap（plus_di/minus_di/supertrend），**未覆盖 lrslope/ha_o**（ptc 也没有，故如实留在 no_lib）——断言名"covers tulipy gaps"易被误读为"覆盖全部 no_lib" | 🟡 表述 | **挂起**：断言语义正确（ptc 确实只补齐这 3 个），但**建议在测试 docstring 里明确"仅覆盖 ptc 有能力补齐的 3 个，lrslope/ha_o 两库皆无"**，避免误读。不改断言（改弱了会失去防护价值） |
+| **A5** | **缓做理由与用户研究清单 3 处正面冲突**：① OHLC 波动率（用户："明显的新维度"）我按"与 ATR 重叠"缓做；② Connors RSI（用户："与常规 RSI(14) 信息不同"）我按"K8 违反"缓做；③ 截面组（用户："对 LightGBM 帮助最大"）我按"R9 单标的"缓做 | 🟠 判断冲突 | **挂起（待用户裁决）**：三条缓做**都有硬约束支撑**（ATR 重叠/K8 网格/R9 单标的），但用户研究清单对这三条的**价值判断高于我的默认**。已把三处冲突 + 用户原始标注写进 §3.4 缓做 5 组表的"注意"栏。**需你逐条裁决**：维持缓做（接受硬约束）/ 或放宽对应约束（如引入子 6 窗口类、或 R9 扩多标的） |
+| **A6** | **vortex_m 语义**：`vortex_p`/`vortex_m` 命名指 VI+/VI−（方向强度），与"m"字面易被误读为 minus-MA | 🟢 无风险 | **接受（现状正确）**：命名沿用 TA-Lib VORTEX 的 VI+/VI− 惯例，已在 §3.4 表注明"方向强度 VI+/VI−" |
 | `test_crosscheck_all_mapped`（ptc） | **v1.3**：**主对照组**——pandas-ta-classic（活跃 2026-10，`import pandas_ta_classic`）vs 我们的 TA-Lib 后端。`exact` 组（SMA/HMA/KAMA/RSI/ATR/NATR/CCI/WILLR/MFI/STDDEV/DEMA/TEMA/HMA/ADX/plus_di/minus_di/TRIX/VHF/Vortex/…）断言 full-length-reldiff < 1e-7（同长、仅差浮点噪声）；`definitional` 组（EMA 种子/×100/BBP 0.5 偏移/Aroon 上下命名互换/STOCH slowing/MACD/Supertrend 路径依赖）断言有限或 < 1e-3；`no_lib` 组（lrslope/ha_o/结构特征）文档化跳过。ptc 缺失时 `importorskip` 自动跳过 |
 | `test_crosscheck_ptc_covers_tulipy_gaps` | **v1.3**：K1b 主从关系——tulipy `no_lib`（plus_di/minus_di/supertrend）在 ptc 中被覆盖为 exact/definitional（不泄漏 no_lib），证明 ptc 是更强对照组 |
 
@@ -569,4 +605,4 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | 2026-11-07 | 1.0 | **0003 实施落地（用户批准"可以实现 0003 的内容了"）**：`lyra/registry.py`（K3 Registry/FeatureSpec，`window_params` 与 `params` 分离使 K8 守卫不误伤 nbdev/multiplier）+ `lyra/indicators.py`（TA-Lib 纯 NumPy 边界 + moneta/nova Supertrend golden 参考 + zscore）+ `lyra/features.py`（`build_registry()` 116 特征、`compute_features`、`load_from` alpha（D7 fail-fast + I16 core 不变）、`run_features` D5 per-instrument 流水线、Parquet 元数据版本）全部落地。**实施期据实修正（均不改特征清单/参数，不触发 I13）**：① NATR 实现为 `atr/close`（**非** `talib.NATR`——后者 ×100，违背 §3.4 与 `test_natr_consistency` 的无量纲契约）；② `rel_quote_activity` 实现为 `volume/SMA(volume,24)`（无量纲，与 nova 实证公式一致，取代早期讨论稿的 `×1e9` 变体）；③ **warm-up 前缀按实测精确化**（MACD = slow+fast−2、STOCH = fastk+slowd−2、DEMA/TEMA 保持安全上界、HMA = n+5、`shift6_atr` = ATR_NORM=24、`rsi_divergence` = 48）——`warmup_bars` 是 F2 断言的安全下界，取实测最大前缀。④ 输出路径 `data/features/ohlcv_5m|1h/<instrument>.parquet`（对齐 0002 聚合层命名 `<minutes>m`，目录名用层名而非分钟数）。**新增工程件**：`lyra features` CLI（恒重算恒覆盖，`--minutes 5|60` / `--instrument` / `--alpha-dir`）、Catalog `features_5m/1h` 视图（D1，glob `features/ohlcv_*/\*.parquet`）、`pyproject.toml` 加 `TA-Lib>=0.8.2` 依赖。**37 项文档测试全部实现并通过**（`tests/test_registry.py` / `test_indicators.py` / `test_features.py`，另 +1 真实数据 E2E），0002 套件 58 项仍全绿（合计 **96**）。**状态：提案 → 已实施**；`test_real_data_one_instrument`（SPX500_USD 1h，40435 行，124 列）实测通过。 |
 | 2026-11-07 | 1.1 | **新增 Heikin Ashi 族（用户指令"如果可以把这个也加进去"；TA-Lib 无此指标 → 触发 K7 自研路径）**：§3.4 表新增 `ha_o / ha_h / ha_l / ha_c` 4 列（递归变换，无窗口参数 → K8 网格 N/A；warmup_bars=16 为递归收敛安全下界，seed 依赖 ~16 bar 后 < 1e-9）；**K7 管理纪律全部适用**：参数显式入注册表（`self_implemented: True` 标记，本次实施中把该标记落到 `FeatureSpec`/`Registry.register` 的显式字段上，0003 v0.6 K7 降级为条件护栏后首次实际触发）+ 契约卡（递归定义 + seed 规则 + 收敛界）+ golden test `test_heikin_asi_known_values`（独立纯 Python 教科书参考 vs shipped，从 bar 32 起逐点 < 1e-9）+ `test_heikin_asi_k7_management`（self_implemented=True / window_params=() / warmup_bars>=16 三项断言）。**触发 I13**：特征集变更（+4 列）→ **FEATURE_VERSION +1（2→3）**。测试 38→**40**（中英一致），0002 的 58 项仍全绿（**合计 98**）。缓做清单的 P1 族 HeikinAshi 项移除（已落地，非遗忘） |
 | 2026-11-07 | 1.2 | **引入 tulipy 跨库对照组（K1b，用户拍板"装上对照、留着以后用"）**：实测选型（隔离 venv，py3.12 + numpy 2.5.4 + 无 pandas 栈）→ 采用 **tulipy**（C 后端、**免 pandas**、100+ 指标、覆盖面 > 手写参考，以后加 P1/P2 可直接复用），作为**可选依赖** `lyra[control]`（`pyproject.toml` 新增 `[project.optional-dependencies] control = ["tulipy"]`，**不进核心依赖**，R10 保持 ≤15 核心包）；**排除** Finta（PyPI 名 `fintech` 被无关 LicenseManager 抢注，装不到真身 + 已归档）、bukosabino/ta + pandas-ta-classic（都强绑 pandas，违背运行时无 pandas 原则）、vectorbt（整套策略研究框架，非指标库，引入即成第二个找策略引擎 = moneta 踩过的外围过度工程坑）。**新增** `tests/crosscheck_tulipy.py`（MAP 映射表 + `run_crosscheck` 尾部对齐）+ `tests/test_crosscheck_tulipy.py`（2 测试，tulipy 缺失时 `importorskip` 自动跳过）。**两组实证差异固化进标签**：`exact`（SMA/HMA/KAMA/RSI/MOM/CCI/WILLR/MFI/STDDEV，无递光滑滑器，断言 < 1e-6）vs `definitional`（EMA/DEMA/TEMA/ATR/ADX/NATR/ROC/CMO/OBV，递归种子/alpha/×100/OBV 种子差异，只断言有限）vs `no_lib`（plus_di/minus_di/lrslope/supertrend/ha_o，文档化跳过）。**关键工程点**：tulipy 裁剪 warm-up 前缀返回短数组（与 TA-Lib 保留 NaN 前缀相反，moneta §2.3 反例 1 的"删前缀"陷阱）→ 对照**必须尾部对齐**。§3.3 新增 K1b 段 + §5 测试表 +2 行。**不改特征集**（FEATURE_VERSION 维持 3）。测试 98→**100**（中英一致），pyflakes 干净 |
-| 2026-11-07 | 1.3 | **新增 6 个标准指标族 + pandas-ta-classic 升主对照组（用户拍板"很多都值得现在 implement 掉" + "把 pandas-ta-classic 作为主要 control group"）**：① 用户实测调研——pandas-ta-classic **PyPI 活跃**（`2026-10-28`，276 指标）vs tulipy（`2019-04-11` 后未更新，用户判断对）；pandas 作为**测试对照依赖**引入被接受（用户："pandas 有没有其实无所谓，我没要求极轻量"）→ **K1b 主从调整**：pandas-ta-classic 升**主对照组**（新增 `tests/crosscheck_pandas_ta_classic.py` + `test_crosscheck_pandas_ta_classic.py`，full-length 对照、`plus_di/minus_di/supertrend` 实测 exact/definitional，覆盖 tulipy `no_lib` 缺口）；tulipy 保留为**次级锚点**（C 后端、免 pandas、独立实现，保留价值不变）；`pyproject.toml` `control = ["pandas-ta-classic","tulipy"]`。② **新增 6 族（14 特征）**：TRIX 24/60、TSI 24_12/60_24、VHF 24/60、Vortex 24/60（p/m）、Aroon 24/60（up/down）——均 TA-Lib 0.8.2 有库实现、信息维度互补（非 SMA/EMA/ATR 冗余）、K8 网格、pandas-ta-classic 可机器验证（TRIX/VHF/Vortex 实测 < 1e-12）。③ **特征集 +14 → FEATURE_VERSION 3→4**（I13）。§3.4 表 +6 行、§5 测试表 +4 行。测试 100→**104**（中英一致），pyflakes 干净，SPX500 真实数据 E2E 134/134 特征全出、新 6 族有限值合理 |
+| 2026-11-07 | 1.3 | **新增 6 个标准指标族 + pandas-ta-classic 升主对照组（用户拍板"很多都值得现在 implement 掉" + "把 pandas-ta-classic 作为主要 control group"）**：① 用户实测调研——pandas-ta-classic **PyPI 活跃**（`2026-10-28`，276 指标）vs tulipy（`2019-04-11` 后未更新，用户判断对）；pandas 作为**测试对照依赖**引入被接受（用户："pandas 有没有其实无所谓，我没要求极轻量"）→ **K1b 主从调整**：pandas-ta-classic 升**主对照组**（新增 `tests/crosscheck_pandas_ta_classic.py` + `test_crosscheck_pandas_ta_classic.py`，full-length 对照、`plus_di/minus_di/supertrend` 实测 exact/definitional，覆盖 tulipy `no_lib` 缺口）；tulipy 保留为**次级锚点**（C 后端、免 pandas、独立实现，保留价值不变）；`pyproject.toml` `control = ["pandas-ta-classic","tulipy"]`。② **新增 6 族（14 特征）**：TRIX 24/60、TSI 24_12/60_24、VHF 24/60、Vortex 24/60（p/m）、Aroon 24/60（up/down）——均 TA-Lib 0.8.2 有库实现、信息维度互补（非 SMA/EMA/ATR 冗余）、K8 网格、pandas-ta-classic 可机器验证（TRIX/VHF/Vortex 实测 < 1e-12）。③ **特征集 +14 → FEATURE_VERSION 3→4**（I13）。§3.4 表 +6 行、§5 测试表 +4 行。测试 100→**104**（中英一致），pyflakes 干净，SPX500 真实数据 E2E 134/134 特征全出、新 6 族有限值合理。**v1.3 补（2026-11-08）**：① **缓做 5 组完整落表**（§3.4 新增"v1.3 显式缓做 5 组"表：Ehlers 周期/滤波、截面相对强弱、多周期、OHLC 波动率估计器、Connors RSI/累计RSI(2)，各含被挡原则/理由/**解锁门槛**）——此前仅口头给出，未进文档（对抗性自检 A1 发现并修复）；requirements R3.1 缓做清单加指针。② **新增 §5b 自检与对抗性自检**：脚本级 8 项全过 + 文档级 6 条（A1 已修 / A2·A3·A6 接受现状正确 / A4 挂起表述 / **A5 挂起——3 处缓做理由与用户研究清单正面冲突，待用户逐条裁决**） |

@@ -110,6 +110,7 @@ authoritative grid**). Initial list:
   - QQE / RSX / VFI / Squeeze / Schaff / Ichimoku / Inside Bar / Williams Fractal (need self-implementation or parameter explosion; Heikin Ashi shipped in v1.1)
   - CORREL / BETA (no natural reference series in a single-instrument universe)
   - HT_* (overfitting risk); CDL* (needs a statistical pre-screen first)
+  - **v1.3 explicit deferred 5 groups** (Ehlers cycle/filter, cross-sectional relative strength, multi-timeframe, OHLC volatility estimators, Connors RSI / cumulative RSI(2)) — each group's blocking principle / rationale / **unblocking gate** is documented in `decisions/0003-feature-builder.en.md` §3.4 "v1.3 explicit deferred groups" table (ZH+EN); the **cross-sectional group is the user's highest-priority candidate** and should be the first un-parked once R9 expands to multi-instrument
 - Semantic / structure: `sma_cross_up_6_24 / sma_cross_down_6_24`,
   `sma_alignment_6_24 ∈ {-1, 0, 1}`, `rsi_divergence_up / down`,
   `psar_bullish / bearish`, `supertrend_bullish / bearish`
