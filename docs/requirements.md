@@ -183,7 +183,10 @@ Lyra 的主要功能就是**跟 OCI 保持同步**：
 - **稳定**：同一输入 + 同一版本 → 同一输出（bit-for-bit，DuckDB 版本
   一致时）。
 - **轻量**：核心依赖 ≤ 15 个 Python 包；启动 < 3 秒；单次 21 标的
-  H1 全量 run < 5 分钟（16 核机器）。
+  H1 全量 run < 5 分钟（16 核机器）。**例外（2026-11-08）**：
+  `control` 可选依赖组（当前仅 `tulipy`）不计入核心上限——它是
+  **test-only 跨库对照组**，运行时不 import，
+  `pip install "lyra[control]"` 显式启用（0003 v1.2 K1b）。
 - **可审查**：每个 feature 一个 commit + 一个决策文档；
   测试覆盖因果性 / 执行合约 / 指标口径 / 数据合约。
 - **可移植**：POSIX + Windows；不依赖系统包（TA-Lib 通过 wheel）。
@@ -295,3 +298,4 @@ YAML 文件。初始 12 个方向继承自 nova：`trend_continuation`、
 | 2026-11-07 | 0.11 | **R3.1 扩充标准指标集（用户批准"推荐范围"）**：新增 NATR / MACD（精选三元组 6_12_6/6_24_6/12_60_12）/ ROC / STOCH（%K/%D）/ BBANDS（%B+带宽，不用原始上下轨）/ ADX+PLUS_DI+MINUS_DI / CCI / WILLR / MFI / CMO / OBV（斜率）/ LINEARREG_SLOPE / KAMA 共 **13 族**；窗口参数一律取 K8 网格 {6,12,24,60,120}（外部建议清单的 5/10/14/20 不采用）。参数面纪律：MACD 精选三元组非全网格展开、趋势强度/动量/震荡族只取 24/60、BBANDS/OBV 取无量纲形态。**缓做**（有理由）：PPO/TRIX/ULTOSC/AROON/STDDEV、CORREL/BETA（无基准序列）、HT_*/CDL*。**触发 I13：FEATURE_VERSION +1**。同步 0003 v0.8（§3.4 + D4 门禁 + 测试 34） |
 | 2026-11-07 | 0.12 | **R3.1 v0.9 补全 P0 缺口（8 项）**：DEMA(6/24/60)、TEMA(6/24/60)、HMA(24/60)、MOM(6/24/60)、Rolling StdDev(24/60)、Z-Score(24/60)、Efficiency Ratio @60、Donchian @60（prior24_* 基础上补 prior60_*）。**缓做新增**：Keltner（=EMA±2×ATR，BBANDS 已覆盖）、Choppiness（=ATR+Donchian 组合变换）、Relative Volume/VWMA（rel_quote_activity 已覆盖）、P1 全族（参数面过大或需自研，留第二批）。**触发 I13：FEATURE_VERSION +1**（v0.8 已 +1，本次再 +1 = 累计 +2）。同步 0003 v0.9（§3.4 + 测试 +6） |
 | 2026-11-07 | 0.13 | **R3.1 新增 Heikin Ashi（用户指令；0003 v1.1）**：`ha_o / ha_h / ha_l / ha_c` 4 列，K7 自研（TA-Lib 无此指标），递归变换无窗口参数（K8 N/A），warmup_bars=16（递归收敛安全下界）；K7 管理纪律全部适用（`self_implemented: True` 注册表标记 + 契约卡 + golden test + I13）。缓做清单的 Heikin Ashi 项移除（已落地）。**触发 I13：FEATURE_VERSION +1（2→3）**。同步 0003 v1.1（§3.4 + 测试 +2） |
+| 2026-11-08 | 0.14 | **R8 轻量条款例外（用户批准）**：`control` 可选依赖组（当前仅 `tulipy`）不计入核心 ≤ 15 包上限——test-only 跨库对照组，运行时不 import，`pip install "lyra[control]"` 显式启用（0003 v1.2 K1b：exact 9 族 <1e-6 一致 + definitional 9 族口径差异冻结 + 5 族无库跳过；tail-alignment 工程点）。requirements 本体指标集不变（120 features，FEATURE_VERSION=3）。 |

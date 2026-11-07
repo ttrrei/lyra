@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0003` |
 | 标题 | Feature Builder（标准特征 + alpha 扩展点） |
-| 状态 | **已实施**（0003 代码落地，98 测试通过，真实数据 E2E 通过；v1.1 新增 Heikin Ashi） |
+| 状态 | **已实施**（0003 代码落地，100 测试通过，真实数据 E2E 通过；v1.1 新增 Heikin Ashi；v1.2 引入 tulipy 跨库对照组 K1b） |
 | Owner | `ttrrei` |
 | 创建日期 | `2026-11-07` |
 | 相关提案 | — |
@@ -239,6 +239,35 @@
   且 core 保持"指标算法层与库实现解耦"（`indicators.py` 纯 NumPy
   边界），未来如需替换/降级引擎，只需换 `features.py` 的库调用
   而不触算法。
+
+**K1b 跨库对照组（v1.2 新增，2026-11-07 用户批准"装上 tulipy 对照、留着以后用"）**：
+K1 用 TA-Lib 作为**唯一计算后端**，为防止未来 TA-Lib 换版本悄悄改语义，
+引入**独立第二实现**做交叉验证。选型实测（隔离 venv、py3.12 + numpy 2.5.4、
+无 pandas 的运行时栈）后结论：
+- **采用 tulipy**——C 后端、**免 pandas**（唯一免 pandas 的第三方指标库）、
+  100+ 指标、覆盖面 > `test_indicators.py` 的手写纯 NumPy 参考，且以后加
+  P1/P2 指标时可直接复用为对照组。**作为可选依赖** `lyra[control]`（
+  `pyproject.toml` 的 `[project.optional-dependencies] control = ["tulipy"]`），
+  **不进核心依赖**（R10 保持 ≤15 核心包），仅 `tests/` 期 import；
+  `tests/test_crosscheck_tulipy.py` 在 tulipy 缺失时 `pytest.importorskip`
+  自动跳过，不破坏核心套件（100 测试含其 2 项，缺库时 98）。
+- **排除 Finta**——PyPI 名 `fintech` 被无关的 LicenseManager 包抢注，装不到真身、
+  且已归档；**排除 bukosabino/ta 与 pandas-ta-classic**——都强绑 pandas，违背
+  "运行时栈刻意无 pandas"，且本质是 TA-Lib 的 re-implementation，对照价值
+  tulipy 已覆盖；**排除 vectorbt**——整套策略研究框架（自带回测/组合），非指标
+  库，引入即成"第二个找策略引擎"，正是 moneta 踩过的外围过度工程坑。
+
+**两组实证差异（K1b 核心发现，固化进对照标签，非 bug）**：
+- **机器精度一致（tag `exact`，断言 < 1e-6）**：SMA / HMA / KAMA / RSI / MOM /
+  CCI / WILLR / MFI / STDDEV——这些**不用衰减递光滑滑器**，两个 C 库仅差浮点噪声。
+- **定义差异（tag `definitional`，只断言有限、不断言量级）**：EMA / DEMA / TEMA /
+  ATR / ADX / NATR / ROC / CMO / OBV——这些**用递光滑滑器**（EMA 或 Wilder），
+  TA-Lib 与 tulipy 的递归**种子不同 / alpha 不同 / ×100 缩放 / OBV 种子**，
+  尾部在合理序列长度下**不收敛到机器精度**（实测 EMA/DEMA ~1e-2、TEMA ~1e-3、
+  ATR/ADX ~3e-3、随长度波动）。这是合法的库间约定差异，与 #61 的 CMO/MFI
+  同源。**关键工程点**：tulipy **裁剪 warm-up 前缀、返回短数组**（与 TA-Lib
+  保留 NaN 前缀、长度不变相反，正是 moneta §2.3 反例 1 的"删前缀"陷阱），
+  故对照**必须按尾部对齐**（`a[-k:]`），不可假设等长。
 
 **K2 宽表粒度（定案）**：特征宽表按 **timeframe × instrument**
 分文件（与 market 层布局一致）；每文件含原始 OHLCV 列（复制，
@@ -478,6 +507,8 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | `test_supertrend_registry_params` | Supertrend（库实现）管理纪律：ATR 窗口取网格点、multiplier 显式入注册表（非硬编码于函数体）+ golden 值与 moneta/nova 参考实现逐点偏差 < 1e-12（K7 的库实现等价纪律，非"自研四项管理"——后者是未触发条件护栏） |
 | `test_heikin_asi_known_values` | **v1.1**：Heikin Ashi 递归变换 golden test——独立纯 Python 教科书参考 vs shipped，从 bar 32 起逐点 < 1e-9（seed 依赖 ~16 bar 后收敛）；不变式 `ha_h ≥ ha_c ≥ ha_l` 全程成立（K7） |
 | `test_heikin_asi_k7_management` | **v1.1**：K7 管理纪律——`self_implemented=True` 标记 + `window_params=()`（递归非窗口，K8 N/A）+ `warmup_bars ≥ 16` 三项断言 |
+| `test_crosscheck_all_mapped` | **v1.2**：K1b 跨库对照——tulipy（C 后端，独立实现）vs 我们的 TA-Lib 后端，对 MAP 内每个特征交叉验证。`exact` 组（SMA/HMA/KAMA/RSI/MOM/CCI/WILLR/MFI/STDDEV）断言 tail-reldiff < 1e-6（两 C 库仅差浮点噪声）；`definitional` 组（EMA/DEMA/TEMA/ATR/ADX/NATR/ROC/CMO/OBV，递归种子/alpha/×100/OBV 种子差异）只断言有限；`no_lib` 组（plus_di/minus_di/lrslope/supertrend/ha_o）文档化跳过。**尾部对齐**（tulipy 裁剪 warm-up 前缀返回短数组，与 TA-Lib 保留 NaN 前缀相反）。tulipy 缺失时 `importorskip` 自动跳过，不破坏核心套件（K1b） |
+| `test_crosscheck_skips_unknown_features` | **v1.2**：K1b 对照组健壮性——被 0004 重命名出注册表的映射特征被干净跳过（非 KeyError），未映射特征静默忽略 |
 
 ## 6. 回滚
 
@@ -512,3 +543,4 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | 2026-11-07 | 0.9 | **补全 P0 基础指标缺口（用户确认；外部 P0/P1/P2 清单中 P0 缺口的 8 项落地，参数全按 K8 网格）**：§3.4 新增 6 族标准指标——DEMA（6/24/60）、TEMA（6/24/60）、HMA（24/60）、MOM（6/24/60）、StdDev（24/60）、Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）；结构族补 **Donchian @60**（`prior60_high/low/range`，同 prior24 的 `shift(1)` 排当前 bar 口径）+ **Efficiency Ratio @60**（`path_eff_60`）。**撤销 v0.8 对 STDDEV 的缓做**（用户拍板：STDDEV 与 Z-Score 的"价格围绕均值的离散/位置"维度与 ATR（TR 基准）/BBANDS（%B 相对位置）不完全重叠，P0 要求覆盖）；缓做清单同步增补：Keltner（=EMA±2×ATR，BBANDS 覆盖）、Choppiness（ATR+Donchian 组合变换）、Relative Volume/VWMA（rel_quote_activity 覆盖）、P1 全族（AROON/TRIX/CMF/EFI/PVT/SMI/TSI/VHF/QQE/RSX/Ichimoku/HeikinAshi/InsideBar/Fractal/Squeeze/Schaff——参数面过大或需自研，留第二批待 0003 基础版跑通后评估）。D4 门禁补 `zscore_*`（第 6 个新除法特征，N 根全平价 → 滚动标准差 0）；`test_grid_only_windows` 扩范围；**+3 测试**（dema_tema_hma / mom_stddev_zscore / prior60_path_eff60）。**触发 I13**：特征集再变更 → **FEATURE_VERSION 再 +1**（v0.8 已 +1，累计 +2）。同步 R3.1（requirements v0.12 中英）。测试 34→**37**（中英一致） |
 | 2026-11-07 | 1.0 | **0003 实施落地（用户批准"可以实现 0003 的内容了"）**：`lyra/registry.py`（K3 Registry/FeatureSpec，`window_params` 与 `params` 分离使 K8 守卫不误伤 nbdev/multiplier）+ `lyra/indicators.py`（TA-Lib 纯 NumPy 边界 + moneta/nova Supertrend golden 参考 + zscore）+ `lyra/features.py`（`build_registry()` 116 特征、`compute_features`、`load_from` alpha（D7 fail-fast + I16 core 不变）、`run_features` D5 per-instrument 流水线、Parquet 元数据版本）全部落地。**实施期据实修正（均不改特征清单/参数，不触发 I13）**：① NATR 实现为 `atr/close`（**非** `talib.NATR`——后者 ×100，违背 §3.4 与 `test_natr_consistency` 的无量纲契约）；② `rel_quote_activity` 实现为 `volume/SMA(volume,24)`（无量纲，与 nova 实证公式一致，取代早期讨论稿的 `×1e9` 变体）；③ **warm-up 前缀按实测精确化**（MACD = slow+fast−2、STOCH = fastk+slowd−2、DEMA/TEMA 保持安全上界、HMA = n+5、`shift6_atr` = ATR_NORM=24、`rsi_divergence` = 48）——`warmup_bars` 是 F2 断言的安全下界，取实测最大前缀。④ 输出路径 `data/features/ohlcv_5m|1h/<instrument>.parquet`（对齐 0002 聚合层命名 `<minutes>m`，目录名用层名而非分钟数）。**新增工程件**：`lyra features` CLI（恒重算恒覆盖，`--minutes 5|60` / `--instrument` / `--alpha-dir`）、Catalog `features_5m/1h` 视图（D1，glob `features/ohlcv_*/\*.parquet`）、`pyproject.toml` 加 `TA-Lib>=0.8.2` 依赖。**37 项文档测试全部实现并通过**（`tests/test_registry.py` / `test_indicators.py` / `test_features.py`，另 +1 真实数据 E2E），0002 套件 58 项仍全绿（合计 **96**）。**状态：提案 → 已实施**；`test_real_data_one_instrument`（SPX500_USD 1h，40435 行，124 列）实测通过。 |
 | 2026-11-07 | 1.1 | **新增 Heikin Ashi 族（用户指令"如果可以把这个也加进去"；TA-Lib 无此指标 → 触发 K7 自研路径）**：§3.4 表新增 `ha_o / ha_h / ha_l / ha_c` 4 列（递归变换，无窗口参数 → K8 网格 N/A；warmup_bars=16 为递归收敛安全下界，seed 依赖 ~16 bar 后 < 1e-9）；**K7 管理纪律全部适用**：参数显式入注册表（`self_implemented: True` 标记，本次实施中把该标记落到 `FeatureSpec`/`Registry.register` 的显式字段上，0003 v0.6 K7 降级为条件护栏后首次实际触发）+ 契约卡（递归定义 + seed 规则 + 收敛界）+ golden test `test_heikin_asi_known_values`（独立纯 Python 教科书参考 vs shipped，从 bar 32 起逐点 < 1e-9）+ `test_heikin_asi_k7_management`（self_implemented=True / window_params=() / warmup_bars>=16 三项断言）。**触发 I13**：特征集变更（+4 列）→ **FEATURE_VERSION +1（2→3）**。测试 38→**40**（中英一致），0002 的 58 项仍全绿（**合计 98**）。缓做清单的 P1 族 HeikinAshi 项移除（已落地，非遗忘） |
+| 2026-11-07 | 1.2 | **引入 tulipy 跨库对照组（K1b，用户拍板"装上对照、留着以后用"）**：实测选型（隔离 venv，py3.12 + numpy 2.5.4 + 无 pandas 栈）→ 采用 **tulipy**（C 后端、**免 pandas**、100+ 指标、覆盖面 > 手写参考，以后加 P1/P2 可直接复用），作为**可选依赖** `lyra[control]`（`pyproject.toml` 新增 `[project.optional-dependencies] control = ["tulipy"]`，**不进核心依赖**，R10 保持 ≤15 核心包）；**排除** Finta（PyPI 名 `fintech` 被无关 LicenseManager 抢注，装不到真身 + 已归档）、bukosabino/ta + pandas-ta-classic（都强绑 pandas，违背运行时无 pandas 原则）、vectorbt（整套策略研究框架，非指标库，引入即成第二个找策略引擎 = moneta 踩过的外围过度工程坑）。**新增** `tests/crosscheck_tulipy.py`（MAP 映射表 + `run_crosscheck` 尾部对齐）+ `tests/test_crosscheck_tulipy.py`（2 测试，tulipy 缺失时 `importorskip` 自动跳过）。**两组实证差异固化进标签**：`exact`（SMA/HMA/KAMA/RSI/MOM/CCI/WILLR/MFI/STDDEV，无递光滑滑器，断言 < 1e-6）vs `definitional`（EMA/DEMA/TEMA/ATR/ADX/NATR/ROC/CMO/OBV，递归种子/alpha/×100/OBV 种子差异，只断言有限）vs `no_lib`（plus_di/minus_di/lrslope/supertrend/ha_o，文档化跳过）。**关键工程点**：tulipy 裁剪 warm-up 前缀返回短数组（与 TA-Lib 保留 NaN 前缀相反，moneta §2.3 反例 1 的"删前缀"陷阱）→ 对照**必须尾部对齐**。§3.3 新增 K1b 段 + §5 测试表 +2 行。**不改特征集**（FEATURE_VERSION 维持 3）。测试 98→**100**（中英一致），pyflakes 干净 |

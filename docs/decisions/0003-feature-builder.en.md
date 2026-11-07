@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0003` |
 | Title | Feature Builder (standard features + alpha extension point) |
-| Status | **Implemented** (0003 code shipped; 98 tests pass; real-data E2E passes; v1.1 adds Heikin Ashi) |
+| Status | **Implemented** (0003 code shipped; 100 tests pass; real-data E2E passes; v1.1 adds Heikin Ashi; v1.2 adds the tulipy cross-library control group K1b) |
 | Owner | `ttrrei` |
 | Created | `2026-11-07` |
 | Related proposal | — |
@@ -305,6 +305,49 @@ TA-Lib; DuckDB never computes features** —
   so replacing/downgrading the engine later only touches
   `features.py`'s library calls, not the algorithms.
 
+**K1b Cross-library control group (v1.2, user approved 2026-11-07: "install tulipy as a control, keep it for later")**:
+K1 uses TA-Lib as the **sole compute backend**; to guard against a silent
+semantic change if TA-Lib is ever re-versioned, we adopt an **independent
+second implementation** for cross-validation. Empirical selection (isolated
+venv, py3.12 + numpy 2.5.4, our deliberate pandas-free runtime stack):
+- **Adopt tulipy** — C-backed, **pandas-free** (the only third-party indicator
+  lib with no pandas dependency), 100+ indicators, broader coverage than the
+  hand-rolled pure-NumPy references in `test_indicators.py`, and reusable as
+  the control group whenever we add P1/P2 indicators later. It is an
+  **optional dependency** `lyra[control]`
+  (`pyproject.toml` `[project.optional-dependencies] control = ["tulipy"]`),
+  **not a core dependency** (R10 keeps the core at ≤15 packages); only
+  `tests/` imports it. `tests/test_crosscheck_tulipy.py` auto-skips via
+  `pytest.importorskip` when tulipy is absent, so the core suite is untouched
+  (100 tests incl. its 2; 98 without the lib).
+- **Reject Finta** — its PyPI name `fintech` is squat-registered by an
+  unrelated "LicenseManager" package, so the real lib cannot be installed, and
+  it is archived; **reject bukosabino/ta and pandas-ta-classic** — both hard-
+  require pandas, contradicting the "deliberately pandas-free runtime stack",
+  and are themselves TA-Lib re-implementations whose cross-check value tulipy
+  already covers; **reject vectorbt** — it is a full strategy-research
+  framework (with its own backtest/portfolio), not an indicator lib; adopting
+  it would install "a second strategy-finding engine", exactly the peripheral
+  over-engineering trap moneta hit.
+
+**Two empirically-verified difference classes (K1b core finding, frozen into
+control tags, NOT bugs)**:
+- **Machine-precision match (tag `exact`, asserted < 1e-6)**: SMA / HMA / KAMA /
+  RSI / MOM / CCI / WILLR / MFI / STDDEV — these use **no decaying recursive
+  smoother**, so the two C libraries differ only by floating-point noise.
+- **Definitional difference (tag `definitional`, only finiteness asserted, no
+  magnitude bound)**: EMA / DEMA / TEMA / ATR / ADX / NATR / ROC / CMO / OBV —
+  these use a **decaying recursive smoother** (EMA or Wilder); TA-Lib and tulipy
+  differ in recursion **seed / alpha / ×100 scaling / OBV seed**, so the tail
+  does **not** converge to machine precision at reasonable series lengths
+  (measured: EMA/DEMA ~1e-2, TEMA ~1e-3, ATR/ADX ~3e-3, length-dependent).
+  This is a legitimate inter-library convention difference, same family as the
+  CMO/MFI findings in #61. **Key engineering point**: tulipy **truncates the
+  warm-up prefix and returns a shorter array** (the opposite of TA-Lib, which
+  keeps the full length and NaN-fills the prefix — exactly the moneta §2.3
+  anti-pattern #1 "delete the prefix rows" trap), so the cross-check **must
+  align on the tail** (`a[-k:]`) and never assume equal lengths.
+
 **K2 Wide-table granularity (decided)**: one feature wide table per
 **timeframe × instrument** (same layout as the market layer); each
 file copies the raw OHLCV columns (copy, not reference) → the 0004
@@ -554,6 +597,8 @@ overfitting into a very narrow parameter environment. **Impact**:
 | `test_supertrend_registry_params` | Supertrend (library-backed) management discipline: ATR window on a grid point, multiplier explicit in the registry (not hard-coded in the function body) + golden values point-for-point cross-checked against the moneta/nova reference implementation, deviation < 1e-12 (K7's library-backed equivalent discipline, NOT the "four self-implemented rules" — that is the untriggered conditional guard) |
 | `test_heikin_asi_known_values` | **v1.1**: Heikin Ashi recursive-transform golden test — independent pure-Python textbook reference vs shipped, point-for-point < 1e-9 from bar 32 (seed dependence converges after ~16 bars); the invariant `ha_h ≥ ha_c ≥ ha_l` holds at every bar (K7) |
 | `test_heikin_asi_k7_management` | **v1.1**: K7 management discipline — `self_implemented=True` marker + `window_params=()` (recursion, not a window; K8 N/A) + `warmup_bars ≥ 16`, three assertions |
+| `test_crosscheck_all_mapped` | **v1.2**: K1b cross-library control — tulipy (C-backed, independent implementation) vs our TA-Lib backend, cross-checking every feature in MAP. The `exact` group (SMA/HMA/KAMA/RSI/MOM/CCI/WILLR/MFI/STDDEV) asserts tail-reldiff < 1e-6 (two C libs differ only by float noise); the `definitional` group (EMA/DEMA/TEMA/ATR/ADX/NATR/ROC/CMO/OBV — recursion seed/alpha/×100/OBV-seed differences) asserts only finiteness; the `no_lib` group (plus_di/minus_di/lrslope/supertrend/ha_o) is a documented skip. **Tail alignment** (tulipy truncates the warm-up prefix and returns a shorter array, the opposite of TA-Lib which keeps NaN prefix at full length). Auto-skips via `importorskip` when tulipy is absent, so the core suite is untouched (K1b) |
+| `test_crosscheck_skips_unknown_features` | **v1.2**: K1b control-group robustness — a mapped feature renamed out of the registry (0004) is skipped cleanly (not KeyError); unmapped features are silently ignored |
 
 ## 6. Rollback
 
@@ -591,3 +636,4 @@ overfitting into a very narrow parameter environment. **Impact**:
 | 2026-11-07 | 0.9 | **Filled the P0 base-indicator gap (user confirmed; the 8 P0-gap items from the external P0/P1/P2 list landed, all params on the K8 grid)**: §3.4 adds 6 standard families — DEMA (6/24/60), TEMA (6/24/60), HMA (24/60), MOM (6/24/60), StdDev (24/60), Z-Score (24/60, `(close−SMA)/STDDEV` dimensionless); the structural family adds **Donchian @60** (`prior60_high/low/range`, same `shift(1)`-exclude-current-bar convention as prior24) + **Efficiency Ratio @60** (`path_eff_60`). **STDDEV un-parked** (user decision: its price-dispersion/position dimension is not fully covered by ATR/BBANDS, and P0 requires coverage); parked list extended (Keltner / Choppiness / Relative Volume-VWMA / all P1 families — parameter surface too large or self-implementation needed, deferred to batch 2 after the 0003 base works). D4 gate adds `zscore_*` (6th new division feature, N all-flat bars → 0/0); `test_grid_only_windows` scope expanded; **+3 tests** (dema_tema_hma / mom_stddev_zscore / prior60_path_eff60). **Triggers I13**: feature-set change again → **FEATURE_VERSION +1** (v0.8 already +1, cumulative +2). Synced R3.1 (requirements v0.12 ZH+EN). Tests 34→**37** (ZH=EN) |
 | 2026-11-07 | 1.0 | **0003 implementation shipped (user approved "you may implement 0003 now")**: `lyra/registry.py` (K3 Registry/FeatureSpec; `window_params` kept separate from `params` so the K8 guard doesn't false-positive on nbdev/multiplier) + `lyra/indicators.py` (pure-NumPy TA-Lib boundary + the moneta/nova Supertrend golden reference + zscore) + `lyra/features.py` (`build_registry()` 116 features, `compute_features`, `load_from` alpha loader (D7 fail-fast + I16 core-untouched), `run_features` D5 per-instrument pipeline, Parquet metadata versioning) all landed. **Implementation-time corrections (none change the feature list/params → no I13 trigger)**: ① NATR implemented as `atr/close` (**not** `talib.NATR` — that ×100, violating the §3.4 / `test_natr_consistency` dimensionless contract); ② `rel_quote_activity` implemented as `volume/SMA(volume,24)` (dimensionless, matches nova's proven formula; supersedes an earlier draft's `×1e9` variant); ③ **warm-up prefixes made exact from measurement** (MACD = slow+fast−2, STOCH = fastk+slowd−2, DEMA/TEMA kept safe upper bounds, HMA = n+5, `shift6_atr` = ATR_NORM=24, `rsi_divergence` = 48) — `warmup_bars` is the safe lower bound the F2 assertion relies on, set to the measured max prefix; ④ output path `data/features/ohlcv_5m|1h/<instrument>.parquet` (aligned with the 0002 aggregate-layer name, dir named by layer not minute count). **New engineering pieces**: `lyra features` CLI (always recompute+overwrite; `--minutes 5|60` / `--instrument` / `--alpha-dir`), Catalog `features_5m/1h` views (D1, glob `features/ohlcv_*/\*.parquet`), `pyproject.toml` adds the `TA-Lib>=0.8.2` dependency. **All 37 documented tests implemented and passing** (`tests/test_registry.py` / `test_indicators.py` / `test_features.py`, plus 1 real-data E2E), and the 0002 suite's 58 tests stay green (**96 total**). **Status: Proposal → Implemented**; `test_real_data_one_instrument` (SPX500_USD 1h, 40,435 rows, 124 columns) passes. |
 | 2026-11-07 | 1.1 | **Added the Heikin Ashi family (user: "if it can be added, add it"; TA-Lib has no HA → triggers the K7 self-implementation path)**: §3.4 table gains `ha_o / ha_h / ha_l / ha_c` (4 columns; recursive transform, no window parameter → K8 grid N/A; warmup_bars=16 is the safe lower bound for the recursive convergence, seed dependence < 1e-9 after ~16 bars). **All K7 management discipline applies**: parameters explicit in the registry (the `self_implemented: True` marker is now an explicit `FeatureSpec`/`Registry.register` field — first real trigger after 0003 v0.6 demoted K7 to a conditional guardrail) + contract card (recursive definition + seed rule + convergence bound) + golden test `test_heikin_asi_known_values` (independent pure-Python textbook reference vs shipped, per-point < 1e-9 from bar 32) + `test_heikin_asi_k7_management` (self_implemented=True / window_params=() / warmup_bars>=16). **Triggers I13**: feature-set change (+4 columns) → **FEATURE_VERSION +1 (2→3)**. Tests 38→**40** (ZH=EN), the 0002 suite's 58 stay green (**98 total**). The P1 parked-list entry "HeikinAshi" is removed (shipped, not forgotten) |
+| 2026-11-07 | 1.2 | **Introduced the tulipy cross-library control group (K1b; user: "install it as a control and keep it for later")**: empirical selection (isolated venv, py3.12 + numpy 2.5.4 + pandas-free stack) → adopted **tulipy** (C-backed, **pandas-free**, 100+ indicators, broader than the hand-rolled references, reusable for future P1/P2) as an **optional dependency** `lyra[control]` (`pyproject.toml` gains `[project.optional-dependencies] control = ["tulipy"]`, **not a core dependency**, R10 keeps the core at ≤15 packages); **rejected** Finta (its PyPI name `fintech` is squat-registered by an unrelated LicenseManager package — the real lib can't be installed — and it is archived), bukosabino/ta + pandas-ta-classic (both hard-require pandas, contradicting the pandas-free runtime principle), and vectorbt (a full strategy-research framework, not an indicator lib; adopting it installs a second strategy-finding engine = the peripheral over-engineering trap moneta hit). **Added** `tests/crosscheck_tulipy.py` (MAP + `run_crosscheck` tail-alignment) + `tests/test_crosscheck_tulipy.py` (2 tests; auto-skips via `importorskip` when tulipy is absent). **Two empirically-verified difference classes frozen into tags**: `exact` (SMA/HMA/KAMA/RSI/MOM/CCI/WILLR/MFI/STDDEV — no recursive smoother, asserted < 1e-6) vs `definitional` (EMA/DEMA/TEMA/ATR/ADX/NATR/ROC/CMO/OBV — recursion seed/alpha/×100/OBV-seed differences, only finiteness asserted) vs `no_lib` (plus_di/minus_di/lrslope/supertrend/ha_o — documented skip). **Key engineering point**: tulipy truncates the warm-up prefix and returns a shorter array (the opposite of TA-Lib, which keeps the NaN prefix at full length — moneta §2.3 anti-pattern #1's "delete the prefix rows" trap) → the cross-check **must align on the tail**. §3.3 gains the K1b section + §5 test table +2 rows. **Feature set unchanged** (FEATURE_VERSION stays 3). Tests 98→**100** (ZH=EN), pyflakes clean |

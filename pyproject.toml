@@ -25,6 +25,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4", "mypy>=1.10"]
+# 跨库对照组（0003 K1 双实现交叉验证）：tulipy 是免 pandas、C 后端的
+# 独立指标实现，覆盖面 > 手写纯 NumPy 参考；仅测试期 import，不进运行时
+# 核心依赖（R10 保持 ≤15 核心包）。装法：pip install "lyra[control]"。
+control = ["tulipy"]
 
 [project.scripts]
 lyra = "lyra.cli:app"
