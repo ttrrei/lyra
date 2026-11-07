@@ -20,9 +20,10 @@
 
 策略（0004 compiler）的右值只能是"常量或已注册 feature 列"（I9），
 所以 0004 之前必须存在一张**列名确定、语义确定、可复现**的特征宽表。
-本 feature 解决：**从 0002 产出的 bronze / 5m / 1h Parquet，算出
-R3.1 定义的全部标准特征，落成"每标的一个 Parquet"的特征宽表，
-并留下一个干净的 alpha 特征扩展点（R3.2）。**
+本 feature 解决：**从 0002 产出的 5m / 1h 聚合层 Parquet（`ohlcv_5m`
+/ `ohlcv_1h`，非 bronze 1m 原始层），算出 R3.1 定义的全部标准特征，
+落成"每标的一个 Parquet"的特征宽表，并留下一个干净的 alpha 特征
+扩展点（R3.2）。**
 
 不解决"用哪些特征组合出好策略"——那是 0004/0005 之后、
 方向内策略迭代的事（用户核心诉求：迭代深度，不是特征广度）。
@@ -131,16 +132,38 @@ R3.1 定义的全部标准特征，落成"每标的一个 Parquet"的特征宽�
   `indicators.py` 纯 NumPy 函数或 `features.py` 的向量化组合；
 - 计算引擎：定案见 **K1**（标准指标全部来自 TA-Lib，含
   `talib.SUPERTREND`；窗口/结构类用 numpy/pandas 向量化）；
-- 输出：`data/features/<minutes>m/<snapshot_id>/
-  <instrument>.parquet`（每标的一个文件，列 = 输入 OHLCV 列（K2
-  复制）+ 全部注册特征列），pandas → `pyarrow` 写 Parquet，
-  行序 = 输入行序（`ORDER BY time` 读入，0002 I18 同款确定性）。
+- **数据流控制律（D5）**：计算流水线**必须按标的逐个循环**
+  （`for inst in instruments:`），每轮只向 DuckDB 请求
+  `SELECT ... FROM ohlcv_<m> WHERE instrument = ? ORDER BY time`，
+  算完该标的即落盘并释放，**严禁**一次性把 21 标的全量读进一个
+  DataFrame（998 万行 × 60 列峰值 >12 GB，低配机必 OOM）；
+- 输出：`data/features/<minutes>m/<instrument>.parquet`
+  （**单文件，无 `<snapshot_id>` 目录层级**——对齐 0002 D4 已废弃
+  的目录级 snapshot 体系；恒重算恒覆盖，无陈旧目录堆积，D1）。
+  版本信息走 **Parquet 文件元数据**（`feature_version`、参数集
+  sha256、生成时间戳），不依赖路径层级。列 = 输入 OHLCV 列
+  （K2 复制）+ 全部注册特征列，pandas → `pyarrow` 写 Parquet，
+  行序 = 输入行序（`ORDER BY time` 读入，0002 I18 同款确定性）；
+- **Catalog 接入（D1）**：在 0002 的 `Catalog`（DuckDB 外部表）
+  中注册 `features_5m` / `features_1h` 视图（与 `bronze`/`ohlcv_5m`/
+  `ohlcv_1h` 同一消费层），0004 compiler 经 Catalog 查特征列，
+  不扫文件系统拼路径。
 
 **alpha 扩展点（R3.2）**：
 - `lyra.features.load_from(directory)`：扫目录下 `*.py`，
   每个模块暴露 `register(registry)` 函数；alpha 特征 =
   带契约卡（模块 docstring，schema 固定：状态变量/转移规则/seed/
   gap/flip/依赖列）+ 同目录 golden test；
+- **API 契约（v0.7 补，D7）**：`registry.register(name, compute,
+  *, kind, unit, warmup_bars, family, params)` 为唯一入口；
+  `compute` 是**纯 NumPy 函数**（`(mid_o, mid_h, mid_l, mid_c, volume,
+  time, *extra) → 1-D float64 数组或 {col: array}`，签名与入参约定在
+  实施 spec 定稿，`indicators.py` 边界不变）；`load_from` 对任一
+  alpha 模块的语法错误/缺依赖/异常**fail-fast 阻断**（抛错并指名文件，
+  **不静默跳过**——静默跳过会让 0004 编译期才炸）；alpha 的
+  `FEATURE_VERSION` 归属：alpha 特征语义变更由**其模块 docstring 的版本
+  标签**承担，core 的 `FEATURE_VERSION` 只覆盖 core 注册项（I16 边界
+  已隔离，不冲突）。
 - core 不 import 任何具体 alpha 模块（I16），只 import
   `lyra.features`；alpha 目录来自 `config.yml` `local.alpha`
   （gitignored，B13/I15）；
@@ -151,11 +174,12 @@ R3.1 定义的全部标准特征，落成"每标的一个 Parquet"的特征宽�
 **FEATURE_VERSION**：
 - 一个整数，存 `lyra/features.py` 模块常量；
 - 任何已注册特征的**计算语义或参数**变更 → +1（I13）；
-- 特征宽表的 snapshot id = `(market snapshot id, timeframe,
+- 特征宽表的版本标识 = `(timeframe,
   FEATURE_VERSION, 注册表全参数集 sha256, 数值栈版本三元组
-  python/numpy/pandas)` 的**派生字符串**（不是单调递增整数——
-  0002 已废弃目录级 snapshot 状态机，这里对齐：派生值可复现、
-  无需分配器）。**TA-Lib 版本刻意不入 snapshot id**：
+  python/numpy/pandas)` 的**派生字符串**，写入 Parquet 元数据
+  （**非目录层级**——0002 D4 已废弃目录级 snapshot 状态机，0002
+  市场层也无"market snapshot id"实体，故此处不引用它；派生值可
+  复现、无需分配器）。**TA-Lib 版本刻意不入版本标识**：
   TA-Lib 是指标参考实现的来源，若它变更语义，正确动作是
   FEATURE_VERSION +1（I13），而不是靠版本串隐式区分——
   snapshot id 表达"注册表语义"，不表达"第三方实现指纹"。
@@ -198,6 +222,22 @@ R3.1 定义的全部标准特征，落成"每标的一个 Parquet"的特征宽�
 - **DuckDB 的角色**：0003 里只做**读输入 / COPY 输出**
   （0002 已验证的外部表模式），不做特征计算——计算语义
   全部在 Python 侧，便于 golden test 与确定性（F4）。
+- **TA-Lib 依赖与 R8 可移植性（v0.7 澄清，D2）**：TA-Lib 是**官方
+  PyPI 包** `TA-Lib`（`github.com/ta-lib/ta-lib-python`，作者
+  John Benediktsson；moneta/nova 锁定的 **0.8.2 即官方封装**，
+  非 fork——reviewer"0.8.2 是未验证 fork"的说法不成立）。
+  R8 的"可移植：POSIX + Windows；不依赖系统包（**TA-Lib 通过
+  wheel**）"已把 TA-Lib 的底层 C 库显式纳入可移植边界。**实测
+  moneta venv 的 0.8.2 wheel 是标准 manylinux wheel**：C runtime
+  经 auditwheel 打包进 `site-packages/ta_lib.libs/libta-lib-*.so.1.1.0`
+  （3.4 MB），`_ta_lib*.so` 直接链接该本地库、**外部仅依赖
+  `libc.so.6`**——即 pip 安装即开箱可用，**无需 `apt-get
+  libta-lib` / MSVC 手编**，与 reviewer"D2 会 pip 编译崩溃"的
+  担忧相反。故**不构成 R8 破坏**。残留风险（若未来某平台无官方
+  wheel 需回退源码编译）记为**实施期环境验证项**，不改变 K1 决策；
+  且 core 保持"指标算法层与库实现解耦"（`indicators.py` 纯 NumPy
+  边界），未来如需替换/降级引擎，只需换 `features.py` 的库调用
+  而不触算法。
 
 **K2 宽表粒度（定案）**：特征宽表按 **timeframe × instrument**
 分文件（与 market 层布局一致）；每文件含原始 OHLCV 列（复制，
@@ -301,6 +341,16 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
   窗口直接 `raise ValueError("window outside CFD grid")`（权威
   网格 = 6/12/24/60/120）；nova 研究特征实际全用 6/12/24/60。
 
+> **D4 过程门禁（本表 ≠ 实现规格）**：上表是**特征清单**，不是
+> 数学规格。进入 0003 实施**之前**，必须在实现 spec（`indicators.py`
+> 各函数 docstring + `tests/` golden）里为**每个**自研语义/结构特征
+> 补**精确到变量名与运算符的确定性数学定义**，并对所有除法特征
+> （`path_eff_24` / `prior24_range_pos` / `shift6_atr` / `bar_range_atr` /
+> `rel_quote_activity`）显式定义分母为 0 / 接近 0 的兜底规则
+> （`denom == 0 → NULL` 或 `0.0`，且不得被 Gate 4 当 NaN 泄漏拦截）。
+> 决策文档只锁定"算哪些、用哪族参数"，"怎么算"以 spec + golden
+> test 为准（防止不同实现者写出不同代码、golden test 沦为自证）。
+
 > 清单以 R3.1 为准；本表是 0003 的**实现分解**。新增/删减特征
 > = 改 R3.1 + 本文 + FEATURE_VERSION。
 
@@ -314,9 +364,9 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
 | I16 | core 不 import 具体 alpha 模块，只 import `lyra.features` 扩展点 | 0001 |
 | I17 | alpha 特征文件 Immutable（OCI 侧，同 sha 幂等） | HLD §4 |
 | F1 | 特征宽表**列集确定**：同 FEATURE_VERSION + 同注册表 → 列名集相同（0004 编译期可静态检查） | 本 feature 新增 |
-| F2 | warm-up NULL 语义：NULL 只出现在 **warm-up 前缀** 或 **上游合法缺失的传播**（市场缺口 bar 无数据 → 依赖它的窗口特征在该 bar 及后续窗口期合法为 NULL，非 bug）；**越界 NULL = bug**，判定标准：某特征的 NULL 位置集合 ⊆ 其依赖链上最晚 warm-up 前缀 ∪ 上游缺失传播闭包（K3 的 `warmup_bars` 是下界数据，缺口传播由 I1 因果性保证方向） | 本 feature 新增 |
+| F2 | warm-up NULL 语义（**v0.7 收紧**，D3）：0002 已保证输入 `mid_*` 零 NULL 且**无缺口占位行**（实测 998 万行 0 NULL），故特征 NULL **只允许**来自 (a) **warm-up 前缀**（K3 `warmup_bars`），或 (b) **派生特征的已定义零分母**（如 `prior24_range_pos` 遇 24 根全平价 bar → `range==0`，按 D4 门禁定义的兜底规则产出 NULL/0，属合法语义而非缺口传播）；**除此两类，warm-up 后出现任何 NULL/NaN 即判定为计算崩溃或除零 Bug**（Gate 4 拦截） | 本 feature 新增（v0.7 按 D3 收紧，删除"缺口传播闭包"幽灵概念） |
 | F3 | 特征宽表每标的单文件自足（K2）：0004 读单文件即可编译，不 join market 层 | 本 feature 新增 |
-| F4 | 计算确定性：同输入 + 同 FEATURE_VERSION + 同数值栈版本 → 特征值逐位一致（bitwise，非"逐行一致"——特征层是数值计算，I18 的"值 + 行序一致"在此收紧为逐位） | 本 feature 新增 |
+| F4 | 计算确定性（**v0.7 收紧**，D6）：同输入 + 同 FEATURE_VERSION + 同数值栈版本 + **同平台/同数学库** → 特征值**逐位一致**（bitwise）；**跨平台**（Linux↔Windows↔macOS，AVX2/AVX-512/NEON、OpenBLAS/MKL 等数学库差异）只承诺 `np.allclose(atol=1e-12, rtol=1e-12)` 高精度一致，**不承诺逐位**——浮点求和/求积顺序与 1-ULP 舍入随硬件与编译器优化而变（D6），golden test 因此按"同平台逐位、跨平台 allclose"两级断言（对齐 moneta Gate 1） | 本 feature 新增（v0.7 按 D6 加跨平台容差层级） |
 | F5 | 注册名冲突（core vs alpha）→ 报错，不覆盖 | 本 feature 新增 |
 
 ## 5. 测试
@@ -335,11 +385,14 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
 | `test_psar_bull_bear_flags` | PSAR 方向标志与翻转 bar 对齐 |
 | `test_supertrend_line_and_flags` | `talib.SUPERTREND` 线 + bull/bear 标志一致性 |
 | `test_supertrend_parity_vs_reference` | `talib.SUPERTREND` 与 moneta/nova 自研参考实现逐 bar 对照（line/direction），偏差 < 1e-12（K1 双库 parity 固化成回归，防 TA-Lib 换版本悄悄改语义） |
-| `test_warmup_null_semantics` | 无缺口输入：NULL 仅 warm-up 前缀（F2）；注入缺口输入：NULL 集合 = 前缀 ∪ 缺口传播闭包（F2 修订） |
+| `test_warmup_null_semantics` | 连续无缺失输入：NULL **仅** warm-up 前缀；warm-up 后出现任何 NULL/NaN = 断言失败（F2 v0.7，D3）；**例外**：派生特征零分母（如 `prior24_range_pos` 全平价 24 根）按 D4 兜底规则产出 NULL/0，属合法（单独断言，不混入前缀规则） |
 | `test_no_future_reference` | 截断数据末端 N 行 → 前缀特征值不变（I1 因果性，最硬的一条） |
-| `test_deterministic_rerun` | 同输入重跑 → 特征值逐位一致（F4） |
+| `test_deterministic_rerun` | 同输入、**同环境**重跑 → 特征值逐位一致（F4 严格层） |
 | `test_wide_table_self_sufficient` | 宽表含全部 OHLCV 列，单文件可独立查询（F3/K2） |
-| `test_snapshot_id_derived` | FEATURE_VERSION/参数/数值栈版本变 → snapshot id 变 |
+| `test_feature_version_in_metadata` | 版本标识（FEATURE_VERSION/参数 sha256/数值栈版本）变 → Parquet 元数据里的版本串变（**非目录层级**，D1） |
+| `test_output_single_file_no_snapshot_dir` | 输出为 `features_<m>/<instrument>.parquet` 单文件，**无** `<snapshot_id>` 子目录；重跑恒覆盖不堆积（D1） |
+| `test_per_instrument_streaming` | 数据流按标的逐个循环：单标的工作集峰值受控（<300MB 量级断言），非全量 21 标的同驻（D5） |
+| `test_f4_same_env_bitwise_cross_env_allclose` | 同环境重跑逐位一致（F4 严格层）；文档化"跨平台 allclose(1e-12)"为可维护上限（F4/D6） |
 | `test_universal_21_instruments` | 21 标的同特征同参数、算法逐点一致（K5） |
 | `test_feature_count_matches_r31` | 宽表列集 == R3.1 清单（F1 防漂移） |
 | `test_gate1_truncation_zero_redraw` | 截断数据重算 vs 全量前缀：`max\|V_trunc − V_full[:k]\| < 1e-12`（moneta Gate 1，I1 最硬形式） |
@@ -347,7 +400,7 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
 | `test_gate4_zero_amplitude_no_crash` | 平价 bar / 零振幅 / 零 volume 注入 → 无 Inf / NaN 泄漏 / 崩溃（moneta Gate 4） |
 | `test_atr_normalization_basis_atr24` | 所有 ATR 归一化特征分母 == `atr_24`（K6，防 nova 混用反例） |
 | `test_supertrend_path_dependent_from_head` | 从数据头起算；中途起算结果可不同（路径依赖显式接受，warm-up NULL 保留，K4） |
-| `test_supertrend_k7_management` | 自研特征四项管理全过：参数显式入注册表（非硬编码）+ 契约卡字段齐全 + golden 值与 moneta/nova 同源参考实现逐点偏差 < 1e-12（K7） |
+| `test_supertrend_registry_params` | Supertrend（库实现）管理纪律：ATR 窗口取网格点、multiplier 显式入注册表（非硬编码于函数体）+ golden 值与 moneta/nova 参考实现逐点偏差 < 1e-12（K7 的库实现等价纪律，非"自研四项管理"——后者是未触发条件护栏） |
 
 ## 6. 回滚
 
@@ -377,3 +430,4 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
 | 2026-11-07 | 0.4 | **对抗性自检修复（1 处不变量过强）**：F2 原"warm-up 后任何 NULL = bug"在**市场缺口**（0002 I22 明确缺口合法、真实数据 73 万处）下会误判——缺口 bar 缺失传播到依赖窗口特征是**合法** NULL，非 bug。修订为"NULL 位置 ⊆ warm-up 前缀 ∪ 上游缺失传播闭包"（方向由 I1 因果性保证）；测试 `test_warmup_null_prefix_only` 更名为 `test_warmup_null_semantics` 并补缺口传播断言。其余候选项（F1/F4/F5、K2 复制体积、K5 与缺口交互、snapshot id 派生串长度）经核验为误报或已覆盖，不改 |
 | 2026-11-07 | 0.5 | **用户拍板两点，落 K7/K8**：① **自研特征管理（K7）**——用户问"Supertrend 为什么自研"：TA-Lib **确无** Supertrend（moneta/nova 头注释均确认），自研特征比库实现更严：参数显式入注册表（禁硬编码）+ 契约卡强制 + golden test 用 moneta/nova 同源参考实现逐点交叉验证（<1e-12，不自己验自己）+ 语义变更必须 I13+1 并说明理由。② **参数网格纪律（K8，用户拍板）**——用户指出 14 是 Wilder "14 交易日≈2 周"遗留、要求尽量用 6/12/24/60 且参数不要太多防极窄参数过拟合；前代背书：moneta `catalogue.py` 对网格外窗口直接 `raise ValueError("window outside CFD grid")`、nova 研究特征实际全用 6/12/24/60 → **ATR/RSI 改 6/12/24/60 网格**、`atr_sma_14` 双平滑变体删除、SMA/EMA 补 12、Supertrend ATR 窗口 14→24、归一化分母 `atr_wilder_14`→`atr_24`（K6 更新）；例外：PSAR (0.02,0.2) 非窗口参数保留。同步 R3.1（requirements 中英权威清单）+ §3.4 表 + 测试（+`test_grid_only_windows`/`test_supertrend_k7_management`，2 个 14 相关用例改网格版）。测试 22→**24** |
 | 2026-11-07 | 0.6 | **两项用户指令落实**：① **Supertrend 改用库实现**——用户要求"再 review 有没有 lib 能获得 Supertrend"。实测推翻前代认知：moneta/nova 头注释"TA-Lib ships no Supertrend"是**旧版本误解**，两代锁定的 **TA-Lib 0.8.2 实测内置 `SUPERTREND`**（`timeperiod`+`multiplier`，输出 line+trend）。用真实数据（SPX500_USD 1h，5000 bar，PER=24/mult=3）做双库 parity：自研版与 `talib.SUPERTREND` **逐 bar 100% 一致**（line diff=0、direction 100%），证明语义同源。→ **K1 改回**"标准指标全部来自 TA-Lib（含 Supertrend）"；**K7 降级为条件护栏**（0003 现无自研实现，规则保留供未来）；§2.3 采纳 1 由"必须自研"改"路径依赖/不删 warm-up 行"（Supertrend 语义不变，仅换实现来源）；§3.4 Supertrend 行计算类改 `talib.SUPERTREND`；**新增测试** `test_supertrend_parity_vs_reference`（双库 parity 固化成回归）。② **K8 网格加 120**（用户指令"加上120"）→ 网格 = {6,12,24,60,120}，**与 moneta `catalogue.py` 权威网格对齐**；ATR/RSI/SMA/EMA 各补 `*_120` 变体（§3.4 表 + K8 影响块 + `test_atr_grid_values_known` + `test_grid_only_windows` 同步）。同步 R3.1（requirements 中英权威清单）。测试 24→**25** |
+| 2026-11-07 | 0.7 | **批次2 外部红队 D1–D8 处置（按用户接受/挂起/拒绝三级：接受 5 = D1/D3/D5/D6/D8，挂起 2 = D4/D7，拒绝 1 = D2）**：① **D1（接受）**——§3.1 废除 `<snapshot_id>` 目录层级与"market snapshot id"幽灵派生项（0002 D4 已废弃目录级 snapshot、市场层无该实体），改单文件 `features_<m>/<instrument>.parquet` + 版本入 Parquet 元数据；补 **Catalog 接入**（注册 `features_5m/1h` 视图，0004 经 Catalog 查列不扫盘）；测试改 `test_feature_version_in_metadata` + 新增 `test_output_single_file_no_snapshot_dir`。② **D5（接受）**——§3.1 补**数据流控制律**：强制 per-instrument 循环、单标的工作集受控、严禁全量 21 标同驻；新增 `test_per_instrument_streaming`。③ **D6（收紧）**——F4 由"bitwise"收紧为**同环境 bitwise + 跨平台 allclose(1e-12)** 两级；新增 `test_f4_same_env_bitwise_cross_env_allclose`。④ **D3（收紧）**——F2 删除"缺口传播闭包"幽灵概念（0002 DQ1 保证 mid_* 零 NULL 且无缺口占位行，实测 998 万行 0 NULL），改为 NULL 只允许来自 warm-up 前缀 ∪ 派生特征已定义零分母；`test_warmup_null_semantics` 同步。⑤ **D4（挂起+过程门禁）**——决策文档≠实现规格，§3.4 加 **D4 过程门禁**：实施前必须为每个自研语义/结构特征补精确数学定义 + 所有除法特征补零分母兜底（`denom==0 → NULL/0`，不被 Gate 4 当 NaN 泄漏）。⑥ **D2（拒绝其核心主张，据实澄清）**——K1 澄清：TA-Lib 0.8.2 是**官方 PyPI 包**（`ta-lib/ta-lib-python`，非 fork），**实测 wheel 经 auditwheel 打包 C runtime**（`ta_lib.libs/libta-lib-*.so`，外部仅依赖 `libc.so.6`），pip 即开箱可用、无需系统 C 库编译 → **不构成 R8 破坏**；残留"某平台无 wheel"风险记为实施期环境验证项。⑦ **D7（挂起+过程门禁）**——alpha 扩展点补 API 契约（`registry.register(...)` 入口 + compute 纯 NumPy 签名 + 加载 fail-fast 不静默跳过 + alpha 版本归属），细节落实施 spec。⑧ **D8（接受）**——§1 输入口径由"bronze/5m/1h"改为"5m/1h 聚合层"（0003 只消费 0002 聚合层，不碰 bronze 1m）。另修 **v0.5 遗留不一致**：`test_supertrend_k7_management` 语义（自研四项管理）与 v0.6 K7 降级矛盾 → 改 `test_supertrend_registry_params`（库实现管理纪律）。测试 25→**28**（+3：输出单文件/per-instrument/F4 两级；改 2：warmup_null、supertrend 管理；改 1：snapshot→metadata） |

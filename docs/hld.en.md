@@ -61,7 +61,10 @@
 - Aggregate: 1m → 5m / 60m (complete-bucket policy; partial buckets
   dropped and counted).
 - Local cache: `data/raw_csv/`, `data/raw_parquet/`,
-  `data/market/<minutes>m/<snapshot_id>/`.
+  `data/ohlcv_5m/ohlcv_5m.parquet`, `data/ohlcv_1h/ohlcv_1h.parquet`
+  (**single-file external tables** — 0002 D4 already deprecated the
+  directory-level `<snapshot_id>` hierarchy; this hld §2.1 wording is
+  historical draft, defer to 0002).
 
 **Not doing**:
 - No feature computation here (that is the features component).
@@ -79,12 +82,15 @@
 ### 2.2 features component
 
 **Responsibilities**:
-- Compute registered standard features from OHLCV
-  (SMA/EMA/RSI/ATR/PSAR/Supertrend/…).
+- Compute registered standard features from OHLCV (the 0002 aggregated
+  layers `ohlcv_5m`/`ohlcv_1h`) (SMA/EMA/RSI/ATR/PSAR/Supertrend/…).
 - Load alpha features (`lyra.features.load_from(directory)` extension
   point).
 - Publish feature wide tables to
-  `data/features/<minutes>m/<snapshot_id>/`.
+  `data/features/<minutes>m/<instrument>.parquet` (**single file, NO
+  `<snapshot_id>` directory level** — 0003 v0.7 aligned to 0002 D4's
+  deprecated directory-level snapshot scheme; the version lives in
+  Parquet metadata; see 0003 §3.1 + §2.3 D1 disposition).
 
 **Not doing**:
 - No parameter sweeps (parameters fixed at registration).
@@ -94,10 +100,14 @@
 
 **Key invariants**:
 - Each feature is available at `bar_close_time` (past-only).
-- Warm-up NULLs retained, not arbitrarily removed.
-- Feature snapshot id = monotonic integer derived from (market
-  snapshot id, timeframe, FEATURE_VERSION, full parameter set, numerical-
-  library version).
+- Warm-up NULLs retained, not arbitrarily removed (0003 v0.7 F2
+  tightened: NULLs allowed only from the warm-up prefix ∪ a derived
+  feature's defined zero denominator).
+- Feature version identifier = a **derived string** over (timeframe,
+  FEATURE_VERSION, full parameter-set sha256, numeric-stack version),
+  written into **Parquet metadata** (**not a directory level** — 0003
+  v0.7 aligned to 0002 D4's deprecated directory-level snapshot scheme;
+  not a monotonic integer, no allocator).
 - Changing a feature computation → FEATURE_VERSION + 1.
 
 ### 2.3 strategy component
@@ -181,15 +191,15 @@ OCI (raw CSV / Parquet)
 local data/raw_csv/ + data/raw_parquet/  (immutable, SHA256-verified)
         │
         ▼  lyra clean
-local data/market/1m/<snapshot_id>/  (cleaned 1m)
+local data/bronze/...  (cleaned 1m, single-file external tables)
         │
         ▼  lyra aggregate --minutes 5 60
-local data/market/5m/<snapshot_id>/ + data/market/60m/<snapshot_id>/
-        │
+local data/ohlcv_5m/ohlcv_5m.parquet + data/ohlcv_1h/ohlcv_1h.parquet
+        │  (single-file external tables — 0002 D4 deprecated the
+        │   directory-level <snapshot_id> hierarchy)
         ▼  lyra features --minutes 5 60
-local data/features/5m/<snapshot_id>/ + data/features/60m/<snapshot_id>/
-        │  (core wide table + domain wide tables, one Parquet per
-        │   instrument)
+local data/features/5m/<instrument>.parquet + data/features/60m/<instrument>.parquet
+        │  (one Parquet per instrument, version in metadata — 0003 v0.7)
         ▼
 OCI (lyra/data/market/ + lyra/data/features/)  ← optional push, for
 multi-machine reuse
@@ -358,3 +368,4 @@ blocked by this ordering.
 | 2026-11-05 | 0.2 | §8 declared the **single source of truth** for build order; added the rationale for "why 0002 comes before 0003"; README / background now reference this section. |
 | 2026-11-05 | 0.3 | §2.3 removed the "No strategy generation (future campaign)" conflict row; added a "Strategy evolution" block (context / new-version / compare / merge / push-direction) aligned with R12 + version tree + AI-free crossover; §7 decision-tree now includes 0008 and 0009 in both languages (ZH was missing 0008, EN was missing 0009, and 0007 misused └──); **§4 invariant table completed with I15-I17** (previously only listed to I14, but AGENTS/0001 both cite I15-I17 — hld as the skeleton should be self-consistent). |
 | 2026-11-06 | 0.4 | Batch-2 adversarial review fixes: I17 made **two-tier** (Immutable/Append-only, L1); I11 adds `alpha/` (L5). |
+| 2026-11-07 | 0.5 | **0003 v0.7 alignment** (hld sync after accepting batch-02 red-team D1/D5/D6/D3): ① §2.1 market-layer cache path changed from the historical-draft `data/market/<m>/<snapshot_id>/` to 0002's actual single-file external tables `ohlcv_5m/ohlcv_5m.parquet` / `ohlcv_1h/ohlcv_1h.parquet` (0002 D4 deprecated directory-level snapshots; the hld early wording is a draft — marked "defer to 0002"); ② §2.2 features component: publish path → `data/features/<m>/<instrument>.parquet` single file, version into Parquet metadata, the "snapshot id monotonic integer" invariant → "derived string in metadata", Warm-up NULL tightened to 0003 F2; ③ §3 data-flow diagram synced (bronze → ohlcv_5m/1h single-file → features single-file). Note: §4 L148/155/179 **OCI push (0007) snapshot id** is 0007's still-undefined semantics — **not** changed here (0007 not yet written; avoids overstepping into 0007's scope), deferred to the 0007 decision |

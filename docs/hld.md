@@ -56,7 +56,9 @@
   UTC 对齐、Bid/Ask 字段校验。
 - 聚合：1m → 5m / 60m（完整桶策略，partial 桶丢弃并计数）。
 - 本地缓存：`data/raw_csv/`、`data/raw_parquet/`、
-  `data/market/<minutes>m/<snapshot_id>/`。
+  `data/ohlcv_5m/ohlcv_5m.parquet`、`data/ohlcv_1h/ohlcv_1h.parquet`
+  （**单文件外部表**——0002 D4 已废弃目录级 `<snapshot_id>` 层级，
+  本 hld §2.1 早期措辞为历史草稿，以 0002 为准）。
 
 **不做**：
 - 不在这里算特征（那是 features 组件）。
@@ -73,9 +75,13 @@
 ### 2.2 features 组件
 
 **职责**：
-- 从 OHLCV 算出已注册的标准特征（SMA/EMA/RSI/ATR/PSAR/Supertrend/…）。
+- 从 OHLCV（0002 聚合层 `ohlcv_5m`/`ohlcv_1h`）算出已注册的标准特征
+  （SMA/EMA/RSI/ATR/PSAR/Supertrend/…）。
 - 加载 alpha 特征（`lyra.features.load_from(directory)` 扩展点）。
-- 发布特征宽表到 `data/features/<minutes>m/<snapshot_id>/`。
+- 发布特征宽表到 `data/features/<minutes>m/<instrument>.parquet`
+  （**单文件，无 `<snapshot_id>` 目录层级**——0003 v0.7 对齐 0002 D4
+  已废弃的目录级 snapshot 体系；版本入 Parquet 元数据；详见
+  0003 §3.1 + §2.3 D1 处置）。
 
 **不做**：
 - 不做参数扫描（参数在注册时定死）。
@@ -84,9 +90,12 @@
 
 **关键不变量**：
 - 每个特征在 `bar_close_time` 时可用（past-only）。
-- Warm-up NULL 保留，不任意删。
-- Feature snapshot id = (market snapshot id, timeframe, FEATURE_VERSION,
-  完整参数集, 数值库版本) 的单调递增整数。
+- Warm-up NULL 保留，不任意删（0003 v0.7 F2 收紧：NULL 只允许来自
+  warm-up 前缀 ∪ 派生特征已定义零分母）。
+- 特征版本标识 = (timeframe, FEATURE_VERSION, 完整参数集 sha256,
+  数值栈版本) 的**派生字符串**，写入 **Parquet 元数据**（**非目录
+  层级**——0003 v0.7 对齐 0002 D4 废弃的目录级 snapshot 体系；非
+  单调递增整数、无分配器）。
 - 改 feature 计算 → FEATURE_VERSION +1。
 
 ### 2.3 strategy 组件
@@ -163,14 +172,14 @@ OCI (raw CSV / Parquet)
 local data/raw_csv/ + data/raw_parquet/  (不可变, SHA256 校验)
         │
         ▼  lyra clean
-local data/market/1m/<snapshot_id>/  (清洗后的 1m)
+local data/bronze/...  (清洗后的 1m, 单文件外部表)
         │
         ▼  lyra aggregate --minutes 5 60
-local data/market/5m/<snapshot_id>/ + data/market/60m/<snapshot_id>/
-        │
+local data/ohlcv_5m/ohlcv_5m.parquet + data/ohlcv_1h/ohlcv_1h.parquet
+        │  (单文件外部表 —— 0002 D4 已废弃目录级 <snapshot_id> 层级)
         ▼  lyra features --minutes 5 60
-local data/features/5m/<snapshot_id>/ + data/features/60m/<snapshot_id>/
-        │  (core 宽表 + domain 宽表, 每标的一个 Parquet)
+local data/features/5m/<instrument>.parquet + data/features/60m/<instrument>.parquet
+        │  (每标的一个 Parquet, 版本入元数据 —— 0003 v0.7)
         ▼
 OCI (lyra/data/market/ + lyra/data/features/)  ← 可选 push, 供多机复用
         │
@@ -334,3 +343,4 @@ lyra/
 | 2026-11-05 | 0.2 | §8 标注为**唯一事实来源**，补"为什么 0002 先于 0003"的理由；README / background 改为引用本节。 |
 | 2026-11-05 | 0.3 | §2.3 移除"不生成新策略（future campaign）"冲突行，补"策略演进"块（context / new-version / compare / merge / push-direction）对齐 R12 + 版本树 + AI 自由交叉；§7 目录树补 0008/0009（ZH 缺 0008、EN 缺 0009，0007 误用 └──）；**§4 不变量表补齐 I15-I17**（原只列到 I14，但 AGENTS/0001 都引用 I15-I17，hld 作骨架应自洽）。 |
 | 2026-11-06 | 0.4 | 批次2 对抗性 review 修复：I17 改**两级**（Immutable/Append-only，L1）；I11 补 `alpha/`（L5）。 |
+| 2026-11-07 | 0.5 | **0003 v0.7 对齐**（批次2 红队 D1/D5/D6/D3 接受后的 hld 同步）：① §2.1 市场层缓存路径由历史草稿 `data/market/<m>/<snapshot_id>/` 改为 0002 实际产出的单文件外部表 `ohlcv_5m/ohlcv_5m.parquet` / `ohlcv_1h/ohlcv_1h.parquet`（0002 D4 已废弃目录级 snapshot，hld 早期措辞为草稿，标注以 0002 为准）；② §2.2 features 组件：发布路径改 `data/features/<m>/<instrument>.parquet` 单文件、版本入 Parquet 元数据、关键不变量"snapshot id 单调整数"改"派生字符串入元数据"、Warm-up NULL 收紧对齐 0003 F2；③ §3 数据流图同步（bronze→ohlcv_5m/1h 单文件→features 单文件）。注：§4 L148/155/179 的 **OCI push（0007）snapshot id** 属 0007 未定语义，本轮**不**改（0007 未写，避免越权改 0007 范围），留待 0007 决策时对齐 |

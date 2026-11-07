@@ -22,10 +22,10 @@ Strategy (0004 compiler) right-hand values can only be "constants or
 registered feature columns" (I9), so before 0004 there must exist a
 feature wide table with **deterministic column names, deterministic
 semantics, and reproducibility**. This feature delivers: **from the
-bronze / 5m / 1h Parquet produced by 0002, compute all standard
-features defined in R3.1, produce "one Parquet per instrument"
-feature wide tables, and leave a clean alpha feature extension point
-(R3.2).**
+0002 aggregated layers `ohlcv_5m` / `ohlcv_1h` (NOT the bronze 1m
+raw layer), compute all standard features defined in R3.1, produce
+"one Parquet per instrument" feature wide tables, and leave a clean
+alpha feature extension point (R3.2).**
 
 It does NOT solve "which feature combinations make good strategies" —
 that is 0004/0005+ and the in-direction strategy iteration (the user's
@@ -156,8 +156,9 @@ otherwise a deleted/corrupted bronze would silently reuse stale
 features; no `--force`).
 
 **Compute core** (`lyra/features.py` + `lyra/indicators.py` + `lyra/registry.py`):
-- input: ohlcv_5m / ohlcv_1h (0002-contract bronze / aggregate
-  views; columns = `instrument, time, volume, mid_*, bid_*, ask_*`);
+- input: ohlcv_5m / ohlcv_1h (0002 aggregate views — the **5m / 1h
+  aggregated layer**, NOT the bronze 1m raw layer; columns =
+  `instrument, time, volume, mid_*, bid_*, ask_*`);
   **price basis = `mid_*` columns** (0002 bronze contract); the
   open/high/low/close in §3.4 are semantic shorthands for
   mid_o/mid_h/mid_l/mid_c;
@@ -167,11 +168,27 @@ features; no `--force`).
 - compute engine: see decision **K1** (standard indicators all from
   TA-Lib, incl. `talib.SUPERTREND`; window/structural via
   numpy/pandas vectorization);
-- output: `data/features/<minutes>m/<snapshot_id>/
-  <instrument>.parquet` (one file per instrument; columns = input
-  OHLCV columns (K2 copy) + all registered feature columns), pandas →
-  `pyarrow` writes the Parquet, row order = input row order (read
-  `ORDER BY time`, same deterministic order as 0002 I18).
+- **data-flow control law (D5)**: the compute pipeline **must loop
+  per instrument** (`for inst in instruments:`), each iteration
+  requests only `SELECT ... FROM ohlcv_<m> WHERE instrument = ? ORDER
+  BY time`, computes, writes, then frees that instrument's frame —
+  **never** load all 21 instruments into one DataFrame at once (9.98M
+  rows × 60 cols peaks >12 GB; a low-spec machine would be OOM-killed);
+- output: `data/features/<minutes>m/<instrument>.parquet`
+  (**single file, NO `<snapshot_id>` directory level** — aligned with
+  0002 D4's deprecated directory-level snapshot scheme; always
+  recompute/overwrite, no stale directory accumulation, D1). Version
+  info goes into **Parquet file metadata** (`feature_version`,
+  param-set sha256, generation timestamp), not into path hierarchy.
+  Columns = input OHLCV columns (K2 copy) + all registered feature
+  columns, pandas → `pyarrow` writes the Parquet, row order = input
+  row order (read `ORDER BY time`, same deterministic order as 0002
+  I18);
+- **Catalog integration (D1)**: register `features_5m` / `features_1h`
+  views in 0002's `Catalog` (DuckDB external tables), the same
+  consumer layer as `bronze`/`ohlcv_5m`/`ohlcv_1h`; 0004's compiler
+  queries feature columns via the Catalog, not by scanning the
+  filesystem for paths.
 
 **Alpha extension point (R3.2)**:
 - `lyra.features.load_from(directory)`: scans `*.py` in the
@@ -179,6 +196,19 @@ features; no `--force`).
   alpha feature = a contract card (module docstring, fixed schema:
   state variables / transition rules / seed / gap/flip / dependency
   columns) + a golden test in the same directory;
+- **API contract (v0.7 added, D7)**: `registry.register(name,
+  compute, *, kind, unit, warmup_bars, family, params)` is the only
+  entry point; `compute` is a **pure-NumPy function** (`(mid_o, mid_h,
+  mid_l, mid_c, volume, time, *extra) → 1-D float64 array or
+  {col: array}`; the exact signature is finalized in the
+  implementation spec, the `indicators.py` boundary unchanged);
+  `load_from` **fail-fasts** on any alpha module's syntax error /
+  missing dep / exception (raises and names the file, **never silently
+  skips** — silent skip would only blow up at 0004 compile time); alpha
+  `FEATURE_VERSION` attribution: an alpha feature's semantic change is
+  carried by **its module docstring's version tag**, while core's
+  `FEATURE_VERSION` covers only core registrations (the I16 boundary
+  already isolates them, no conflict).
 - core imports no specific alpha module (I16), only `lyra.features`;
   the alpha directory comes from `config.yml` `local.alpha`
   (gitignored, B13/I15);
@@ -191,17 +221,19 @@ features; no `--force`).
 - one integer, a module constant in `lyra/features.py`;
 - any change to a registered feature's **compute semantics or
   parameters** → +1 (I13);
-- the feature wide table's snapshot id = a **derived string** over
-  `(market snapshot id, timeframe, FEATURE_VERSION, sha256 of the
-  full registry parameter set, python/numpy/pandas version triple)`
-  (not a monotonic integer — 0002 deprecated directory-level snapshot
-  state machines; we align: derived values are reproducible and need
-  no allocator). **TA-Lib's version is deliberately NOT in the
-  snapshot id**: TA-Lib is the source of the indicator reference
+- the feature wide table's version identifier = a **derived string**
+  over `(timeframe, FEATURE_VERSION, sha256 of the full registry
+  parameter set, python/numpy/pandas version triple)`, written into
+  the Parquet metadata (**NOT a directory level** — 0002 D4
+  deprecated directory-level snapshot state machines, and 0002's
+  market layer has no "market snapshot id" entity either, so we do not
+  reference it; derived values are reproducible and need no
+  allocator). **TA-Lib's version is deliberately NOT in the version
+  identifier**: TA-Lib is the source of the indicator reference
   implementations; if its semantics change, the correct action is
   FEATURE_VERSION +1 (I13), not an implicit distinction via a version
-  string — the snapshot id expresses "registry semantics", not a
-  "third-party implementation fingerprint".
+  string — the version identifier expresses "registry semantics", not
+  a "third-party implementation fingerprint".
 
 ### 3.2 What we do NOT build
 
@@ -250,6 +282,27 @@ TA-Lib; DuckDB never computes features** —
   (the external-table pattern validated by 0002); it does not
   compute features — all compute semantics live on the Python side
   for golden tests and determinism (F4).
+- **TA-Lib dependency vs R8 portability (v0.7 clarified, D2)**: TA-Lib
+  is the **official PyPI package** `TA-Lib` (`github.com/ta-lib/
+  ta-lib-python`, author John Benediktsson; the **0.8.2** both
+  generations lock **is the official wrapper, not a fork** — the
+  reviewer's "0.8.2 is an unverified fork" claim does not hold). R8's
+  "portable: POSIX + Windows; no system packages (**TA-Lib via
+  wheel**)" already folds TA-Lib's C runtime into the portability
+  boundary. **Measured on moneta's venv 0.8.2 wheel, it is a standard
+  manylinux wheel**: the C runtime is bundled by auditwheel into
+  `site-packages/ta_lib.libs/libta-lib-*.so.1.1.0` (3.4 MB), and
+  `_ta_lib*.so` links that local library with **only `libc.so.6`
+  external** — i.e. pip install is ready-to-use, **no
+  `apt-get libta-lib` / MSVC hand-build needed**, opposite to the
+  reviewer's "D2 will break pip with a compile crash" concern. So it
+  **does not violate R8**. Residual risk (a future platform with no
+  official wheel needing a source-build fallback) is recorded as an
+  **implementation-phase environment check**, not a K1 decision
+  change; and core keeps the "indicator algorithm layer decoupled from
+  the library implementation" (`indicators.py` pure-NumPy boundary),
+  so replacing/downgrading the engine later only touches
+  `features.py`'s library calls, not the algorithms.
 
 **K2 Wide-table granularity (decided)**: one feature wide table per
 **timeframe × instrument** (same layout as the market layer); each
@@ -387,6 +440,21 @@ overfitting into a very narrow parameter environment. **Impact**:
   windows (authoritative grid = 6/12/24/60/120); nova's research
   features in practice all use 6/12/24/60.
 
+> **D4 process gate (this table ≠ implementation spec)**: the table
+> above is a **feature list**, not a mathematical spec. **Before**
+> 0003 implementation begins, the implementation spec (each function's
+> docstring in `indicators.py` + `tests/` goldens) must give **an exact,
+> variable-and-operator-level deterministic mathematical definition**
+> for **every** self-implemented semantic/structural feature, and every
+> division feature (`path_eff_24` / `prior24_range_pos` / `shift6_atr` /
+> `bar_range_atr` / `rel_quote_activity`) must define an explicit
+> zero/near-zero denominator fallback rule (`denom == 0 → NULL` or `0.0`,
+> and it must NOT be caught by Gate 4 as a NaN leak). The decision doc
+> locks only "which to compute, which parameter family to use"; "how to
+> compute" is governed by the spec + golden test (to prevent different
+> implementers writing different code and the golden test becoming
+> self-referential).
+
 > The list is authoritative per R3.1; this table is 0003's
 > **implementation decomposition**. Adding/removing a feature =
 > change R3.1 + this doc + FEATURE_VERSION.
@@ -401,9 +469,9 @@ overfitting into a very narrow parameter environment. **Impact**:
 | I16 | core imports no specific alpha module, only the `lyra.features` extension point | 0001 |
 | I17 | alpha feature files are Immutable (OCI side, same-sha idempotent) | HLD §4 |
 | F1 | feature wide table **column set is deterministic**: same FEATURE_VERSION + same registry → same column-name set (the 0004 compiler can statically check) | new in this feature |
-| F2 | warm-up NULL semantics: NULLs appear only in the **warm-up prefix** or in **legitimate upstream-missingness propagation** (a market-gap bar with no data → dependent window features are legitimately NULL for that bar and its following window period — not a bug); **out-of-bounds NULL = bug**, judged by: a feature's NULL position set ⊆ (its dependency chain's latest warm-up prefix ∪ upstream-missingness propagation closure) (K3's `warmup_bars` is the lower-bound datum; gap-propagation direction is guaranteed by I1 causality) | new in this feature |
+| F2 | warm-up NULL semantics (**v0.7 tightened**, D3): 0002 already guarantees the input `mid_*` is NULL-free and has **no gap placeholder rows** (measured 9.98M rows, 0 NULLs), so a feature's NULLs are **allowed to come only** from (a) the **warm-up prefix** (K3 `warmup_bars`), or (b) a **defined zero-denominator of a derived feature** (e.g. `prior24_range_pos` hitting 24 all-equal bars → `range==0`, producing NULL/0 per the D4-gate fallback rule — a legitimate semantic, not gap propagation); **outside these two classes, any NULL/NaN after warm-up = a compute crash or divide-by-zero bug** (Gate 4 catches it) | new in this feature (v0.7 tightened per D3, removing the "gap-propagation closure" phantom concept) |
 | F3 | each instrument's feature wide table is a self-sufficient single file (K2): 0004 can compile by reading one file, no join to the market layer | new in this feature |
-| F4 | compute determinism: same input + same FEATURE_VERSION + same numeric-stack version → feature values bitwise identical (bitwise, not "row-identical" — the feature layer is numeric computation; I18's "values + row order" is tightened here to bitwise) | new in this feature |
+| F4 | compute determinism (**v0.7 tightened**, D6): same input + same FEATURE_VERSION + same numeric-stack version + **same platform / same math library** → feature values **bitwise identical**; **cross-platform** (Linux↔Windows↔macOS, AVX2/AVX-512/NEON, OpenBLAS/MKL etc. math-library differences) only commits to `np.allclose(atol=1e-12, rtol=1e-12)` high-precision equality, **not bitwise** — floating-point sum/product order and 1-ULP rounding vary with hardware and compiler optimization (D6); golden tests therefore assert on two tiers: "same-platform bitwise, cross-platform allclose" (aligned with moneta Gate 1) | new in this feature (v0.7 added the cross-platform tolerance tier per D6) |
 | F5 | registry name conflict (core vs alpha) → error, no override | new in this feature |
 
 ## 5. Tests
@@ -422,11 +490,14 @@ overfitting into a very narrow parameter environment. **Impact**:
 | `test_psar_bull_bear_flags` | PSAR direction flags align with the flip bar |
 | `test_supertrend_line_and_flags` | `talib.SUPERTREND` line + bull/bear flags are mutually consistent |
 | `test_supertrend_parity_vs_reference` | `talib.SUPERTREND` vs the moneta/nova self-implementation reference, bar-for-bar (line/direction), deviation < 1e-12 (K1's dual-library parity hardened into a regression, guarding against a TA-Lib version change silently altering semantics) |
-| `test_warmup_null_semantics` | gap-free input: NULLs only in the warm-up prefix (F2); injected gap: NULL set = prefix ∪ gap-propagation closure (F2 revised) |
+| `test_warmup_null_semantics` | contiguous gap-free input: NULLs **only** in the warm-up prefix; any NULL/NaN after warm-up = assertion failure (F2 v0.7, D3); **exception**: a derived feature's zero denominator (e.g. `prior24_range_pos` on 24 all-equal bars) yields NULL/0 per the D4 fallback rule, legitimate (asserted separately, not mixed into the prefix rule) |
 | `test_no_future_reference` | truncating the last N rows of data → the prefix feature values are unchanged (I1 causality — the hardest one) |
-| `test_deterministic_rerun` | re-running with the same input → feature values bitwise identical (F4) |
+| `test_deterministic_rerun` | re-running with the same input, **same environment** → feature values bitwise identical (F4 strict tier) |
 | `test_wide_table_self_sufficient` | the wide table contains all OHLCV columns and is independently queryable as a single file (F3/K2) |
-| `test_snapshot_id_derived` | changing FEATURE_VERSION/params/numeric-stack version → snapshot id changes |
+| `test_feature_version_in_metadata` | changing FEATURE_VERSION/param-set sha256/numeric-stack version → the version string in the Parquet metadata changes (**not a directory level**, D1) |
+| `test_output_single_file_no_snapshot_dir` | output is a single `features_<m>/<instrument>.parquet` file, **no** `<snapshot_id>` sub-directory; re-runs overwrite without accumulating (D1) |
+| `test_per_instrument_streaming` | the data flow loops per instrument: the single-instrument working set stays bounded (<~300MB asserted), never all 21 instruments resident at once (D5) |
+| `test_f4_same_env_bitwise_cross_env_allclose` | same-environment re-run is bitwise identical (F4 strict tier); document "cross-platform allclose(1e-12)" as the maintainable upper bound (F4/D6) |
 | `test_universal_21_instruments` | 21 instruments, same feature, same parameters, point-for-point identical algorithm (K5) |
 | `test_feature_count_matches_r31` | wide-table column set == R3.1 list (F1 drift guard) |
 | `test_gate1_truncation_zero_redraw` | truncated recompute vs full prefix: `max\|V_trunc − V_full[:k]\| < 1e-12` (moneta Gate 1; the hardest form of I1) |
@@ -434,7 +505,7 @@ overfitting into a very narrow parameter environment. **Impact**:
 | `test_gate4_zero_amplitude_no_crash` | flat bar / zero amplitude / zero volume injection → no Inf / NaN leakage / crash (moneta Gate 4) |
 | `test_atr_normalization_basis_atr24` | every ATR-normalized feature's denominator == `atr_24` (K6; prevents the nova-mixing counter-example) |
 | `test_supertrend_path_dependent_from_head` | computed from the data head; a mid-start may differ (path dependence explicitly accepted; warm-up NULLs kept; K4) |
-| `test_supertrend_k7_management` | all four K7 management rules pass: parameters explicit in the registry (not hard-coded) + contract-card fields complete + golden values point-for-point cross-checked against the same-origin moneta/nova reference implementation, deviation < 1e-12 (K7) |
+| `test_supertrend_registry_params` | Supertrend (library-backed) management discipline: ATR window on a grid point, multiplier explicit in the registry (not hard-coded in the function body) + golden values point-for-point cross-checked against the moneta/nova reference implementation, deviation < 1e-12 (K7's library-backed equivalent discipline, NOT the "four self-implemented rules" — that is the untriggered conditional guard) |
 
 ## 6. Rollback
 
@@ -467,3 +538,4 @@ overfitting into a very narrow parameter environment. **Impact**:
 | 2026-11-07 | 0.4 | **Adversarial self-check fix (1 over-strong invariant)**: F2's original "any NULL after warm-up = bug" false-positives on **market gaps** (0002 I22 declares gaps legal; 730k real occurrences) — a gap bar's missingness propagating into dependent window features is a **legitimate** NULL, not a bug. Revised to "NULL positions ⊆ warm-up prefix ∪ upstream-missingness propagation closure" (direction guaranteed by I1 causality); `test_warmup_null_prefix_only` renamed `test_warmup_null_semantics` with a gap-propagation assertion. Other candidates (F1/F4/F5, K2 copy size, K5 interaction with gaps, snapshot-id derived-string length) verified as false positives or already covered — unchanged |
 | 2026-11-07 | 0.5 | **User decided two points, landed as K7/K8**: ① **self-implemented feature management (K7)** — the user asked "why is Supertrend self-implemented?": TA-Lib **indeed has no** Supertrend (moneta/nova headers both confirm); self-implemented features are managed **stricter** than library-backed ones: parameters explicit in the registry (no hard-coding) + mandatory contract card + golden test cross-checked point-for-point against the same-origin moneta/nova reference implementation (<1e-12, no self-verification) + any semantic change must be I13+1 with a recorded reason. ② **parameter grid discipline (K8, user decision)** — the user pointed out 14 is the Wilder "14 trading days ≈ 2 weeks" legacy and asked for 6/12/24/60 with few parameters to prevent overfitting into a narrow parameter environment; prior-generation evidence: moneta `catalogue.py` directly `raise ValueError("window outside CFD grid")` for off-grid windows, nova's research features in practice all use 6/12/24/60 → **ATR/RSI re-registered as the 6/12/24/60 grid**, the `atr_sma_14` dual-smoothing variant deleted, SMA/EMA gain 12, Supertrend's ATR window 14→24, normalization denominator `atr_wilder_14`→`atr_24` (K6 updated); exception: PSAR (0.02,0.2) kept (not a window parameter). Synced R3.1 (the requirements ZH+EN authoritative list) + §3.4 table + tests (+`test_grid_only_windows`/`test_supertrend_k7_management`, the two 14-related cases re-gridded). Tests 22→**24** |
 | 2026-11-07 | 0.6 | **Two user directives landed**: ① **Supertrend switched to the library** — the user asked "re-review whether any lib provides Supertrend". Measured evidence overturns the prior generations' assumption: the moneta/nova headers' "TA-Lib ships no Supertrend" is a **stale-version misconception** — the **TA-Lib 0.8.2** both generations lock does ship `SUPERTREND` (a real import probe confirms it, and `pandas-ta-classic` in moneta's deps also has one). A real-data dual-library parity test (SPX500_USD 1h, 5000 bars, PER=24/mult=3) shows the self-implementation and `talib.SUPERTREND` **match bar-for-bar 100%** (line diff=0, direction 100%). → **K1 revised** to "standard indicators all from TA-Lib (incl. Supertrend)"; **K7 demoted to a conditional guard** (0003 now has no self-implemented implementation; the rule is kept for the future); §2.3 adoption 1 changed from "must self-implement" to "path-dependence / keep NULL warm-up" (Supertrend's semantics unchanged, only its implementation source moved); §3.4's Supertrend row's compute class → `talib.SUPERTREND`; **new test** `test_supertrend_parity_vs_reference` (dual-library parity hardened into a regression). ② **K8 grid adds 120** (user directive "add 120") → grid = {6,12,24,60,120}, **aligned with moneta `catalogue.py`'s authoritative grid**; ATR/RSI/SMA/EMA each gain a `*_120` variant (§3.4 table + K8 impact block + `test_atr_grid_values_known` + `test_grid_only_windows` synced). Synced R3.1 (requirements ZH+EN authoritative list). Tests 24→**25** |
+| 2026-11-07 | 0.7 | **Batch-02 external red-team D1–D8 disposition (per user's accept/park/reject 3-level: 接受 5 = D1/D3/D5/D6/D8, 挂起 2 = D4/D7, 拒绝 1 = D2)**: ① **D1 (accepted)** — §3.1 abolished the `<snapshot_id>` directory level and the phantom "market snapshot id" derived term (0002 D4 already deprecated directory-level snapshots; the market layer has no such entity), now a single `features_<m>/<instrument>.parquet` file with the version written into Parquet metadata; added **Catalog integration** (register `features_5m/1h` views; 0004 queries feature columns via the Catalog, not by scanning the filesystem); test renamed `test_feature_version_in_metadata` + new `test_output_single_file_no_snapshot_dir`. ② **D5 (accepted)** — §3.1 added the **data-flow control law**: force per-instrument looping, bound the single-instrument working set, never load all 21 instruments resident at once; new `test_per_instrument_streaming`. ③ **D6 (tightened)** — F4 tightened from "bitwise" to a **two-tier: same-environment bitwise + cross-platform allclose(1e-12)**; new `test_f4_same_env_bitwise_cross_env_allclose`. ④ **D3 (tightened)** — F2 removed the "gap-propagation closure" phantom concept (0002 DQ1 guarantees `mid_*` NULL-free with no gap placeholder rows; measured 9.98M rows, 0 NULLs); now NULLs allowed only from warm-up prefix ∪ a defined derived-feature zero denominator; `test_warmup_null_semantics` synced. ⑤ **D4 (parked + process gate)** — decision doc ≠ implementation spec; §3.4 added a **D4 process gate**: before implementation, every self-implemented semantic/structural feature must get an exact variable/operator-level mathematical definition + every division feature a zero-denominator fallback (`denom==0 → NULL/0`, not caught by Gate 4 as a NaN leak). ⑥ **D2 (rejected on the merits, clarified with evidence)** — K1 clarified: TA-Lib 0.8.2 is the **official PyPI package** (`ta-lib/ta-lib-python`, not a fork); **the measured wheel bundles the C runtime via auditwheel** (`ta_lib.libs/libta-lib-*.so`, only `libc.so.6` external), so pip install is ready-to-use with no system C build → **does not violate R8**; the residual "a platform with no wheel" risk is recorded as an implementation-phase environment check. ⑦ **D7 (parked + process gate)** — the alpha extension point gained an API contract (`registry.register(...)` entry + pure-NumPy `compute` signature + fail-fast load with no silent skip + alpha version attribution); details land in the implementation spec. ⑧ **D8 (accepted)** — §1 input scope changed from "bronze/5m/1h" to "5m/1h aggregated layer" (0003 consumes only 0002's aggregated layer, not bronze 1m). Also fixed a **v0.5 leftover inconsistency**: `test_supertrend_k7_management`'s semantics ("four self-implemented rules") contradicted v0.6's K7 demotion → renamed `test_supertrend_registry_params` (library-backed management discipline). Tests 25→**28** (+3: single-file output / per-instrument / F4 two-tier; renamed 2: warmup_null, supertrend management; renamed 1: snapshot→metadata) |
