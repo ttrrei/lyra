@@ -575,7 +575,7 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | **A2** | **TSI ptc 映射**：`tsi_24_12`/`tsi_60_24` 映射到 ptc `TSI_f_s_13`（ptc 硬编码 signal=13），与我们的 (fast,slow) 签名不同 → 已正确标 `definitional`，非 bug | 🟢 无风险 | **接受（现状正确）**：签名差异已在 MAP 注释 + definitional 组标注 |
 | **A3** | **Aroon 命名互换**：ptc `AROONU`=我们的 AROON_DOWN。风险点=策略代码若误信 ptc 语义会把 up/down 读反 | 🟢 无风险（shipped 正确） | **接受（现状正确）**：shipped `aroon_up_*`=TA-Lib `AROON_UP`（正确），互换只存在于 cross-check 映射侧并已注释；**建议**在 0004 消费方首次引用 aroon 时补一条"以 TA-Lib 语义为准"的提醒 |
 | **A4** | **`test_crosscheck_ptc_covers_tulipy_gaps` 覆盖范围弱**：只断言 3 个 gap（plus_di/minus_di/supertrend），**未覆盖 lrslope/ha_o**（ptc 也没有，故如实留在 no_lib）——断言名"covers tulipy gaps"易被误读为"覆盖全部 no_lib" | 🟡 表述 | **挂起**：断言语义正确（ptc 确实只补齐这 3 个），但**建议在测试 docstring 里明确"仅覆盖 ptc 有能力补齐的 3 个，lrslope/ha_o 两库皆无"**，避免误读。不改断言（改弱了会失去防护价值） |
-| **A5** | **缓做理由与用户研究清单 3 处正面冲突**：① OHLC 波动率（用户："明显的新维度"）我按"与 ATR 重叠"缓做；② Connors RSI（用户："与常规 RSI(14) 信息不同"）我按"K8 违反"缓做；③ 截面组（用户："对 LightGBM 帮助最大"）我按"R9 单标的"缓做 | 🟠 判断冲突 | **挂起（待用户裁决）**：三条缓做**都有硬约束支撑**（ATR 重叠/K8 网格/R9 单标的），但用户研究清单对这三条的**价值判断高于我的默认**。已把三处冲突 + 用户原始标注写进 §3.4 缓做 5 组表的"注意"栏。**需你逐条裁决**：维持缓做（接受硬约束）/ 或放宽对应约束（如引入子 6 窗口类、或 R9 扩多标的） |
+| **A5** | **缓做理由与用户研究清单 3 处正面冲突**：① OHLC 波动率（用户："明显的新维度"）我按"与 ATR 重叠"缓做；② Connors RSI（用户："与常规 RSI(14) 信息不同"）我按"K8 违反"缓做；③ 截面组（用户："对 LightGBM 帮助最大"）我按"R9 单标的"缓做 | 🟠 判断冲突 | **已裁决（用户 2026-11-08）：三条全部维持缓做**。用户接受三条硬约束（ATR 重叠 / K8 网格 / R9 单标的）作为暂缓理由，不放宽约束、不引入子 6 窗口类、不扩多标的。§3.4 缓做 5 组表的"解锁门槛"保持不变（OHLC 波动率等 0006 实测偏置后再补 1 个、Connors 等"子 6 均值回归窗口"类独立决策、截面等 R9 扩多标的时）。本项**关闭**，0003 无遗留待决 |
 | **A6** | **vortex_m 语义**：`vortex_p`/`vortex_m` 命名指 VI+/VI−（方向强度），与"m"字面易被误读为 minus-MA | 🟢 无风险 | **接受（现状正确）**：命名沿用 TA-Lib VORTEX 的 VI+/VI− 惯例，已在 §3.4 表注明"方向强度 VI+/VI−" |
 | `test_crosscheck_all_mapped`（ptc） | **v1.3**：**主对照组**——pandas-ta-classic（活跃 2026-10，`import pandas_ta_classic`）vs 我们的 TA-Lib 后端。`exact` 组（SMA/HMA/KAMA/RSI/ATR/NATR/CCI/WILLR/MFI/STDDEV/DEMA/TEMA/HMA/ADX/plus_di/minus_di/TRIX/VHF/Vortex/…）断言 full-length-reldiff < 1e-7（同长、仅差浮点噪声）；`definitional` 组（EMA 种子/×100/BBP 0.5 偏移/Aroon 上下命名互换/STOCH slowing/MACD/Supertrend 路径依赖）断言有限或 < 1e-3；`no_lib` 组（lrslope/ha_o/结构特征）文档化跳过。ptc 缺失时 `importorskip` 自动跳过 |
 | `test_crosscheck_ptc_covers_tulipy_gaps` | **v1.3**：K1b 主从关系——tulipy `no_lib`（plus_di/minus_di/supertrend）在 ptc 中被覆盖为 exact/definitional（不泄漏 no_lib），证明 ptc 是更强对照组 |
@@ -599,7 +599,7 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | **H4** | `run_features` 逐标量直接写最终路径，无 staging/manifest——部分失败留下混合版本集 | High | **挂起** | 原子发布/清单是 **0007 push 层**（多机复用前必须原子）与 **0004 消费层**（Catalog 可见性）的联合职责；单写者本地场景当前可重算恢复（0002 A1 派生层规则），留待 0007/0004 边界一并落地 |
 | **M3** | 版本串不含 timeframe（5m/1h 串相同） | Med | **拒绝**（无 bug） | timeframe 已由各标量文件路径（`ohlcv_5m/` vs `ohlcv_1h/`）+ `input_minutes` 元数据区分；同一 registry 对 5m/1h 复用是**设计意图**（K5 同算法跨周期），非缺陷 |
 
-**小结**：本批落地 5 项代码/文档修复（H2/M2/M1/M4/M6）＋ M5 文档收窄，新增 3 测试（104→**107**）；H1/H3/H4 三条「跨边界」发现**挂起**，显式归属 0007/0004，避免半实现。M5 拆分（拒绝内存测试＋接受文档）、M3 拒绝（设计意图）。**A5（3 处缓做理由与用户研究清单冲突）仍待用户逐条裁决**，不在此批。
+**小结**：本批落地 5 项代码/文档修复（H2/M2/M1/M4/M6）＋ M5 文档收窄，新增 3 测试（104→**107**）；H1/H3/H4 三条「跨边界」发现**挂起**，显式归属 0007/0004，避免半实现。M5 拆分（拒绝内存测试＋接受文档）、M3 拒绝（设计意图）。**A5（3 处缓做理由 vs 用户研究清单）已由用户裁决（2026-11-08）：三条全部维持缓做**（接受 ATR 重叠 / K8 网格 / R9 单标的三条硬约束，不放宽、不扩多标的）——见 §5b A5 行，0003 至此**无遗留待决项**，可签收。
 
 ## 6. 回滚
 
