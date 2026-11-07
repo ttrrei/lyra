@@ -49,10 +49,24 @@
 - SMA：6, 12, 24, 60, 120
 - EMA：6, 12, 24, 60, 120
 - ATR：Wilder-ATR 6 / 12 / 24 / 60 / 120（**24 = ATR 归一化分母默认**）
+- NATR：`atr / close` 归一化（6, 12, 24, 60, 120）
 - RSI：6, 12, 24, 60, 120
 - PSAR：(0.02, 0.2)（例外：加速/极值因子，非窗口参数）
 - Supertrend：(ATR 窗口 24, multiplier 3)（**`talib.SUPERTREND`
   库实现**，0003 K1；moneta/nova 自研参考作 golden 交叉锚点）
+- MACD（精选三元组，非全网格展开）：(6, 12, 6) / (6, 24, 6) / (12, 60, 12)
+- ROC：6, 12, 24, 60, 120
+- STOCH：%K/%D，(fastk, slowd) ∈ {(6,6), (24,12), (60,24)}（slowk 平滑 = 1）
+- BBANDS：%B + 带宽，窗口 (24, 60, 120)，std = 2
+- ADX / PLUS_DI / MINUS_DI：24, 60（趋势强度族，仅 2 点）
+- CCI：24, 60
+- WILLR：24, 60
+- MFI：24, 60（量价资金流）
+- CMO：24, 60
+- OBV + `obv_slope_24`（累计量 + 24-bar 斜率）
+- LINEARREG_SLOPE（归一化斜率）：24, 60
+- KAMA（自适应均线）：24
+- **缓做（有理由）**：PPO（MACD 归一化变体，冗余）；TRIX / ULTOSC / AROON（利基变体）；STDDEV（ATR + BBANDS 已覆盖波动）；CORREL / BETA（单标的宇宙无自然基准序列）；HT_*（过拟合风险）；CDL*（需先做统计预筛）
 - 语义 / 结构：`sma_cross_up_6_24 / sma_cross_down_6_24`、
   `sma_alignment_6_24 ∈ {-1, 0, 1}`、`rsi_divergence_up / down`、
   `psar_bullish / bearish`、`supertrend_bullish / bearish`
@@ -260,3 +274,4 @@ YAML 文件。初始 12 个方向继承自 nova：`trend_continuation`、
 | 2026-11-06 | 0.8 | R12 交叉段补 **I8 边界**（L2）：AI 改造能力仅限策略层（阈值/操作符/时间算子/entry-exit 结构），严禁改动特征注册名及已注册特征底层参数（如 `sma_6_24`→`sma_7_25`，属 I8 违规，`validate` 拒绝）；特征要变 = 注册新特征。 |
 | 2026-11-07 | 0.9 | **R3.1 网格纪律（用户拍板，0003 K8）**：窗口参数只取 CFD 网格 {6,12,24,60}——不用 Wilder "14≈2 周" 遗留参数，参数面收窄防极窄参数环境过拟合。ATR 改 6/12/24/60（24=归一化分母默认）、RSI 改 6/12/24/60、SMA/EMA 补 12、Supertrend ATR 窗口 14→24；例外：PSAR (0.02,0.2) 非窗口参数保留。前代背书：moneta `catalogue.py` 网格外窗口 `raise ValueError("window outside CFD grid")`；nova 研究特征实际全用 6/12/24/60。同步 0003 v0.5（K6/K7/K8 + §3.4 + 测试 24） |
 | 2026-11-07 | 0.10 | **R3.1 两项更新（用户指令）**：① **网格加 120** → {6,12,24,60,120}，**与 moneta `catalogue.py` 权威网格对齐**；ATR/RSI/SMA/EMA 各补 `*_120` 变体。② **Supertrend 改库实现**——实测推翻前代认知：moneta/nova 头注释"TA-Lib ships no Supertrend"系旧版本误解，两代锁定的 **TA-Lib 0.8.2 实测内置 `SUPERTREND`**；真实数据双库 parity（SPX500_USD 1h，5000 bar）自研版与 `talib.SUPERTREND` **逐 bar 100% 一致** → R3.1 Supertrend 行由"自研"改"`talib.SUPERTREND` 库实现 + moneta/nova 自研参考作 golden 交叉锚点"。同步 0003 v0.6（K1/K7/K8 + §3.4 + 测试 25） |
+| 2026-11-07 | 0.11 | **R3.1 扩充标准指标集（用户批准"推荐范围"）**：新增 NATR / MACD（精选三元组 6_12_6/6_24_6/12_60_12）/ ROC / STOCH（%K/%D）/ BBANDS（%B+带宽，不用原始上下轨）/ ADX+PLUS_DI+MINUS_DI / CCI / WILLR / MFI / CMO / OBV（斜率）/ LINEARREG_SLOPE / KAMA 共 **13 族**；窗口参数一律取 K8 网格 {6,12,24,60,120}（外部建议清单的 5/10/14/20 不采用）。参数面纪律：MACD 精选三元组非全网格展开、趋势强度/动量/震荡族只取 24/60、BBANDS/OBV 取无量纲形态。**缓做**（有理由）：PPO/TRIX/ULTOSC/AROON/STDDEV、CORREL/BETA（无基准序列）、HT_*/CDL*。**触发 I13：FEATURE_VERSION +1**。同步 0003 v0.8（§3.4 + D4 门禁 + 测试 34） |

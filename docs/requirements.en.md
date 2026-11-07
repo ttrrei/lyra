@@ -63,12 +63,32 @@ authoritative grid**). Initial list:
 - EMA: 6, 12, 24, 60, 120
 - ATR: Wilder-ATR 6 / 12 / 24 / 60 / 120 (**24 = default
   ATR-normalization denominator**)
+- NATR: `atr / close` normalized (6, 12, 24, 60, 120)
 - RSI: 6, 12, 24, 60, 120
 - PSAR: (0.02, 0.2) (exception: acceleration/extreme factors, not
   window parameters)
 - Supertrend: (ATR window 24, multiplier 3) (**`talib.SUPERTREND`
   library implementation**, 0003 K1; the moneta/nova
   self-implementation reference serves as the golden cross-anchor)
+- MACD (curated triplets, NOT full grid expansion): (6, 12, 6) /
+  (6, 24, 6) / (12, 60, 12)
+- ROC: 6, 12, 24, 60, 120
+- STOCH: %K/%D, (fastk, slowd) ∈ {(6,6), (24,12), (60,24)} (slowk
+  smoothing = 1)
+- BBANDS: %B + bandwidth, window (24, 60, 120), std = 2
+- ADX / PLUS_DI / MINUS_DI: 24, 60 (trend-strength family, 2 points only)
+- CCI: 24, 60
+- WILLR: 24, 60
+- MFI: 24, 60 (volume-weighted money flow)
+- CMO: 24, 60
+- OBV + `obv_slope_24` (cumulative volume + 24-bar slope)
+- LINEARREG_SLOPE (normalized slope): 24, 60
+- KAMA (adaptive moving average): 24
+- **Parked (with rationale)**: PPO (normalized MACD variant, redundant);
+  TRIX / ULTOSC / AROON (niche variants); STDDEV (ATR + BBANDS already
+  cover volatility); CORREL / BETA (no natural reference series in a
+  single-instrument universe); HT_* (overfitting risk); CDL* (needs a
+  statistical pre-screen first)
 - Semantic / structure: `sma_cross_up_6_24 / sma_cross_down_6_24`,
   `sma_alignment_6_24 ∈ {-1, 0, 1}`, `rsi_divergence_up / down`,
   `psar_bullish / bearish`, `supertrend_bullish / bearish`
@@ -316,3 +336,4 @@ directions are fully peer.
 | 2026-11-06 | 0.8 | R12 crossover gains an **I8 boundary** (L2): the AI's modification capability is limited to the **strategy layer** (thresholds / operators / temporal operators / entry-exit structure); changing a feature's registered name or underlying parameters is forbidden (e.g. `sma_6_24`→`sma_7_25` is an I8 violation, `validate` rejects it); a changing feature = a newly registered feature. |
 | 2026-11-07 | 0.9 | **R3.1 grid discipline (user decision, 0003 K8)**: window parameters only take the CFD grid {6,12,24,60} — no Wilder "14 ≈ 2 weeks" legacy parameter; a narrow parameter surface suppresses overfitting into a narrow parameter environment. ATR re-registered as 6/12/24/60 (24 = default normalization denominator), RSI as 6/12/24/60, SMA/EMA gain 12, Supertrend's ATR window 14→24; exception: PSAR (0.02,0.2) kept (not a window parameter). Prior-generation evidence: moneta `catalogue.py` `raise ValueError("window outside CFD grid")` for off-grid windows; nova's research features in practice all use 6/12/24/60. Synced with 0003 v0.5 (K6/K7/K8 + §3.4 + 24 tests) |
 | 2026-11-07 | 0.10 | **R3.1 two updates (user directives)**: ① **grid adds 120** → {6,12,24,60,120}, **aligned with moneta `catalogue.py`'s authoritative grid**; ATR/RSI/SMA/EMA each gain a `*_120` variant. ② **Supertrend switched to the library** — measured evidence overturns the prior generations' assumption: the moneta/nova headers' "TA-Lib ships no Supertrend" is a stale-version misconception, and the **TA-Lib 0.8.2** both generations lock does ship `SUPERTREND` (a real import probe confirms it); a real-data dual-library parity test (SPX500_USD 1h, 5000 bars) shows the self-implementation and `talib.SUPERTREND` **match bar-for-bar 100%** → R3.1's Supertrend row changed from "self-implemented" to "`talib.SUPERTREND` library implementation + the moneta/nova self-implementation reference as golden cross-anchor". Synced with 0003 v0.6 (K1/K7/K8 + §3.4 + 25 tests) |
+| 2026-11-07 | 0.11 | **R3.1 expanded standard-indicator set (user approved "recommended scope")**: added **13 families** — NATR / MACD (curated triplets 6_12_6/6_24_6/12_60_12) / ROC / STOCH (%K/%D) / BBANDS (%B + bandwidth, no raw bands) / ADX + PLUS_DI + MINUS_DI / CCI / WILLR / MFI / CMO / OBV (slope) / LINEARREG_SLOPE / KAMA. All window parameters restricted to the K8 grid {6,12,24,60,120} (the external suggestion list's 5/10/14/20 parameters are all rejected). Parameter-surface discipline: MACD curated triplets (not full grid expansion), trend-strength/momentum/oscillator families take 24/60 only, BBANDS/OBV use dimensionless forms. **Parked** (with rationale): PPO/TRIX/ULTOSC/AROON/STDDEV (redundant or niche), CORREL/BETA (no reference series in a single-instrument universe), HT_*/CDL* (overfitting risk / need a statistical pre-screen first). **Triggers I13: FEATURE_VERSION +1**. Synced with 0003 v0.8 (§3.4 + D4 gate + 34 tests) |

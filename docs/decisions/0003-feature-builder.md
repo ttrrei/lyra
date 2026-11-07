@@ -321,10 +321,45 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
 | EMA | `ema_6 / ema_12 / ema_24 / ema_60 / ema_120` | 网格（K8） | TA-Lib（K1） |
 | ATR | `atr_6 / atr_12 / atr_24 / atr_60 / atr_120` | 网格（K8） | `talib.ATR`（Wilder 平滑）；**`atr_24` = 归一化分母默认**（K6） |
 | RSI | `rsi_6 / rsi_12 / rsi_24 / rsi_60 / rsi_120` | 网格（K8） | `talib.RSI` |
+| NATR | `natr_6 / natr_12 / natr_24 / natr_60 / natr_120` | 网格（K8） | `talib.NATR`（`atr/close` 波动尺度） |
+| MACD | `macd_6_12_6 / macd_6_24_6 / macd_12_60_12`（各含 `line / signal / hist` 三列） | **精选三元组**（K8 例外，见下） | `talib.MACD`（fast/slow/signal） |
+| ROC | `roc_6 / roc_12 / roc_24 / roc_60 / roc_120` | 网格（K8） | `talib.ROC`（动量） |
+| STOCH | `stoch_k_6 / stoch_d_6` 等，(fastk, slowd) ∈ {(6,6),(24,12),(60,24)} | 网格内配对（K8） | `talib.STOCH`（%K/%D） |
+| BBANDS | `bband_pctb_24 / bband_pctb_60 / bband_pctb_120` + `bband_bw_24 / 60 / 120` | 网格（K8），std=2 | `talib.BBANDS`（%B + 带宽，**不用原始上下轨**） |
+| ADX 族 | `adx_24 / adx_60`、`plus_di_24 / plus_di_60`、`minus_di_24 / minus_di_60` | 24/60（K8，仅 2 点） | `talib.ADX / PLUS_DI / MINUS_DI`（趋势强度） |
+| CCI | `cci_24 / cci_60` | 24/60（K8，仅 2 点） | `talib.CCI`（均值回归动量） |
+| WILLR | `willr_24 / willr_60` | 24/60（K8，仅 2 点） | `talib.WILLR`（均值回归） |
+| MFI | `mfi_24 / mfi_60` | 24/60（K8，仅 2 点） | `talib.MFI`（需 volume，量价资金流） |
+| CMO | `cmo_24 / cmo_60` | 24/60（K8，仅 2 点） | `talib.CMO`（动量） |
+| OBV | `obv`、`obv_slope_24`（`obv` 的 24-bar `LINEARREG_SLOPE`） | 斜率窗口 24（K8） | `talib.OBV` + 斜率派生（**不用绝对值**，用斜率/变化率） |
+| 回归斜率 | `lrslope_24 / lrslope_60`（`LINEARREG_SLOPE / close` 归一化） | 24/60（K8，仅 2 点） | `talib.LINEARREG_SLOPE`（趋势方向） |
+| KAMA | `kama_24` | 24（K8） | `talib.KAMA`（自适应均线，ER 因子内建） |
 | PSAR | `psar / psar_bullish / psar_bearish` | (0.02, 0.2)（K8 例外：非窗口参数） | `talib.SAR` + 方向标志 |
 | Supertrend | `supertrend / supertrend_bullish / supertrend_bearish` | (ATR 窗口 24, multiplier 3) | `talib.SUPERTREND`（K1，库实现）+ moneta/nova 自研参考作 golden 交叉锚点 |
 | 语义 | `sma_cross_up_6_24 / sma_cross_down_6_24 / sma_alignment_6_24 / rsi_divergence_up / rsi_divergence_down` | 引用已注册列（6/24） | 派生（已注册列的确定性谓词） |
 | 结构 | `prior24_high / prior24_low / prior24_range / prior24_range_pos / prior24_width / breakout_up / breakout_down / failed_breakout_up / failed_breakout_down / shift6_atr / bar_range_atr / rel_quote_activity / utc_hour / path_eff_24` | 6 / 24（均网格内） | numpy/pandas 向量化（K1） |
+
+**v0.8 新增标准指标族（K8 网格 + 参数面纪律）**：上表 NATR / MACD /
+ROC / STOCH / BBANDS / ADX 族 / CCI / WILLR / MFI / CMO / OBV /
+回归斜率 / KAMA 共 **13 族**为本次纳入（2026-11-07 用户批准"推荐
+范围"；外部建议清单的**参数一律不采用**，全部重排到 K8 网格）。
+参数面纪律（呼应 K8 防过拟合动机）：
+- **MACD 用精选三元组而非全网格展开**——fast/slow/signal 三者相互
+  约束，全网格 `5×5×5` 会引入大量无意义组合（fast>slow、signal>slow
+  等），只保留 3 个语义合理的网格内三元组；
+- **趋势强度/动量/震荡族（ADX/CCI/WILLR/MFI/CMO）只取 24、60 两点**，
+  不是 5 点全开——这些是"尺度选择"而非"关键信号点"，多开只是放大
+  参数面；
+- **BBANDS 用 %B + 带宽，不用原始上下轨**（原始轨含价格量纲，跨标
+  的不可比；%B 与带宽无量纲、跨标的可比，符合"通用规则"）；
+- **OBV 用斜率/变化率，不用绝对累计值**（绝对值量纲随标的成交量
+  漂移，不可比）。
+
+**缓做族（有理由，非遗忘）**：PPO（MACD 归一化变体，冗余）、
+TRIX / ULTOSC / AROON（利基变体、边际价值低）、STDDEV（ATR + BBANDS
+已覆盖波动维度）、CORREL / BETA（单标的宇宙无自然基准序列，定义不清）、
+HT_*（Hilbert 变换，解释性差易过拟合）、CDL*（61 根 K 线形态，稀疏二
+值、单独统计显著性弱，需先做统计预筛再谈纳入）。
 
 **结构族口径（§2.3 采纳 4/6，K6/K8）**：
 - `prior24_*` 的 24 根窗口**排除当前 bar**（`shift(1)` 后开窗，
@@ -346,7 +381,10 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
 > 各函数 docstring + `tests/` golden）里为**每个**自研语义/结构特征
 > 补**精确到变量名与运算符的确定性数学定义**，并对所有除法特征
 > （`path_eff_24` / `prior24_range_pos` / `shift6_atr` / `bar_range_atr` /
-> `rel_quote_activity`）显式定义分母为 0 / 接近 0 的兜底规则
+> `rel_quote_activity` / v0.8 新增：`natr_*` / `bband_pctb_*` / `bband_bw_*` /
+> `lrslope_*` / `mfi_*`）显式定义分母为 0 / 接近 0 的兜底规则
+> （`mfi_*` 的钱流比、`bband_pctb_*`/`bband_bw_*` 的带宽差，遇 24 根全平价
+> bar → 分母 0，同属"已定义零分母"合法 NULL 来源）
 > （`denom == 0 → NULL` 或 `0.0`，且不得被 Gate 4 当 NaN 泄漏拦截）。
 > 决策文档只锁定"算哪些、用哪族参数"，"怎么算"以 spec + golden
 > test 为准（防止不同实现者写出不同代码、golden test 沦为自证）。
@@ -381,7 +419,13 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
 | `test_ema_recursion_known` | EMA 前 5 值手工 golden（递归起点 = 首值） |
 | `test_rsi_grid_known` | RSI（窗口 24）手工 golden（`talib.RSI` Wilder 平滑） |
 | `test_atr_grid_values_known` | `atr_6/12/24/60/120` 各窗口手工 golden；不同窗口值互不相同（网格生效） |
-| `test_grid_only_windows` | 注册表所有窗口参数 ∈ {6,12,24,60,120}，无 14（K8 防回归） |
+| `test_grid_only_windows` | **v0.8 扩范围**：注册表**所有**窗口参数（SMA/EMA/ATR/NATR/RSI/ROC/STOCH/BBANDS/ADX 族/CCI/WILLR/MFI/CMO/LRSLOPE/KAMA/obv_slope/MACD 三元组三参）∈ {6,12,24,60,120}，无 14/15/20/50/100 等网格外值（K8 防回归） |
+| `test_macd_triplets_known` | MACD 三组精选三元组 (6,12,6)/(6,24,6)/(12,60,12) 的 `line/signal/hist` 手工 golden；且满足 `line − signal == hist`（`talib.MACD`） |
+| `test_roc_stoch_known` | ROC（24）与 STOCH（%K/%D，fastk=6/slowd=6）手工 golden；STOCH %K ∈ [0,100]（`talib.ROC` / `talib.STOCH`） |
+| `test_bbands_pctb_bw_known` | BBANDS（窗口 24，std=2）：%B 手工 golden + 带宽 `(upper−lower)/middle ≥ 0`；**不注册原始上下轨**（无量纲纪律）（`talib.BBANDS`） |
+| `test_trend_momentum_family_known` | ADX/PLUS_DI/MINUS_DI（24/60）∈ [0,100]；CCI(24/60) 有限、WILLR(24/60) ∈ [−100,0]、CMO(24/60) ∈ [−100,100]（`talib.ADX/PLUS_DI/MINUS_DI/CCI/WILLR/CMO`） |
+| `test_volume_flow_known` | MFI(24/60) ∈ [0,100]；OBV 为累计量、`obv_slope_24` = 其 24-bar `LINEARREG_SLOPE`；KAMA(24) ∈ [low, high] 域；LRSLOPE(24/60) 有限（`talib.MFI/OBV/LINEARREG_SLOPE/KAMA`） |
+| `test_natr_consistency` | `natr_W` == `atr_W / close`（逐点 < 1e-12），即 NATR 是 ATR 的 close 归一化，非独立指标 |
 | `test_psar_bull_bear_flags` | PSAR 方向标志与翻转 bar 对齐 |
 | `test_supertrend_line_and_flags` | `talib.SUPERTREND` 线 + bull/bear 标志一致性 |
 | `test_supertrend_parity_vs_reference` | `talib.SUPERTREND` 与 moneta/nova 自研参考实现逐 bar 对照（line/direction），偏差 < 1e-12（K1 双库 parity 固化成回归，防 TA-Lib 换版本悄悄改语义） |
@@ -431,3 +475,4 @@ Wilder 时代"14 交易日 ≈ 2 周"遗留参数**（nova 研究特征实际全
 | 2026-11-07 | 0.5 | **用户拍板两点，落 K7/K8**：① **自研特征管理（K7）**——用户问"Supertrend 为什么自研"：TA-Lib **确无** Supertrend（moneta/nova 头注释均确认），自研特征比库实现更严：参数显式入注册表（禁硬编码）+ 契约卡强制 + golden test 用 moneta/nova 同源参考实现逐点交叉验证（<1e-12，不自己验自己）+ 语义变更必须 I13+1 并说明理由。② **参数网格纪律（K8，用户拍板）**——用户指出 14 是 Wilder "14 交易日≈2 周"遗留、要求尽量用 6/12/24/60 且参数不要太多防极窄参数过拟合；前代背书：moneta `catalogue.py` 对网格外窗口直接 `raise ValueError("window outside CFD grid")`、nova 研究特征实际全用 6/12/24/60 → **ATR/RSI 改 6/12/24/60 网格**、`atr_sma_14` 双平滑变体删除、SMA/EMA 补 12、Supertrend ATR 窗口 14→24、归一化分母 `atr_wilder_14`→`atr_24`（K6 更新）；例外：PSAR (0.02,0.2) 非窗口参数保留。同步 R3.1（requirements 中英权威清单）+ §3.4 表 + 测试（+`test_grid_only_windows`/`test_supertrend_k7_management`，2 个 14 相关用例改网格版）。测试 22→**24** |
 | 2026-11-07 | 0.6 | **两项用户指令落实**：① **Supertrend 改用库实现**——用户要求"再 review 有没有 lib 能获得 Supertrend"。实测推翻前代认知：moneta/nova 头注释"TA-Lib ships no Supertrend"是**旧版本误解**，两代锁定的 **TA-Lib 0.8.2 实测内置 `SUPERTREND`**（`timeperiod`+`multiplier`，输出 line+trend）。用真实数据（SPX500_USD 1h，5000 bar，PER=24/mult=3）做双库 parity：自研版与 `talib.SUPERTREND` **逐 bar 100% 一致**（line diff=0、direction 100%），证明语义同源。→ **K1 改回**"标准指标全部来自 TA-Lib（含 Supertrend）"；**K7 降级为条件护栏**（0003 现无自研实现，规则保留供未来）；§2.3 采纳 1 由"必须自研"改"路径依赖/不删 warm-up 行"（Supertrend 语义不变，仅换实现来源）；§3.4 Supertrend 行计算类改 `talib.SUPERTREND`；**新增测试** `test_supertrend_parity_vs_reference`（双库 parity 固化成回归）。② **K8 网格加 120**（用户指令"加上120"）→ 网格 = {6,12,24,60,120}，**与 moneta `catalogue.py` 权威网格对齐**；ATR/RSI/SMA/EMA 各补 `*_120` 变体（§3.4 表 + K8 影响块 + `test_atr_grid_values_known` + `test_grid_only_windows` 同步）。同步 R3.1（requirements 中英权威清单）。测试 24→**25** |
 | 2026-11-07 | 0.7 | **批次2 外部红队 D1–D8 处置（按用户接受/挂起/拒绝三级：接受 5 = D1/D3/D5/D6/D8，挂起 2 = D4/D7，拒绝 1 = D2）**：① **D1（接受）**——§3.1 废除 `<snapshot_id>` 目录层级与"market snapshot id"幽灵派生项（0002 D4 已废弃目录级 snapshot、市场层无该实体），改单文件 `features_<m>/<instrument>.parquet` + 版本入 Parquet 元数据；补 **Catalog 接入**（注册 `features_5m/1h` 视图，0004 经 Catalog 查列不扫盘）；测试改 `test_feature_version_in_metadata` + 新增 `test_output_single_file_no_snapshot_dir`。② **D5（接受）**——§3.1 补**数据流控制律**：强制 per-instrument 循环、单标的工作集受控、严禁全量 21 标同驻；新增 `test_per_instrument_streaming`。③ **D6（收紧）**——F4 由"bitwise"收紧为**同环境 bitwise + 跨平台 allclose(1e-12)** 两级；新增 `test_f4_same_env_bitwise_cross_env_allclose`。④ **D3（收紧）**——F2 删除"缺口传播闭包"幽灵概念（0002 DQ1 保证 mid_* 零 NULL 且无缺口占位行，实测 998 万行 0 NULL），改为 NULL 只允许来自 warm-up 前缀 ∪ 派生特征已定义零分母；`test_warmup_null_semantics` 同步。⑤ **D4（挂起+过程门禁）**——决策文档≠实现规格，§3.4 加 **D4 过程门禁**：实施前必须为每个自研语义/结构特征补精确数学定义 + 所有除法特征补零分母兜底（`denom==0 → NULL/0`，不被 Gate 4 当 NaN 泄漏）。⑥ **D2（拒绝其核心主张，据实澄清）**——K1 澄清：TA-Lib 0.8.2 是**官方 PyPI 包**（`ta-lib/ta-lib-python`，非 fork），**实测 wheel 经 auditwheel 打包 C runtime**（`ta_lib.libs/libta-lib-*.so`，外部仅依赖 `libc.so.6`），pip 即开箱可用、无需系统 C 库编译 → **不构成 R8 破坏**；残留"某平台无 wheel"风险记为实施期环境验证项。⑦ **D7（挂起+过程门禁）**——alpha 扩展点补 API 契约（`registry.register(...)` 入口 + compute 纯 NumPy 签名 + 加载 fail-fast 不静默跳过 + alpha 版本归属），细节落实施 spec。⑧ **D8（接受）**——§1 输入口径由"bronze/5m/1h"改为"5m/1h 聚合层"（0003 只消费 0002 聚合层，不碰 bronze 1m）。另修 **v0.5 遗留不一致**：`test_supertrend_k7_management` 语义（自研四项管理）与 v0.6 K7 降级矛盾 → 改 `test_supertrend_registry_params`（库实现管理纪律）。测试 25→**28**（+3：输出单文件/per-instrument/F4 两级；改 2：warmup_null、supertrend 管理；改 1：snapshot→metadata） |
+| 2026-11-07 | 0.8 | **扩充标准指标集（用户批准"推荐范围"；外部建议清单的 5/10/14/20 等参数一律不采用，全部重排到 K8 网格 {6,12,24,60,120}）**：§3.4 新增 **13 族**标准指标——NATR（`atr/close`）、MACD（**精选三元组** 6_12_6/6_24_6/12_60_12，非全网格展开）、ROC、STOCH（%K/%D）、BBANDS（**%B+带宽**，不用原始上下轨）、ADX/PLUS_DI/MINUS_DI（趋势强度族，仅 24/60）、CCI、WILLR、MFI、CMO（均仅 24/60）、OBV（**斜率**非绝对值）、LINEARREG_SLOPE（归一化斜率）、KAMA（自适应均线）。参数面纪律：MACD 精选三元组、趋势强度/动量/震荡族只取 2 点、BBANDS/OBV 取无量纲形态（呼应 K8 防过拟合动机）。**缓做族**（有理由）：PPO/TRIX/ULTOSC/AROON/STDDEV（冗余或利基）、CORREL/BETA（单标的宇宙无基准）、HT_*/CDL*（过拟合/需先预筛）。D4 门禁补 5 个新除法特征（natr_*/bband_pctb_*/bband_bw_*/lrslope_*/mfi_*）；`test_grid_only_windows` 扩范围覆盖全部新族；**+6 测试**（MACD/ROC+STOCH/BBANDS/趋势动量族/量流族/NATR 一致性）。**触发 I13**：特征集变更 → **FEATURE_VERSION +1**。同步 R3.1（requirements 中英权威清单）。测试 28→**34**（中英一致） |
