@@ -94,13 +94,20 @@ authoritative grid**). Initial list:
   - Efficiency Ratio @60 (v0.8 has eff_24): 60
   - Donchian @60 (prior60_high / prior60_low; v0.8 has prior24_*): 60
 - **v1.1 additions**: Heikin Ashi (`ha_o / ha_h / ha_l / ha_c`, K7 self-implementation, recursive transform, no window parameter, warmup 16)
-- **Parked (with rationale, not forgotten)**:
+- **v1.3 additions (6 families, trend-strength / efficiency dimension)**:
+  - TRIX (triple-EMA smoothed momentum): 24, 60
+  - TSI (dual-EMA momentum, curated fast/slow pairs): (24,12), (60,24)
+  - VHF (Volatility Hester Framework): 24, 60
+  - Vortex (directional strength VI+/VI−): 24, 60
+  - Aroon (trend age UP/DOWN): 24, 60
+  - (all have TA-Lib 0.8.2 implementations, on the K8 grid, machine-verifiable by pandas-ta-classic)
+- **Parked (with rationale, not forgotten; v1.3 removed the now-shipped TRIX / AROON / TSI / Vortex / VHF)**:
   - Keltner (= EMA±2×ATR; BBANDS already covers the "mean ± n-volatility band" signal)
   - Choppiness (= 100×LOG(SUM(TR)/MAXHIGH−MINLOW); a composite of ATR+Donchian, not an independent signal)
   - Relative Volume / VWMA (v0.8 rel_quote_activity already covers relative-volume signal)
-  - PPO (normalized MACD variant, redundant); TRIX / ULTOSC / AROON / TSI / SMI (niche momentum variants, parameter surface too large)
-  - CMF / EFI / PVT / VHF (volume-direction ratios, overlapping with MFI/OBV)
-  - Vortex / QQE / RSX / VFI / Squeeze / Schaff / Ichimoku / Inside Bar / Williams Fractal (need self-implementation or parameter explosion; Heikin Ashi shipped in v1.1)
+  - PPO (normalized MACD variant, redundant); ULTOSC / SMI (niche momentum variants, parameter surface too large)
+  - CMF / EFI / PVT (volume-direction ratios, overlapping with MFI/OBV)
+  - QQE / RSX / VFI / Squeeze / Schaff / Ichimoku / Inside Bar / Williams Fractal (need self-implementation or parameter explosion; Heikin Ashi shipped in v1.1)
   - CORREL / BETA (no natural reference series in a single-instrument universe)
   - HT_* (overfitting risk); CDL* (needs a statistical pre-screen first)
 - Semantic / structure: `sma_cross_up_6_24 / sma_cross_down_6_24`,
@@ -358,3 +365,4 @@ directions are fully peer.
 | 2026-11-07 | 0.12 | **R3.1 v0.9 fills the P0 gap (8 items)**: DEMA (6/24/60), TEMA (6/24/60), HMA (24/60), MOM (6/24/60), Rolling StdDev (24/60), Z-Score (24/60), Efficiency Ratio @60, Donchian @60 (prior24_* extended to prior60_*). **Parked additions**: Keltner (=EMA±2×ATR, BBANDS covers it), Choppiness (=ATR+Donchian composite transform), Relative Volume/VWMA (rel_quote_activity covers it), all P1 families (parameter surface too large or need self-implementation, deferred to batch 2). **Triggers I13: FEATURE_VERSION +1** (v0.8 already +1, this +1 more = cumulative +2). Synced 0003 v0.9 (§3.4 + 6 new tests) |
 | 2026-11-07 | 0.13 | **R3.1 adds Heikin Ashi (user instruction; 0003 v1.1)**: `ha_o / ha_h / ha_l / ha_c` (4 columns), K7 self-implementation (TA-Lib has no HA), recursive transform with no window parameter (K8 N/A), warmup_bars=16 (safe lower bound for the recursive convergence); all K7 management discipline applies (registry `self_implemented: True` marker + contract card + golden test + I13). The parked-list "Heikin Ashi" entry is removed (shipped). **Triggers I13: FEATURE_VERSION +1 (2→3)**. Synced 0003 v1.1 (§3.4 + tests +2) |
 | 2026-11-08 | 0.14 | **R8 Light clause exception (user approved)**: the `control` optional dependency group (currently only `tulipy`) does not count toward the ≤ 15 core package limit — a test-only cross-library control, never imported at runtime, enabled explicitly via `pip install "lyra[control]"` (0003 v1.2 K1b: 9 exact families <1e-6 + 9 definitional families frozen with measured deltas + 5 no-lib skips; tail-alignment engineering point). The indicator set itself is unchanged (120 features, FEATURE_VERSION=3). |
+| 2026-11-08 | 0.15 | **R3.1 +6 families, R8 control group updated (0003 v1.3)**: R3.1 ships TRIX(24/60) / TSI(24_12/60_24) / VHF(24/60) / Vortex(24/60) / Aroon(24/60 up/down) — **14 features** (all have TA-Lib implementations, on the K8 grid, machine-verifiable by pandas-ta-classic); parked-list entries now shipped are removed. **R8 exception extends to 2 control libs**: `control = ["pandas-ta-classic","tulipy"]` — pandas-ta-classic promoted to **primary** (PyPI-active 2026-10, 276 indicators, pandas accepted as a test-only control dependency by the user), tulipy demoted to **secondary** (last release 2019-04; its value as a C-backed, pandas-free independent anchor is retained). **Triggers I13: FEATURE_VERSION +1 (3→4)**, standard features 120→**134**. Synced 0003 v1.3 (§3.4 +6 rows, §5 tests +4). |

@@ -34,7 +34,8 @@ __all__ = [
     "sma", "ema", "dema", "tema", "hma", "kama",
     "atr", "natr", "rsi", "roc", "cci", "willr", "mfi", "cmo",
     "mom", "stddev", "lrslope", "obv", "macd", "stoch", "bbands",
-    "adx", "plus_di", "minus_di", "sar", "sar_direction",
+    "adx", "plus_di", "minus_di", "trix", "tsi", "vhf", "vortex",
+    "aroon_up", "aroon_down", "sar", "sar_direction",
     "supertrend_line", "supertrend_bullish", "supertrend_bearish",
     "supertrend_reference", "zscore",
 ]
@@ -169,6 +170,36 @@ def plus_di(h, l, c, n: int) -> np.ndarray:
 
 def minus_di(h, l, c, n: int) -> np.ndarray:
     return talib.MINUS_DI(h, l, c, timeperiod=n)
+
+
+def trix(c: np.ndarray, n: int) -> np.ndarray:
+    """Triple EMA smoothed momentum rate (TA-Lib TRIX, 100·d(EMA³)/EMA³)."""
+    return talib.TRIX(np.asarray(c, dtype=np.float64), timeperiod=n)
+
+
+def tsi(c: np.ndarray, fast: int, slow: int) -> np.ndarray:
+    """TSI = 100·EMA(EMA(Δc, fast)) / EMA(Σ|EMA(Δc, fast)|, slow) (TA-Lib TSI)."""
+    return talib.TSI(np.asarray(c, dtype=np.float64), fast, slow)
+
+
+def vhf(c: np.ndarray, n: int) -> np.ndarray:
+    """Volatility Health Factor: 100·Σ|Δc| / |c−c[n]| — trend efficiency."""
+    return talib.VHF(np.asarray(c, dtype=np.float64), timeperiod=n)
+
+
+def vortex(h: np.ndarray, l: np.ndarray, c: np.ndarray, n: int) -> Tuple[np.ndarray, np.ndarray]:
+    """(VI+, VI−) — directional strength vs path length (TA-Lib VORTEX)."""
+    return talib.VORTEX(h, l, c, timeperiod=n)
+
+
+def aroon_up(h: np.ndarray, l: np.ndarray, n: int) -> np.ndarray:
+    """Aroon Up: n·(bars since highest high)/n — trend age."""
+    return talib.AROON(h, l, timeperiod=n)[0]
+
+
+def aroon_down(h: np.ndarray, l: np.ndarray, n: int) -> np.ndarray:
+    """Aroon Down: n·(bars since lowest low)/n — trend age."""
+    return talib.AROON(h, l, timeperiod=n)[1]
 
 
 # ---------------------------------------------------------------------------

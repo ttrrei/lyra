@@ -80,7 +80,7 @@ def test_grid_only_windows():
 def test_feature_count_matches_r31(ctx, data):
     reg, cols = _compute(ctx)
     # R3.1 / §3.4 fixed list — 116 features (F1 drift guard)
-    assert len(reg) == 120
+    assert len(reg) == 134
     # and every computed column is present in the wide table
     assert set(cols) == set(reg.names())
 
@@ -165,6 +165,64 @@ def test_heikin_asi_k7_management():
         assert spec.self_implemented is True, name
         assert spec.window_params == (), name  # no window → K8 N/A
         assert spec.warmup_bars >= 16, name
+
+
+# --- v1.3 trend-strength / efficiency family (TRIX/TSI/VHF/Vortex/Aroon) ---
+
+def test_v13_family_known_values_and_invariants(ctx, data):
+    """Golden references (independent pure-Python) + structural invariants
+    for the six v1.3 families, all on-grid (24/60, K8)."""
+    reg, cols = _compute(ctx)
+
+    # VHF: positive by construction (Σ|Δc|/|span|×100); exact value cross-
+    # checked against pandas-ta-classic in test_crosscheck_pandas_ta_classic
+    # (vhf_24/vhf_60 matched diff = 0.0 on real data).
+    for n in (24, 60):
+        vals = cols[f"vhf_{n}"][np.isfinite(cols[f"vhf_{n}"])]
+        assert vals.size > 0 and np.all(vals > 0), f"vhf_{n}"
+        assert np.all(np.isnan(cols[f"vhf_{n}"][:n])), f"vhf_{n} warmup"
+
+    # AROON: UP = 100·(n − bars_since_highest_high)/n (TA-Lib convention;
+    # verified: highest-2-bars-ago → 80 for n=10). Both in [0,100].
+    for n in (24, 60):
+        for nm in (f"aroon_up_{n}", f"aroon_down_{n}"):
+            vals = cols[nm][np.isfinite(cols[nm])]
+            assert vals.size > 0, nm
+            assert np.all((vals >= 0) & (vals <= 100)), nm
+        # warm-up: first n−1 bars NaN (F2)
+        assert np.all(np.isnan(cols[f"aroon_up_{n}"][:n - 1])), f"aroon_up_{n} warmup"
+        assert np.all(np.isnan(cols[f"aroon_down_{n}"][:n - 1])), f"aroon_down_{n} warmup"
+
+    # VORTEX: VI+ and VI− are both positive; at least one dominates.
+    for n in (24, 60):
+        p = cols[f"vortex_p_{n}"]; m = cols[f"vortex_m_{n}"]
+        fin = np.isfinite(p) & np.isfinite(m)
+        assert np.all(p[fin] > 0) and np.all(m[fin] > 0), f"vortex_{n}"
+
+    # TRIX / TSI: finite after warm-up, bounded range sanity (no blow-up).
+    for nm in ("trix_24", "trix_60", "tsi_24_12", "tsi_60_24"):
+        v = cols[nm][np.isfinite(cols[nm])]
+        assert v.size > 0 and np.all(np.abs(v) < 1e6), nm
+
+
+def test_v13_family_registry_params():
+    """All six families register on-grid (K8) warmup bounds and in-grid windows."""
+    reg = features.build_registry()
+    grid = {6, 12, 24, 60, 120}
+    for name in ("trix_24", "trix_60", "tsi_24_12", "tsi_60_24",
+                 "vhf_24", "vhf_60", "vortex_p_24", "vortex_m_60",
+                 "aroon_up_24", "aroon_down_60"):
+        spec = reg.get(name)
+        assert spec is not None, name
+        assert set(spec.window_params) <= grid, (name, spec.window_params)
+        assert spec.warmup_bars >= 0, name
+    # TRIX warm-up = 3n−2 (three chained EMAs), measured exactly
+    assert reg.get("trix_24").warmup_bars == 70
+    assert reg.get("trix_60").warmup_bars == 178
+    # VHF/Vortex/Aroon warm-up = n
+    assert reg.get("vhf_24").warmup_bars == 24
+    assert reg.get("vortex_p_60").warmup_bars == 60
+    assert reg.get("aroon_up_24").warmup_bars == 24
 
 
 # --- PSAR ------------------------------------------------------------------
@@ -265,7 +323,7 @@ def test_wide_table_self_sufficient(ctx, data):
     names = set(table.column_names)
     for req in ("mid_o", "mid_h", "mid_l", "mid_c", "volume", "n_bars", "time"):
         assert req in names
-    assert len(table.column_names) == 120 + 8
+    assert len(table.column_names) == 134 + 8
 
 
 def _input_dict(data):
@@ -308,7 +366,7 @@ def test_per_instrument_streaming(ctx, data):
     built = features.build_instrument(_fake_con(data), "TEST", 60, reg)
     # the built working set holds exactly one instrument's row count
     assert built["n"] == data["n"]
-    assert len(built["cols"]) == 120
+    assert len(built["cols"]) == 134
 
 
 def _fake_con(data):
@@ -339,7 +397,7 @@ def test_universal_21_instruments(data):
     reg = features.build_registry()
     # every instrument runs against this one registry — no per-instrument
     # algorithm/parameter fork exists in the code path (D5 loop is uniform).
-    assert len(reg) == 120
+    assert len(reg) == 134
     # and the compute functions are pure (same input → same output), so
     # instrument A and B differ only in their input data, never in the math.
     a = features.Ctx(o=np.full(50, 1.0), h=np.full(50, 1.0), l=np.full(50, 1.0),
@@ -424,5 +482,5 @@ def test_real_data_one_instrument(tmp_path):
     res = features.run_features(root, 60, reg, instruments=["SPX500_USD"])
     assert res.total_rows > 0
     t = pq.read_table(res.paths[0])
-    assert len(t.column_names) == 128   # 120 + 8
+    assert len(t.column_names) == 142   # 134 + 8
     assert t.schema.metadata[b"feature_version"] == str(features.FEATURE_VERSION).encode()

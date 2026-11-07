@@ -49,7 +49,7 @@ from .registry import FeatureKind, Registry, RegistryError
 # I13: any change to a registered feature's computation or parameters must
 # bump this. 0003 shipped v0.8 (+1 over the v0.7 baseline) and v0.9 (+1), so
 # the first implementation baseline is 2.
-FEATURE_VERSION = 3
+FEATURE_VERSION = 4
 
 #: The K8 window grid (0003 K8, aligned to moneta ``catalogue.py``).
 GRID = (6, 12, 24, 60, 120)
@@ -100,6 +100,12 @@ def _obv(c, v): return indicators.obv(c, v)
 def _macd(c, f, s, sig): return indicators.macd(c, f, s, sig)
 def _stoch(h, l, c, fastk, slowd): return indicators.stoch(h, l, c, fastk, slowd)
 def _bbands(c, n): return indicators.bbands(c, n)
+def _trix(c, n): return indicators.trix(c, n)
+def _tsi(c, fast, slow): return indicators.tsi(c, fast, slow)
+def _vhf(c, n): return indicators.vhf(c, n)
+def _vortex(h, l, c, n): return indicators.vortex(h, l, c, n)
+def _aroon_up(h, l, n): return indicators.aroon_up(h, l, n)
+def _aroon_down(h, l, n): return indicators.aroon_down(h, l, n)
 
 
 def build_registry() -> Registry:
@@ -190,6 +196,25 @@ def build_registry() -> Registry:
             f"zscore_{n}", "zscore", n - 1, {"n": n}, (n,),
             lambda ctx, sp: indicators.zscore(ctx.c, sp.params["n"]), unit="z",
         )
+
+    # --- v1.3 trend-strength / efficiency family (24/60, K8 grid) ----------
+    for n in (24, 60):
+        # TRIX = 3 chained EMAs → warm-up measured exactly = 3n−2 (70/178).
+        reg_value(f"trix_{n}", "trix", 3 * n - 2, {"n": n}, (n,), lambda ctx, sp: _trix(ctx.c, sp.params["n"]), unit="ratio")
+    for (fast, slow) in ((24, 12), (60, 24)):
+        # TSI = EMA of EMA + EMA of |EMA| → warm-up measured exactly = fast+slow−1 (35/83).
+        tag = f"tsi_{fast}_{slow}"
+        params = {"fast": fast, "slow": slow}
+        reg_value(tag, "tsi", fast + slow - 1, params, (fast, slow),
+                  lambda ctx, sp: _tsi(ctx.c, sp.params["fast"], sp.params["slow"]), unit="index[-100,100]")
+    for n in (24, 60):
+        reg_value(f"vhf_{n}", "vhf", n, {"n": n}, (n,), lambda ctx, sp: _vhf(ctx.c, sp.params["n"]), unit="index[0,100]")
+        reg_value(f"vortex_p_{n}", "vortex", n, {"n": n}, (n,),
+                  lambda ctx, sp: _vortex(ctx.h, ctx.l, ctx.c, sp.params["n"])[0], unit="index")
+        reg_value(f"vortex_m_{n}", "vortex", n, {"n": n}, (n,),
+                  lambda ctx, sp: _vortex(ctx.h, ctx.l, ctx.c, sp.params["n"])[1], unit="index")
+        reg_value(f"aroon_up_{n}", "aroon", n, {"n": n}, (n,), lambda ctx, sp: _aroon_up(ctx.h, ctx.l, sp.params["n"]), unit="index[0,100]")
+        reg_value(f"aroon_down_{n}", "aroon", n, {"n": n}, (n,), lambda ctx, sp: _aroon_down(ctx.h, ctx.l, sp.params["n"]), unit="index[0,100]")
 
     # --- PSAR (direction flags; K8 exception: af/maximum are not windows) --
     reg_value("psar", "psar", 2, {"af": 0.02, "maximum": 0.2}, (), lambda ctx, s: indicators.sar(ctx.h, ctx.l), unit="price")
