@@ -52,21 +52,23 @@ system.
 ### R3.1 Standard features (open-source, ship with the repo)
 
 Fixed registered names + fixed parameters. **Window parameters only
-take the CFD grid {6, 12, 24, 60}** (user decision 2026-11-07,
+take the CFD grid {6, 12, 24, 60, 120}** (user decision 2026-11-07,
 0003 K8: do not use the Wilder-era "14 ≈ 2 weeks" legacy parameter;
 a narrow parameter surface suppresses overfitting into a narrow
-parameter environment). Initial list:
+parameter environment; **120 aligns with moneta `catalogue.py`'s
+authoritative grid**). Initial list:
 
 - Market data: `open / high / low / close / volume` (UTC-aligned)
-- SMA: 6, 12, 24, 60
-- EMA: 6, 12, 24, 60
-- ATR: Wilder-ATR 6 / 12 / 24 / 60 (**24 = default ATR-normalization
-  denominator**)
-- RSI: 6, 12, 24, 60
+- SMA: 6, 12, 24, 60, 120
+- EMA: 6, 12, 24, 60, 120
+- ATR: Wilder-ATR 6 / 12 / 24 / 60 / 120 (**24 = default
+  ATR-normalization denominator**)
+- RSI: 6, 12, 24, 60, 120
 - PSAR: (0.02, 0.2) (exception: acceleration/extreme factors, not
   window parameters)
-- Supertrend: (ATR window 24, multiplier 3) (self-implemented;
-  0003 K7 management)
+- Supertrend: (ATR window 24, multiplier 3) (**`talib.SUPERTREND`
+  library implementation**, 0003 K1; the moneta/nova
+  self-implementation reference serves as the golden cross-anchor)
 - Semantic / structure: `sma_cross_up_6_24 / sma_cross_down_6_24`,
   `sma_alignment_6_24 ∈ {-1, 0, 1}`, `rsi_divergence_up / down`,
   `psar_bullish / bearish`, `supertrend_bullish / bearish`
@@ -313,3 +315,4 @@ directions are fully peer.
 | 2026-11-05 | 0.7 | R12 upgraded to a **version tree** model: branching (1 parent → N candidate branches), `compare --siblings` multi-branch comparison, `merge` crossover (mutation), branch lifecycle active/pruned, kill criteria now "all active branches failing N consecutive rounds"; naming `v<generation><branch-suffix>`. |
 | 2026-11-06 | 0.8 | R12 crossover gains an **I8 boundary** (L2): the AI's modification capability is limited to the **strategy layer** (thresholds / operators / temporal operators / entry-exit structure); changing a feature's registered name or underlying parameters is forbidden (e.g. `sma_6_24`→`sma_7_25` is an I8 violation, `validate` rejects it); a changing feature = a newly registered feature. |
 | 2026-11-07 | 0.9 | **R3.1 grid discipline (user decision, 0003 K8)**: window parameters only take the CFD grid {6,12,24,60} — no Wilder "14 ≈ 2 weeks" legacy parameter; a narrow parameter surface suppresses overfitting into a narrow parameter environment. ATR re-registered as 6/12/24/60 (24 = default normalization denominator), RSI as 6/12/24/60, SMA/EMA gain 12, Supertrend's ATR window 14→24; exception: PSAR (0.02,0.2) kept (not a window parameter). Prior-generation evidence: moneta `catalogue.py` `raise ValueError("window outside CFD grid")` for off-grid windows; nova's research features in practice all use 6/12/24/60. Synced with 0003 v0.5 (K6/K7/K8 + §3.4 + 24 tests) |
+| 2026-11-07 | 0.10 | **R3.1 two updates (user directives)**: ① **grid adds 120** → {6,12,24,60,120}, **aligned with moneta `catalogue.py`'s authoritative grid**; ATR/RSI/SMA/EMA each gain a `*_120` variant. ② **Supertrend switched to the library** — measured evidence overturns the prior generations' assumption: the moneta/nova headers' "TA-Lib ships no Supertrend" is a stale-version misconception, and the **TA-Lib 0.8.2** both generations lock does ship `SUPERTREND` (a real import probe confirms it); a real-data dual-library parity test (SPX500_USD 1h, 5000 bars) shows the self-implementation and `talib.SUPERTREND` **match bar-for-bar 100%** → R3.1's Supertrend row changed from "self-implemented" to "`talib.SUPERTREND` library implementation + the moneta/nova self-implementation reference as golden cross-anchor". Synced with 0003 v0.6 (K1/K7/K8 + §3.4 + 25 tests) |

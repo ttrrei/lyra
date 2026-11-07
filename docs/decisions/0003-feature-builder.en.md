@@ -61,15 +61,21 @@ core ask: iteration depth, not feature breadth).
 
 **Adopted (already in the plan)**:
 
-1. **Supertrend must be self-implemented** (moneta
-   `library/supertrend.py` header / nova `indicators.py`, same
-   origin): TA-Lib **does not ship** Supertrend; the canonical
-   construction = ATR basic bands + final band ratcheted against the
-   **previous bar's close** + direction flip when close crosses the
-   active band; **path-dependent**, warm-up does not guarantee
-   convergence — so lyra computes from the **source head** and keeps
-   NULL warm-up (K4), and does **not** adopt moneta's "WARMUP_DROP
-   row deletion" (see counter-example 1).
+1. **Supertrend path-dependence / keep NULL warm-up** (moneta
+   `library/supertrend.py` implementation + comments / nova
+   `indicators.py` same origin, now reproduced bar-for-bar by
+   `talib.SUPERTREND` — see K1): the canonical construction = ATR
+   basic bands + final band ratcheted against the **previous bar's
+   close** + direction flip when close crosses the active band;
+   **path-dependent**, warm-up does not guarantee convergence — so
+   lyra computes from the **source head** and keeps NULL warm-up
+   (K4), and does **not** adopt moneta's "WARMUP_DROP row deletion"
+   (see counter-example 1). The moneta/nova self-implementation
+   headers' "TA-Lib ships no Supertrend" is a **stale-version
+   misconception** (the real TA-Lib 0.8.2 has `SUPERTREND`), so lyra
+   uses the library implementation with the self-implementation as a
+   golden cross-anchor, while still adopting the **path-dependence /
+   keep-NULL-warm-up** discipline.
 2. **Pure-NumPy boundary for `indicators`** (moneta
    `library/__init__.py`: "NumPy in, NumPy out; no parquet, no
    DuckDB, no network"): indicator functions have zero framework
@@ -158,8 +164,9 @@ features; no `--force`).
 - each standard feature = one registry record (K3); compute function =
   a pure-NumPy function in `indicators.py` or a vectorized
   composition in `features.py`;
-- compute engine: see decision **K1** (TA-Lib + self-implemented
-  Supertrend + numpy vectorization);
+- compute engine: see decision **K1** (standard indicators all from
+  TA-Lib, incl. `talib.SUPERTREND`; window/structural via
+  numpy/pandas vectorization);
 - output: `data/features/<minutes>m/<snapshot_id>/
   <instrument>.parquet` (one file per instrument; columns = input
   OHLCV columns (K2 copy) + all registered feature columns), pandas →
@@ -208,16 +215,28 @@ features; no `--force`).
 
 ### 3.3 Key decisions
 
-**K1 Compute engine (decided; revised after the 2026-11-07 scan)**:
-**Compute on the Python side only; DuckDB never computes features** —
-- standard indicators (SMA / EMA / ATR / RSI / PSAR) use **TA-Lib**
-  (validated across two generations by moneta `library/psar.py` and
-  nova `features.py`: `talib.SAR/EMA/SMA/ATR/RSI` are both
-  generations' reference implementations; py3.12 wheels exist;
-  already chosen in hld §6);
-- **Supertrend is a self-implemented pure-NumPy per-bar loop**
-  (TA-Lib has no Supertrend; moneta/nova share the same-origin
-  self-implementation — see §2.3 adoption 1);
+**K1 Compute engine (decided; second revision 2026-11-07:
+Supertrend back to the library)**:
+**Compute on the Python side only; standard indicators all come from
+TA-Lib; DuckDB never computes features** —
+- standard indicators (SMA / EMA / ATR / RSI / PSAR / **Supertrend**)
+  use **TA-Lib** (validated across two generations by moneta
+  `library/psar.py` and nova `features.py`: `talib.SAR/EMA/SMA/ATR/RSI`
+  are both generations' reference implementations; py3.12 wheels
+  exist; already chosen in hld §6);
+- **Supertrend uses `talib.SUPERTREND` (built into TA-Lib 0.8.2), no
+  longer self-implemented**: the moneta `library/supertrend.py` and
+  nova `indicators.py` headers' "TA-Lib ships no Supertrend" is a
+  **stale-version misconception** — the real TA-Lib 0.8.2 both
+  generations lock does ship `SUPERTREND` (`timeperiod` +
+  `multiplier`, output line + trend). **Verified with real data via a
+  dual-library parity test** (SPX500_USD 1h, 5000 bars,
+  `PER=24, multiplier=3`): the self-implementation and
+  `talib.SUPERTREND` **match bar-for-bar 100%** (line
+  max_abs_diff=0, direction 100% agreement), proving the same
+  semantics; we therefore adopt the library implementation and use
+  the self-implementation (moneta/nova reference) as a golden-test
+  cross-anchor (see §2.3 adoption 1 + K7 rule 3);
 - window/structural features (prior-24 / breakout / path
   efficiency / range position / ATR normalization) use
   **numpy/pandas vectorization** (`shift(1)` + `rolling`, same as
@@ -270,27 +289,30 @@ smoothing, 24-bar window, grid default point); **no mixing** of
 different ATRs within one semantic family (nova's mixing of
 `atr_14`/`atr_sma_14` is undefined behavior; we do not learn that).
 
-**K7 Self-implemented feature management (decided; v0.5 new, user
-request)**: any feature NOT implemented by a third-party library
-(currently only **Supertrend** — TA-Lib has no Supertrend; the
-moneta `library/supertrend.py` / nova `indicators.py` headers both
-confirm "TA-Lib ships no Supertrend") must carry
-`self_implemented: true` in the registry and enforce four
-management rules (**stricter** than library-backed features):
+**K7 Self-implemented feature management (decided; v0.5 new,
+v0.6 revised to a conditional guard; user request)**:
+**0003's standard-feature set contains NO self-implemented
+implementation** — Supertrend is now back to `talib.SUPERTREND`
+(K1, verified by a real-data dual-library parity test), so this
+rule is **not triggered** under 0003's current list. It is kept as
+a **conditional guard**: any future feature NOT implemented by a
+third-party library (alpha self-implementation or core
+self-implementation) must carry `self_implemented: true` in the
+registry and enforce four management rules (**stricter** than
+library-backed features):
 1. **Parameters must be explicit in the registry** (no hard-coding
-   in the function body — Supertrend's ATR window = a grid point
-   (K8), multiplier explicitly registered and pinned by a golden
-   test);
+   in the function body; window parameters take grid points (K8);
+   other numeric parameters explicitly registered and pinned by a
+   golden test);
 2. **contract card mandatory** (the R3.2 alpha requirement applies
    equally to core self-implemented features): state variables /
    transition rules / seed convention / flip boundaries, written in
-   the `indicators.py` function docstring (the existing supertrend
-   implementation already has this docstring; carried over);
+   the `indicators.py` function docstring;
 3. **golden test against an independent reference**: not
    "verify ourselves with ourselves" — hand-derived first-N-bar
-   values + point-for-point cross-check against the moneta/nova
-   reference implementations (same origin, usable as a
-   cross-validation), failing on any deviation > 1e-12;
+   values + point-for-point cross-check against an independent
+   implementation (a moneta/nova reference can serve as a
+   cross-anchor), failing on any deviation > 1e-12;
 4. **version discipline**: any semantic change to a
    self-implemented feature → FEATURE_VERSION +1 (I13) and the
    reason must be recorded in the decision doc's revision log
@@ -298,27 +320,38 @@ management rules (**stricter** than library-backed features):
    version; a self-implemented change has no external anchor and
    must self-justify).
 
-**K8 Parameter grid discipline (decided; v0.5 new, user request)**:
-all **window parameters only take the CFD grid {6, 12, 24, 60}**
-(≈ 30m/1h/2h/5h scale; consistent semantics across timeframes);
-**the Wilder-era "14 trading days ≈ 2 weeks" legacy parameter is
-not used** (prior-generation evidence: moneta
-`library/catalogue.py` directly `raise ValueError("window outside
-CFD grid")` for windows outside 6/12/24/60/120; nova's research
-features in practice all use 6/12/24/60 — `return_6`, `prior24`,
-`efficiency_24`). Motivation (user): keep the parameter surface
-small and the grid coarse so strategies have low sensitivity to
-parameters — preventing overfitting into a very narrow parameter
-environment. **Impact**:
-- ATR registers `atr_6 / atr_12 / atr_24 / atr_60` (single Wilder
-  smoothing, grid windows; the `atr_sma_14` dual-smoothing variant
-  is **deleted** — under grid discipline the benefit of "two
+> The **equivalent discipline for library-backed** features
+> (Supertrend now belongs to this class; applies directly):
+> parameters explicit in the registry (ATR window = a grid point,
+> multiplier explicit) + a pinned golden test (Supertrend uses the
+> moneta/nova self-implementation reference as a bar-for-bar
+> cross-check — see K1's dual-library parity).
+
+**K8 Parameter grid discipline (decided; v0.5 new, v0.6 added 120;
+user request)**: all **window parameters only take the CFD grid
+{6, 12, 24, 60, 120}** (≈ 30m/1h/2h/5h/10h scale; consistent
+semantics across timeframes; **120 aligns with moneta
+`library/catalogue.py`'s authoritative grid `(6, 12, 24, 60, 120)`**,
+which directly `raise ValueError("window outside CFD grid")` for
+windows outside it); **the Wilder-era "14 trading days ≈ 2 weeks"
+legacy parameter is not used** (nova's research features in practice
+all use 6/12/24/60 — `return_6`, `prior24`, `efficiency_24`).
+Motivation (user): keep the parameter surface small and the grid
+coarse so strategies have low sensitivity to parameters — preventing
+overfitting into a very narrow parameter environment. **Impact**:
+- ATR registers `atr_6 / atr_12 / atr_24 / atr_60 / atr_120` (single
+  Wilder smoothing, grid windows; the `atr_sma_14` dual-smoothing
+  variant is **deleted** — under grid discipline the benefit of "two
   smoothings × one window" does not pay for its complexity);
-- RSI registers `rsi_6 / rsi_12 / rsi_24 / rsi_60` (same, grid);
+- RSI registers `rsi_6 / rsi_12 / rsi_24 / rsi_60 / rsi_120` (same,
+  grid);
+- SMA/EMA register `sma_/ema_ 6 / 12 / 24 / 60 / 120` (full grid);
 - **exception (explicitly recorded)**: PSAR `(0.02, 0.2)` is
   Wilder's standard acceleration/extreme factor — **not a bar
   window**, no "week" legacy; kept. Supertrend multiplier `3` is a
-  multiplier, not a window; kept but managed under K7;
+  multiplier, not a window; kept with **explicit registry parameters
+  + a pinned golden test** (K7's library-backed equivalent
+  discipline);
 - default normalization denominator = `atr_24` (K6 updated).
 
 ### 3.4 Standard feature list (R3.1 decomposition)
@@ -326,12 +359,12 @@ environment. **Impact**:
 | Family | Feature columns | Params | Compute class |
 |---|---|---|---|
 | Market | `open/high/low/close/volume` | — | copy (K2) |
-| SMA | `sma_6 / sma_12 / sma_24 / sma_60` | grid (K8) | TA-Lib (K1) |
-| EMA | `ema_6 / ema_12 / ema_24 / ema_60` | grid (K8) | TA-Lib (K1) |
-| ATR | `atr_6 / atr_12 / atr_24 / atr_60` | grid (K8) | `talib.ATR` (Wilder smoothing); **`atr_24` = default normalization denominator** (K6) |
-| RSI | `rsi_6 / rsi_12 / rsi_24 / rsi_60` | grid (K8) | `talib.RSI` |
+| SMA | `sma_6 / sma_12 / sma_24 / sma_60 / sma_120` | grid (K8) | TA-Lib (K1) |
+| EMA | `ema_6 / ema_12 / ema_24 / ema_60 / ema_120` | grid (K8) | TA-Lib (K1) |
+| ATR | `atr_6 / atr_12 / atr_24 / atr_60 / atr_120` | grid (K8) | `talib.ATR` (Wilder smoothing); **`atr_24` = default normalization denominator** (K6) |
+| RSI | `rsi_6 / rsi_12 / rsi_24 / rsi_60 / rsi_120` | grid (K8) | `talib.RSI` |
 | PSAR | `psar / psar_bullish / psar_bearish` | (0.02, 0.2) (K8 exception: not a window param) | `talib.SAR` + direction flags |
-| Supertrend | `supertrend / supertrend_bullish / supertrend_bearish` | (ATR window 24, multiplier 3) | self-implemented pure NumPy (K1) + K7 management |
+| Supertrend | `supertrend / supertrend_bullish / supertrend_bearish` | (ATR window 24, multiplier 3) | `talib.SUPERTREND` (K1, library) + moneta/nova self-implementation reference as golden cross-anchor |
 | Semantic | `sma_cross_up_6_24 / sma_cross_down_6_24 / sma_alignment_6_24 / rsi_divergence_up / rsi_divergence_down` | reference registered columns (6/24) | derived deterministic predicates over registered columns |
 | Structural | `prior24_high / prior24_low / prior24_range / prior24_range_pos / prior24_width / breakout_up / breakout_down / failed_breakout_up / failed_breakout_down / shift6_atr / bar_range_atr / rel_quote_activity / utc_hour / path_eff_24` | 6 / 24 (both in-grid) | numpy/pandas vectorized (K1) |
 
@@ -345,13 +378,14 @@ environment. **Impact**:
 - `utc_hour` = the UTC hour of the bar's **opening** (known at close
   confirmation; causally safe);
 - all ATR-normalization denominators = `atr_24` (K6 updated);
-- **v0.5 gridding (K8, user decision)**: the original `atr_14 /
+- **v0.5/v0.6 gridding (K8, user decision)**: the original `atr_14 /
   rsi_14` (Wilder "14 trading days ≈ 2 weeks" legacy) and the
   `atr_sma_14` dual-smoothing variant are **deleted**; SMA/EMA
-  gain 12; all window parameters ∈ {6,12,24,60}. Prior-generation
-  evidence: moneta `catalogue.py` directly `raise
-  ValueError("window outside CFD grid")` for off-grid windows;
-  nova's research features in practice all use 6/12/24/60.
+  gain 12; **v0.6 adds 120**; all window parameters ∈
+  {6,12,24,60,120}. Prior-generation evidence: moneta `catalogue.py`
+  directly `raise ValueError("window outside CFD grid")` for off-grid
+  windows (authoritative grid = 6/12/24/60/120); nova's research
+  features in practice all use 6/12/24/60.
 
 > The list is authoritative per R3.1; this table is 0003's
 > **implementation decomposition**. Adding/removing a feature =
@@ -383,10 +417,11 @@ environment. **Impact**:
 | `test_sma_values_known` | SMA hand-computed golden test |
 | `test_ema_recursion_known` | EMA first-5 values hand-computed golden (recursion seed = first value) |
 | `test_rsi_grid_known` | RSI (window 24) hand-computed golden (`talib.RSI` Wilder smoothing) |
-| `test_atr_grid_values_known` | `atr_6/12/24/60` per-window hand-computed goldens; different windows give different values (the grid takes effect) |
-| `test_grid_only_windows` | every window parameter in the registry ∈ {6,12,24,60}, no 14 (K8 regression guard) |
+| `test_atr_grid_values_known` | `atr_6/12/24/60/120` per-window hand-computed goldens; different windows give different values (the grid takes effect) |
+| `test_grid_only_windows` | every window parameter in the registry ∈ {6,12,24,60,120}, no 14 (K8 regression guard) |
 | `test_psar_bull_bear_flags` | PSAR direction flags align with the flip bar |
-| `test_supertrend_line_and_flags` | Supertrend line + bull/bear flags are mutually consistent |
+| `test_supertrend_line_and_flags` | `talib.SUPERTREND` line + bull/bear flags are mutually consistent |
+| `test_supertrend_parity_vs_reference` | `talib.SUPERTREND` vs the moneta/nova self-implementation reference, bar-for-bar (line/direction), deviation < 1e-12 (K1's dual-library parity hardened into a regression, guarding against a TA-Lib version change silently altering semantics) |
 | `test_warmup_null_semantics` | gap-free input: NULLs only in the warm-up prefix (F2); injected gap: NULL set = prefix ∪ gap-propagation closure (F2 revised) |
 | `test_no_future_reference` | truncating the last N rows of data → the prefix feature values are unchanged (I1 causality — the hardest one) |
 | `test_deterministic_rerun` | re-running with the same input → feature values bitwise identical (F4) |
@@ -431,3 +466,4 @@ environment. **Impact**:
 | 2026-11-07 | 0.3 | **Self-check fixes (3 self-contradictions + 1 implementation ambiguity)**: ① §3.1 CLI's "skip if present with the same snapshot id" contradicted 0002 A1's derived-layers-always-recompute → now always recompute/overwrite; §3.1's leftover numba/DuckDB-compute draft contradicted the K1 decision → rewritten to point at K1; the §3.2 "no TA-Lib" row contradicted K1's TA-Lib adoption → row removed. ② §3.4's column names `open/high/low/close` did not match the bronze contract's `mid_o/...` → price basis = mid columns, shorthands clarified. ③ the `bar_close_time` vs bronze's actual column name `time` dual-column ambiguity → I1 row clarifies the alignment (no new column). ④ `atr_sma_14`'s "hybrid" implementation semantics were undefined → defined as the 14-bar SMA of TR (must be a different algorithm from Wilder recursion). Also: TA-Lib's version is deliberately excluded from the snapshot id (semantic changes go through I13); the approval checklist gains the TA-Lib dependency item |
 | 2026-11-07 | 0.4 | **Adversarial self-check fix (1 over-strong invariant)**: F2's original "any NULL after warm-up = bug" false-positives on **market gaps** (0002 I22 declares gaps legal; 730k real occurrences) — a gap bar's missingness propagating into dependent window features is a **legitimate** NULL, not a bug. Revised to "NULL positions ⊆ warm-up prefix ∪ upstream-missingness propagation closure" (direction guaranteed by I1 causality); `test_warmup_null_prefix_only` renamed `test_warmup_null_semantics` with a gap-propagation assertion. Other candidates (F1/F4/F5, K2 copy size, K5 interaction with gaps, snapshot-id derived-string length) verified as false positives or already covered — unchanged |
 | 2026-11-07 | 0.5 | **User decided two points, landed as K7/K8**: ① **self-implemented feature management (K7)** — the user asked "why is Supertrend self-implemented?": TA-Lib **indeed has no** Supertrend (moneta/nova headers both confirm); self-implemented features are managed **stricter** than library-backed ones: parameters explicit in the registry (no hard-coding) + mandatory contract card + golden test cross-checked point-for-point against the same-origin moneta/nova reference implementation (<1e-12, no self-verification) + any semantic change must be I13+1 with a recorded reason. ② **parameter grid discipline (K8, user decision)** — the user pointed out 14 is the Wilder "14 trading days ≈ 2 weeks" legacy and asked for 6/12/24/60 with few parameters to prevent overfitting into a narrow parameter environment; prior-generation evidence: moneta `catalogue.py` directly `raise ValueError("window outside CFD grid")` for off-grid windows, nova's research features in practice all use 6/12/24/60 → **ATR/RSI re-registered as the 6/12/24/60 grid**, the `atr_sma_14` dual-smoothing variant deleted, SMA/EMA gain 12, Supertrend's ATR window 14→24, normalization denominator `atr_wilder_14`→`atr_24` (K6 updated); exception: PSAR (0.02,0.2) kept (not a window parameter). Synced R3.1 (the requirements ZH+EN authoritative list) + §3.4 table + tests (+`test_grid_only_windows`/`test_supertrend_k7_management`, the two 14-related cases re-gridded). Tests 22→**24** |
+| 2026-11-07 | 0.6 | **Two user directives landed**: ① **Supertrend switched to the library** — the user asked "re-review whether any lib provides Supertrend". Measured evidence overturns the prior generations' assumption: the moneta/nova headers' "TA-Lib ships no Supertrend" is a **stale-version misconception** — the **TA-Lib 0.8.2** both generations lock does ship `SUPERTREND` (a real import probe confirms it, and `pandas-ta-classic` in moneta's deps also has one). A real-data dual-library parity test (SPX500_USD 1h, 5000 bars, PER=24/mult=3) shows the self-implementation and `talib.SUPERTREND` **match bar-for-bar 100%** (line diff=0, direction 100%). → **K1 revised** to "standard indicators all from TA-Lib (incl. Supertrend)"; **K7 demoted to a conditional guard** (0003 now has no self-implemented implementation; the rule is kept for the future); §2.3 adoption 1 changed from "must self-implement" to "path-dependence / keep NULL warm-up" (Supertrend's semantics unchanged, only its implementation source moved); §3.4's Supertrend row's compute class → `talib.SUPERTREND`; **new test** `test_supertrend_parity_vs_reference` (dual-library parity hardened into a regression). ② **K8 grid adds 120** (user directive "add 120") → grid = {6,12,24,60,120}, **aligned with moneta `catalogue.py`'s authoritative grid**; ATR/RSI/SMA/EMA each gain a `*_120` variant (§3.4 table + K8 impact block + `test_atr_grid_values_known` + `test_grid_only_windows` synced). Synced R3.1 (requirements ZH+EN authoritative list). Tests 24→**25** |

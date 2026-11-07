@@ -40,17 +40,19 @@
 
 ### R3.1 标准特征（开源，随 repo 走）
 
-固定注册名 + 固定参数。**窗口参数只取 CFD 网格 {6, 12, 24, 60}**
+固定注册名 + 固定参数。**窗口参数只取 CFD 网格 {6, 12, 24, 60, 120}**
 （2026-11-07 用户拍板，0003 K8：不用 Wilder 时代 "14 ≈ 2 周"
-遗留参数；参数面收窄以抑制极窄参数环境过拟合）。初始清单：
+遗留参数；参数面收窄以抑制极窄参数环境过拟合；**120 与 moneta
+`catalogue.py` 权威网格对齐**）。初始清单：
 
 - 市场数据：`open / high / low / close / volume`（UTC 对齐）
-- SMA：6, 12, 24, 60
-- EMA：6, 12, 24, 60
-- ATR：Wilder-ATR 6 / 12 / 24 / 60（**24 = ATR 归一化分母默认**）
-- RSI：6, 12, 24, 60
+- SMA：6, 12, 24, 60, 120
+- EMA：6, 12, 24, 60, 120
+- ATR：Wilder-ATR 6 / 12 / 24 / 60 / 120（**24 = ATR 归一化分母默认**）
+- RSI：6, 12, 24, 60, 120
 - PSAR：(0.02, 0.2)（例外：加速/极值因子，非窗口参数）
-- Supertrend：(ATR 窗口 24, multiplier 3)（自研，0003 K7 管理）
+- Supertrend：(ATR 窗口 24, multiplier 3)（**`talib.SUPERTREND`
+  库实现**，0003 K1；moneta/nova 自研参考作 golden 交叉锚点）
 - 语义 / 结构：`sma_cross_up_6_24 / sma_cross_down_6_24`、
   `sma_alignment_6_24 ∈ {-1, 0, 1}`、`rsi_divergence_up / down`、
   `psar_bullish / bearish`、`supertrend_bullish / bearish`
@@ -257,3 +259,4 @@ YAML 文件。初始 12 个方向继承自 nova：`trend_continuation`、
 | 2026-11-05 | 0.6 | R9 措辞修正：排除的是 **autonomous / unbounded AI generation**；明确 **AI 有界迭代（R12）属于范围内**，消除与 R12 的字面冲突。 |
 | 2026-11-06 | 0.8 | R12 交叉段补 **I8 边界**（L2）：AI 改造能力仅限策略层（阈值/操作符/时间算子/entry-exit 结构），严禁改动特征注册名及已注册特征底层参数（如 `sma_6_24`→`sma_7_25`，属 I8 违规，`validate` 拒绝）；特征要变 = 注册新特征。 |
 | 2026-11-07 | 0.9 | **R3.1 网格纪律（用户拍板，0003 K8）**：窗口参数只取 CFD 网格 {6,12,24,60}——不用 Wilder "14≈2 周" 遗留参数，参数面收窄防极窄参数环境过拟合。ATR 改 6/12/24/60（24=归一化分母默认）、RSI 改 6/12/24/60、SMA/EMA 补 12、Supertrend ATR 窗口 14→24；例外：PSAR (0.02,0.2) 非窗口参数保留。前代背书：moneta `catalogue.py` 网格外窗口 `raise ValueError("window outside CFD grid")`；nova 研究特征实际全用 6/12/24/60。同步 0003 v0.5（K6/K7/K8 + §3.4 + 测试 24） |
+| 2026-11-07 | 0.10 | **R3.1 两项更新（用户指令）**：① **网格加 120** → {6,12,24,60,120}，**与 moneta `catalogue.py` 权威网格对齐**；ATR/RSI/SMA/EMA 各补 `*_120` 变体。② **Supertrend 改库实现**——实测推翻前代认知：moneta/nova 头注释"TA-Lib ships no Supertrend"系旧版本误解，两代锁定的 **TA-Lib 0.8.2 实测内置 `SUPERTREND`**；真实数据双库 parity（SPX500_USD 1h，5000 bar）自研版与 `talib.SUPERTREND` **逐 bar 100% 一致** → R3.1 Supertrend 行由"自研"改"`talib.SUPERTREND` 库实现 + moneta/nova 自研参考作 golden 交叉锚点"。同步 0003 v0.6（K1/K7/K8 + §3.4 + 测试 25） |
