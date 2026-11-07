@@ -128,7 +128,10 @@ core ask: iteration depth, not feature breadth).
    which basis applies to which feature). lyra decision: **all
    ATR-normalized features use `atr_wilder_14`** (Wilder is the
    industry-convention basis); `atr_sma_14` stays registered but
-   only for explicit reference.
+   only for explicit reference. (**v0.5 update**: with K8's grid
+   discipline, the whole 14-window family retires → the
+   normalization denominator uniformly becomes `atr_24`; the
+   mixed-basis counter-example still stands.)
 
 **Not applicable**: moneta's OOS token / frozen buckets / paired
 week-block uncertainty (deprecated; hld §1 less-is-more); nova's
@@ -259,27 +262,78 @@ the same parameters runs **point-for-point identically** across the
 a longer warm-up is allowed (different NULL counts); a different
 algorithm is not.
 
-**K6 ATR normalization basis (decided; §2.3 counter-example 4)**:
-all "distance/displacement normalization" features (`shift6_atr`,
-`bar_range_atr`, the ATR variants of `prior24_width`, etc.)
-**uniformly divide by `atr_wilder_14`** (Wilder basis, industry
-convention); `atr_sma_14` stays registered but **must not** be the
-default normalization denominator (nova mixed two ATR bases within
-one semantic family — undefined behavior; we do not learn that).
+**K6 ATR normalization basis (decided; §2.3 counter-example 4; v0.5
+re-grid per K8)**: all "distance/displacement normalization"
+features (`shift6_atr`, `bar_range_atr`, the ATR variants of
+`prior24_width`, etc.) **uniformly divide by `atr_24`** (Wilder
+smoothing, 24-bar window, grid default point); **no mixing** of
+different ATRs within one semantic family (nova's mixing of
+`atr_14`/`atr_sma_14` is undefined behavior; we do not learn that).
+
+**K7 Self-implemented feature management (decided; v0.5 new, user
+request)**: any feature NOT implemented by a third-party library
+(currently only **Supertrend** — TA-Lib has no Supertrend; the
+moneta `library/supertrend.py` / nova `indicators.py` headers both
+confirm "TA-Lib ships no Supertrend") must carry
+`self_implemented: true` in the registry and enforce four
+management rules (**stricter** than library-backed features):
+1. **Parameters must be explicit in the registry** (no hard-coding
+   in the function body — Supertrend's ATR window = a grid point
+   (K8), multiplier explicitly registered and pinned by a golden
+   test);
+2. **contract card mandatory** (the R3.2 alpha requirement applies
+   equally to core self-implemented features): state variables /
+   transition rules / seed convention / flip boundaries, written in
+   the `indicators.py` function docstring (the existing supertrend
+   implementation already has this docstring; carried over);
+3. **golden test against an independent reference**: not
+   "verify ourselves with ourselves" — hand-derived first-N-bar
+   values + point-for-point cross-check against the moneta/nova
+   reference implementations (same origin, usable as a
+   cross-validation), failing on any deviation > 1e-12;
+4. **version discipline**: any semantic change to a
+   self-implemented feature → FEATURE_VERSION +1 (I13) and the
+   reason must be recorded in the decision doc's revision log
+   (a library-backed change usually just bumps the dependency
+   version; a self-implemented change has no external anchor and
+   must self-justify).
+
+**K8 Parameter grid discipline (decided; v0.5 new, user request)**:
+all **window parameters only take the CFD grid {6, 12, 24, 60}**
+(≈ 30m/1h/2h/5h scale; consistent semantics across timeframes);
+**the Wilder-era "14 trading days ≈ 2 weeks" legacy parameter is
+not used** (prior-generation evidence: moneta
+`library/catalogue.py` directly `raise ValueError("window outside
+CFD grid")` for windows outside 6/12/24/60/120; nova's research
+features in practice all use 6/12/24/60 — `return_6`, `prior24`,
+`efficiency_24`). Motivation (user): keep the parameter surface
+small and the grid coarse so strategies have low sensitivity to
+parameters — preventing overfitting into a very narrow parameter
+environment. **Impact**:
+- ATR registers `atr_6 / atr_12 / atr_24 / atr_60` (single Wilder
+  smoothing, grid windows; the `atr_sma_14` dual-smoothing variant
+  is **deleted** — under grid discipline the benefit of "two
+  smoothings × one window" does not pay for its complexity);
+- RSI registers `rsi_6 / rsi_12 / rsi_24 / rsi_60` (same, grid);
+- **exception (explicitly recorded)**: PSAR `(0.02, 0.2)` is
+  Wilder's standard acceleration/extreme factor — **not a bar
+  window**, no "week" legacy; kept. Supertrend multiplier `3` is a
+  multiplier, not a window; kept but managed under K7;
+- default normalization denominator = `atr_24` (K6 updated).
 
 ### 3.4 Standard feature list (R3.1 decomposition)
 
 | Family | Feature columns | Params | Compute class |
 |---|---|---|---|
 | Market | `open/high/low/close/volume` | — | copy (K2) |
-| SMA | `sma_6 / sma_24` | 6 / 24 | TA-Lib (K1) |
-| EMA | `ema_6 / ema_24 / ema_60` | 6 / 24 / 60 | TA-Lib recursive |
-| ATR | `atr_sma_14 / atr_wilder_14` | 14 | `atr_wilder_14` = `talib.ATR` (Wilder smoothing, industry basis, K6 denominator); `atr_sma_14` = 14-bar **SMA** of TR (implementation = `rolling(14).mean`, distinct from Wilder recursion — the two registered names must be two **different** algorithms or the registration is meaningless) |
-| RSI | `rsi_14` | 14 | TA-Lib (Wilder) |
-| PSAR | `psar / psar_bullish / psar_bearish` | (0.02, 0.2) | TA-Lib `talib.SAR` + direction flags |
-| Supertrend | `supertrend / supertrend_bullish / supertrend_bearish` | (14, 3) | self-implemented pure NumPy (K1) |
-| Semantic | `sma_cross_up_6_24 / sma_cross_down_6_24 / sma_alignment_6_24 / rsi_divergence_up / rsi_divergence_down` | — | derived deterministic predicates over registered columns |
-| Structural | `prior24_high / prior24_low / prior24_range / prior24_range_pos / prior24_width / breakout_up / breakout_down / failed_breakout_up / failed_breakout_down / shift6_atr / bar_range_atr / rel_quote_activity / utc_hour / path_eff_24` | — | numpy/pandas vectorized (K1) |
+| SMA | `sma_6 / sma_12 / sma_24 / sma_60` | grid (K8) | TA-Lib (K1) |
+| EMA | `ema_6 / ema_12 / ema_24 / ema_60` | grid (K8) | TA-Lib (K1) |
+| ATR | `atr_6 / atr_12 / atr_24 / atr_60` | grid (K8) | `talib.ATR` (Wilder smoothing); **`atr_24` = default normalization denominator** (K6) |
+| RSI | `rsi_6 / rsi_12 / rsi_24 / rsi_60` | grid (K8) | `talib.RSI` |
+| PSAR | `psar / psar_bullish / psar_bearish` | (0.02, 0.2) (K8 exception: not a window param) | `talib.SAR` + direction flags |
+| Supertrend | `supertrend / supertrend_bullish / supertrend_bearish` | (ATR window 24, multiplier 3) | self-implemented pure NumPy (K1) + K7 management |
+| Semantic | `sma_cross_up_6_24 / sma_cross_down_6_24 / sma_alignment_6_24 / rsi_divergence_up / rsi_divergence_down` | reference registered columns (6/24) | derived deterministic predicates over registered columns |
+| Structural | `prior24_high / prior24_low / prior24_range / prior24_range_pos / prior24_width / breakout_up / breakout_down / failed_breakout_up / failed_breakout_down / shift6_atr / bar_range_atr / rel_quote_activity / utc_hour / path_eff_24` | 6 / 24 (both in-grid) | numpy/pandas vectorized (K1) |
 
 **Structural-family semantics (§2.3 adoptions 4/6, K6)**:
 - the 24-bar windows of `prior24_*` **exclude the current bar**
@@ -290,7 +344,14 @@ one semantic family — undefined behavior; we do not learn that).
   breakout; same definition as nova);
 - `utc_hour` = the UTC hour of the bar's **opening** (known at close
   confirmation; causally safe);
-- all ATR-normalization denominators = `atr_wilder_14` (K6).
+- all ATR-normalization denominators = `atr_24` (K6 updated);
+- **v0.5 gridding (K8, user decision)**: the original `atr_14 /
+  rsi_14` (Wilder "14 trading days ≈ 2 weeks" legacy) and the
+  `atr_sma_14` dual-smoothing variant are **deleted**; SMA/EMA
+  gain 12; all window parameters ∈ {6,12,24,60}. Prior-generation
+  evidence: moneta `catalogue.py` directly `raise
+  ValueError("window outside CFD grid")` for off-grid windows;
+  nova's research features in practice all use 6/12/24/60.
 
 > The list is authoritative per R3.1; this table is 0003's
 > **implementation decomposition**. Adding/removing a feature =
@@ -321,8 +382,9 @@ one semantic family — undefined behavior; we do not learn that).
 | `test_load_from_core_only_unchanged` | with no alpha directory the core registry is unchanged (I16) |
 | `test_sma_values_known` | SMA hand-computed golden test |
 | `test_ema_recursion_known` | EMA first-5 values hand-computed golden (recursion seed = first value) |
-| `test_rsi_wilder_known` | RSI hand-computed golden (Wilder smoothing) |
-| `test_atr_wilder_vs_sma_differ` | the two ATR registrations are each correct (and different) |
+| `test_rsi_grid_known` | RSI (window 24) hand-computed golden (`talib.RSI` Wilder smoothing) |
+| `test_atr_grid_values_known` | `atr_6/12/24/60` per-window hand-computed goldens; different windows give different values (the grid takes effect) |
+| `test_grid_only_windows` | every window parameter in the registry ∈ {6,12,24,60}, no 14 (K8 regression guard) |
 | `test_psar_bull_bear_flags` | PSAR direction flags align with the flip bar |
 | `test_supertrend_line_and_flags` | Supertrend line + bull/bear flags are mutually consistent |
 | `test_warmup_null_semantics` | gap-free input: NULLs only in the warm-up prefix (F2); injected gap: NULL set = prefix ∪ gap-propagation closure (F2 revised) |
@@ -335,8 +397,9 @@ one semantic family — undefined behavior; we do not learn that).
 | `test_gate1_truncation_zero_redraw` | truncated recompute vs full prefix: `max\|V_trunc − V_full[:k]\| < 1e-12` (moneta Gate 1; the hardest form of I1) |
 | `test_gate3_bounds_rsi_atr` | RSI ∈ [0,100], ATR ≥ 0, PSAR/Supertrend line within the [low, high] domain (moneta Gate 3) |
 | `test_gate4_zero_amplitude_no_crash` | flat bar / zero amplitude / zero volume injection → no Inf / NaN leakage / crash (moneta Gate 4) |
-| `test_atr_normalization_basis_wilder` | every ATR-normalized feature's denominator == `atr_wilder_14` (K6; prevents the nova-mixing counter-example) |
+| `test_atr_normalization_basis_atr24` | every ATR-normalized feature's denominator == `atr_24` (K6; prevents the nova-mixing counter-example) |
 | `test_supertrend_path_dependent_from_head` | computed from the data head; a mid-start may differ (path dependence explicitly accepted; warm-up NULLs kept; K4) |
+| `test_supertrend_k7_management` | all four K7 management rules pass: parameters explicit in the registry (not hard-coded) + contract-card fields complete + golden values point-for-point cross-checked against the same-origin moneta/nova reference implementation, deviation < 1e-12 (K7) |
 
 ## 6. Rollback
 
@@ -367,3 +430,4 @@ one semantic family — undefined behavior; we do not learn that).
 | 2026-11-07 | 0.2 | **Filled from the moneta/nova read-only scan**: §2.3 six adoptions + four counter-examples + three not-applicable classes (Supertrend self-implementation / pure-NumPy `indicators` boundary / nova registry warm-up metadata / structural windows exclude the current bar / Gate 1-3-4 / utc_hour semantics; counter-examples = WARMUP_DROP row deletion, P1 2160 combinations with 0 promoted, 575-column wide table, mixed ATR bases); **K1 revised**: the numba draft is voided, now TA-Lib + self-implemented Supertrend + numpy vectorization, DuckDB reads/writes but never computes; K3 gains nova metadata; **K6 added** (ATR normalization uniformly on the Wilder basis); §3.4 structural semantics pinned; tests 17→**22** (+Gate1/3/4 + K6 + Supertrend path dependence) |
 | 2026-11-07 | 0.3 | **Self-check fixes (3 self-contradictions + 1 implementation ambiguity)**: ① §3.1 CLI's "skip if present with the same snapshot id" contradicted 0002 A1's derived-layers-always-recompute → now always recompute/overwrite; §3.1's leftover numba/DuckDB-compute draft contradicted the K1 decision → rewritten to point at K1; the §3.2 "no TA-Lib" row contradicted K1's TA-Lib adoption → row removed. ② §3.4's column names `open/high/low/close` did not match the bronze contract's `mid_o/...` → price basis = mid columns, shorthands clarified. ③ the `bar_close_time` vs bronze's actual column name `time` dual-column ambiguity → I1 row clarifies the alignment (no new column). ④ `atr_sma_14`'s "hybrid" implementation semantics were undefined → defined as the 14-bar SMA of TR (must be a different algorithm from Wilder recursion). Also: TA-Lib's version is deliberately excluded from the snapshot id (semantic changes go through I13); the approval checklist gains the TA-Lib dependency item |
 | 2026-11-07 | 0.4 | **Adversarial self-check fix (1 over-strong invariant)**: F2's original "any NULL after warm-up = bug" false-positives on **market gaps** (0002 I22 declares gaps legal; 730k real occurrences) — a gap bar's missingness propagating into dependent window features is a **legitimate** NULL, not a bug. Revised to "NULL positions ⊆ warm-up prefix ∪ upstream-missingness propagation closure" (direction guaranteed by I1 causality); `test_warmup_null_prefix_only` renamed `test_warmup_null_semantics` with a gap-propagation assertion. Other candidates (F1/F4/F5, K2 copy size, K5 interaction with gaps, snapshot-id derived-string length) verified as false positives or already covered — unchanged |
+| 2026-11-07 | 0.5 | **User decided two points, landed as K7/K8**: ① **self-implemented feature management (K7)** — the user asked "why is Supertrend self-implemented?": TA-Lib **indeed has no** Supertrend (moneta/nova headers both confirm); self-implemented features are managed **stricter** than library-backed ones: parameters explicit in the registry (no hard-coding) + mandatory contract card + golden test cross-checked point-for-point against the same-origin moneta/nova reference implementation (<1e-12, no self-verification) + any semantic change must be I13+1 with a recorded reason. ② **parameter grid discipline (K8, user decision)** — the user pointed out 14 is the Wilder "14 trading days ≈ 2 weeks" legacy and asked for 6/12/24/60 with few parameters to prevent overfitting into a narrow parameter environment; prior-generation evidence: moneta `catalogue.py` directly `raise ValueError("window outside CFD grid")` for off-grid windows, nova's research features in practice all use 6/12/24/60 → **ATR/RSI re-registered as the 6/12/24/60 grid**, the `atr_sma_14` dual-smoothing variant deleted, SMA/EMA gain 12, Supertrend's ATR window 14→24, normalization denominator `atr_wilder_14`→`atr_24` (K6 updated); exception: PSAR (0.02,0.2) kept (not a window parameter). Synced R3.1 (the requirements ZH+EN authoritative list) + §3.4 table + tests (+`test_grid_only_windows`/`test_supertrend_k7_management`, the two 14-related cases re-gridded). Tests 22→**24** |

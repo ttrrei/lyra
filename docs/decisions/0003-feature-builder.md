@@ -99,7 +99,9 @@ R3.1 定义的全部标准特征，落成"每标的一个 Parquet"的特征宽�
    同一语义族混用两种 ATR 归一化基准是**未定义行为**（读者无法
    推断哪条基准对哪个特征生效）。lyra 定案：**所有 ATR 归一化
    特征统一用 `atr_wilder_14`**（Wilder 是行业惯例基准），
-   `atr_sma_14` 保留注册但只供显式引用。
+   `atr_sma_14` 保留注册但只供显式引用。（**v0.5 更新**：随 K8
+   网格纪律，14 窗口全族退役 → 归一化分母统一改 `atr_24`，
+   混用基准的反例仍成立。）
 
 **不适用**：moneta 的 OOS token / frozen bucket / 配对周块不确定性
 （已废弃，hld §1 少即是多）；nova 的 SHA256 snapshot 目录（I11 已
@@ -205,34 +207,77 @@ compiler 落实，0003 只保证 NULL 语义一致（R3.3）。
 **逐点同算法**（universal，HLD §1 精神）；某标的因数据短 warm-up
 更长是允许的（NULL 行数不同），算法不允许不同。
 
-**K6 ATR 归一化基准（定案，§2.3 反例 4）**：所有"距离/位移
-归一化"特征（`shift6_atr`、`bar_range_atr`、`prior24_width` 的
-ATR 变体等）**统一除以 `atr_wilder_14`**（Wilder 基准，行业
-惯例）；`atr_sma_14` 保留注册但**不得**作为归一化分母的默认
-基准（nova 在同一语义族混用两种 ATR 是未定义行为，不学）。
+**K6 ATR 归一化基准（定案，§2.3 反例 4；v0.5 随 K8 改网格）**：
+所有"距离/位移归一化"特征（`shift6_atr`、`bar_range_atr`、
+`prior24_width` 的 ATR 变体等）**统一除以 `atr_24`**（Wilder
+平滑、24-bar 窗口、网格默认点）；**不得**在语义族内混用不同
+ATR（nova 混用 `atr_14`/`atr_sma_14` 是未定义行为，不学）。
+
+**K7 自研特征管理（定案，v0.5 新增，用户要求）**：凡非
+第三方库实现的特征（当前仅 **Supertrend**——TA-Lib 无此指标，
+moneta `library/supertrend.py` / nova `indicators.py` 头注释均
+确认"TA-Lib ships no Supertrend"），在注册表中显式标记
+`self_implemented: true`，并强制四项管理（比库实现特征**更严**）：
+1. **参数必须显式入注册表**（不得硬编码在函数体——Supertrend
+   的 ATR 窗口 = 网格点（K8）、multiplier 显式注册且 golden
+   test 钉死）；
+2. **契约卡强制**（R3.2 对 alpha 的要求同样适用于 core 自研）：
+   状态变量 / 转移规则 / seed 约定 / 翻转边界，写在
+   `indicators.py` 函数 docstring（supertrend 现有实现已具备
+   此 docstring，直接沿用）；
+3. **golden test 用独立参考值**：不"自己算自己验证"——用手工
+   推导的前 N bar 值 + 与 moneta/nova 参考实现逐点对照（两者
+   同源、可作交叉验证），偏差 > 1e-12 即失败；
+4. **版本纪律**：自研特征任何语义变更 → FEATURE_VERSION +1
+   （I13）且必须在决策文档修订记录说明理由（库实现变更通常
+   只 bump 依赖版本，自研变更无外部锚点，必须自证）。
+
+**K8 参数网格纪律（定案，v0.5 新增，用户要求）**：所有
+**窗口类参数只取 CFD 网格 {6, 12, 24, 60}**（对应 30m/1h/2h/5h
+量级，跨 timeframe 语义一致）；**不使用 14 这类 Wilder 时代
+"14 交易日 ≈ 2 周"遗留参数**（前代背书：moneta
+`library/catalogue.py` 对 6/12/24/60/120 之外的窗口直接
+`raise ValueError("window outside CFD grid")`；nova 研究特征
+实际全用 6/12/24/60——`return_6`、`prior24`、`efficiency_24`）。
+动机（用户）：防止策略在极窄参数环境过拟合——参数面越小、
+网格越粗，策略对参数的敏感性越低。**影响**：
+- ATR 注册 `atr_6 / atr_12 / atr_24 / atr_60`（单一 Wilder
+  平滑，窗口取网格；`atr_sma_14` 双平滑变体**删除**——
+  网格纪律下"两种平滑 × 一种窗口"的收益不抵复杂度）；
+- RSI 注册 `rsi_6 / rsi_12 / rsi_24 / rsi_60`（同上，网格）；
+- **例外（显式记录）**：PSAR `(0.02, 0.2)` 是 Wilder 的
+  标准加速/极值因子，**不是 bar 窗口**、不涉及"周"遗留，保留；
+  Supertrend multiplier `3` 是倍数非窗口，保留但入 K7 管理；
+- 默认归一化分母 = `atr_24`（K6 更新）。
 
 ### 3.4 标准特征清单（R3.1 落表）
 
 | 族 | 特征列 | 参数 | 计算类 |
 |---|---|---|---|
 | 市场 | `open/high/low/close/volume` | — | 复制（K2） |
-| SMA | `sma_6 / sma_24` | 6 / 24 | TA-Lib（K1） |
-| EMA | `ema_6 / ema_24 / ema_60` | 6 / 24 / 60 | 递归 |
-| ATR | `atr_sma_14 / atr_wilder_14` | 14 | `atr_wilder_14` = `talib.ATR`（Wilder 平滑，行业基准，K6 归一化分母）；`atr_sma_14` = TR 的 14 根 **SMA**（实现 = `rolling(14).mean`，区别于 Wilder 递推——两个注册名必须是两种**不同**算法，否则注册无意义） |
-| RSI | `rsi_14` | 14 | 递归（Wilder） |
-| PSAR | `psar / psar_bullish / psar_bearish` | (0.02, 0.2) | 递归 |
-| Supertrend | `supertrend / supertrend_bullish / supertrend_bearish` | (14, 3) | 递归 |
-| 语义 | `sma_cross_up_6_24 / sma_cross_down_6_24 / sma_alignment_6_24 / rsi_divergence_up / rsi_divergence_down` | — | 派生（已注册列的确定性谓词） |
-| 结构 | `prior24_high / prior24_low / prior24_range / prior24_range_pos / prior24_width / breakout_up / breakout_down / failed_breakout_up / failed_breakout_down / shift6_atr / bar_range_atr / rel_quote_activity / utc_hour / path_eff_24` | — | numpy/pandas 向量化（K1） |
+| SMA | `sma_6 / sma_12 / sma_24 / sma_60` | 网格（K8） | TA-Lib（K1） |
+| EMA | `ema_6 / ema_12 / ema_24 / ema_60` | 网格（K8） | TA-Lib（K1） |
+| ATR | `atr_6 / atr_12 / atr_24 / atr_60` | 网格（K8） | `talib.ATR`（Wilder 平滑）；**`atr_24` = 归一化分母默认**（K6） |
+| RSI | `rsi_6 / rsi_12 / rsi_24 / rsi_60` | 网格（K8） | `talib.RSI` |
+| PSAR | `psar / psar_bullish / psar_bearish` | (0.02, 0.2)（K8 例外：非窗口参数） | `talib.SAR` + 方向标志 |
+| Supertrend | `supertrend / supertrend_bullish / supertrend_bearish` | (ATR 窗口 24, multiplier 3) | 自研纯 NumPy（K1）+ K7 管理 |
+| 语义 | `sma_cross_up_6_24 / sma_cross_down_6_24 / sma_alignment_6_24 / rsi_divergence_up / rsi_divergence_down` | 引用已注册列（6/24） | 派生（已注册列的确定性谓词） |
+| 结构 | `prior24_high / prior24_low / prior24_range / prior24_range_pos / prior24_width / breakout_up / breakout_down / failed_breakout_up / failed_breakout_down / shift6_atr / bar_range_atr / rel_quote_activity / utc_hour / path_eff_24` | 6 / 24（均网格内） | numpy/pandas 向量化（K1） |
 
-**结构族口径（§2.3 采纳 4/6，K6）**：
+**结构族口径（§2.3 采纳 4/6，K6/K8）**：
 - `prior24_*` 的 24 根窗口**排除当前 bar**（`shift(1)` 后开窗，
   nova `_research_features` 同款）；
 - `failed_breakout_up` = 当前 bar `high` 越过 prior24_high 但
   `close` 收回其内（wick 扫过假突破，nova 同款定义）；
 - `utc_hour` = bar **开盘时刻**的 UTC 小时（收盘确认时已知，
   因果安全）；
-- 所有 ATR 归一化分母 = `atr_wilder_14`（K6）。
+- 所有 ATR 归一化分母 = `atr_24`（K6 更新）；
+- **v0.5 网格化（K8，用户拍板）**：原 `atr_14 / rsi_14`
+  （Wilder "14 交易日 ≈ 2 周" 遗留）与 `atr_sma_14` 双平滑
+  变体**删除**；SMA/EMA 补齐 12；所有窗口参数 ∈ {6,12,24,60}。
+  前代背书：moneta `catalogue.py` 对网格外窗口直接 `raise
+  ValueError("window outside CFD grid")`；nova 研究特征实际
+  全用 6/12/24/60。
 
 > 清单以 R3.1 为准；本表是 0003 的**实现分解**。新增/删减特征
 > = 改 R3.1 + 本文 + FEATURE_VERSION。
@@ -262,8 +307,9 @@ ATR 变体等）**统一除以 `atr_wilder_14`**（Wilder 基准，行业
 | `test_load_from_core_only_unchanged` | 无 alpha 目录时 core 注册表不变（I16） |
 | `test_sma_values_known` | SMA 手工值 golden test |
 | `test_ema_recursion_known` | EMA 前 5 值手工 golden（递归起点 = 首值） |
-| `test_rsi_wilder_known` | RSI 手工 golden（Wilder 平滑） |
-| `test_atr_wilder_vs_sma_differ` | 两种 ATR 注册名各自正确 |
+| `test_rsi_grid_known` | RSI（窗口 24）手工 golden（`talib.RSI` Wilder 平滑） |
+| `test_atr_grid_values_known` | `atr_6/12/24/60` 各窗口手工 golden；不同窗口值互不相同（网格生效） |
+| `test_grid_only_windows` | 注册表所有窗口参数 ∈ {6,12,24,60}，无 14（K8 防回归） |
 | `test_psar_bull_bear_flags` | PSAR 方向标志与翻转 bar 对齐 |
 | `test_supertrend_line_and_flags` | Supertrend 线 + bull/bear 标志一致性 |
 | `test_warmup_null_semantics` | 无缺口输入：NULL 仅 warm-up 前缀（F2）；注入缺口输入：NULL 集合 = 前缀 ∪ 缺口传播闭包（F2 修订） |
@@ -276,8 +322,9 @@ ATR 变体等）**统一除以 `atr_wilder_14`**（Wilder 基准，行业
 | `test_gate1_truncation_zero_redraw` | 截断数据重算 vs 全量前缀：`max\|V_trunc − V_full[:k]\| < 1e-12`（moneta Gate 1，I1 最硬形式） |
 | `test_gate3_bounds_rsi_atr` | RSI ∈ [0,100]、ATR ≥ 0、PSAR/Supertrend 线 ∈ [low, high] 域（moneta Gate 3） |
 | `test_gate4_zero_amplitude_no_crash` | 平价 bar / 零振幅 / 零 volume 注入 → 无 Inf / NaN 泄漏 / 崩溃（moneta Gate 4） |
-| `test_atr_normalization_basis_wilder` | 所有 ATR 归一化特征分母 == `atr_wilder_14`（K6，防 nova 混用反例） |
+| `test_atr_normalization_basis_atr24` | 所有 ATR 归一化特征分母 == `atr_24`（K6，防 nova 混用反例） |
 | `test_supertrend_path_dependent_from_head` | 从数据头起算；中途起算结果可不同（路径依赖显式接受，warm-up NULL 保留，K4） |
+| `test_supertrend_k7_management` | 自研特征四项管理全过：参数显式入注册表（非硬编码）+ 契约卡字段齐全 + golden 值与 moneta/nova 同源参考实现逐点偏差 < 1e-12（K7） |
 
 ## 6. 回滚
 
@@ -305,3 +352,4 @@ ATR 变体等）**统一除以 `atr_wilder_14`**（Wilder 基准，行业
 | 2026-11-07 | 0.2 | **moneta/nova 只读扫描回填**：§2.3 采纳 6 条 + 反例 4 条 + 不适用 3 类（Supertrend 自研 / indicators 纯 NumPy 边界 / nova 注册表 warmup 元数据 / 结构窗口排当前 bar / Gate 1-3-4 门禁 / utc_hour 口径；反例 = WARMUP_DROP 删行、P1 2160 组合 0 晋级、575 列宽表、ATR 归一化混用）；**K1 修订**：numba 草案作废，改 TA-Lib + 自研 Supertrend + numpy 向量化，DuckDB 只读写不算；K3 补 nova 元数据；**新增 K6**（ATR 归一化统一 Wilder 基准）；§3.4 结构族口径明确；测试 17→**22**（+Gate1/3/4 + K6 + Supertrend 路径依赖） |
 | 2026-11-07 | 0.3 | **自检修复（3 处自相矛盾 + 1 处实现歧义）**：① §3.1 CLI 原"已存在且 snapshot id 一致则跳过"与 0002 A1 派生层恒重算冲突 → 改恒重算恒覆盖；§3.1 残留的 numba/DuckDB 计算草稿与 K1 定案冲突 → 重写指向 K1；§3.2"不做 TA-Lib"行与 K1 采纳 TA-Lib 矛盾 → 删行。② §3.4 表列名 `open/high/low/close` 与 bronze 契约 `mid_o/...` 不符 → 明确价格基准 = mid 列、语义简称。③ I1 的 `bar_close_time` 与 bronze 实际列名 `time` 的双列歧义 → I1 行澄清列对齐（不新增列）。④ `atr_sma_14` 实现口径"混合"含义不明 → 定为 TR 的 14 根 SMA（与 Wilder 递推必须是两种不同算法）。另：TA-Lib 版本刻意不入 snapshot id（语义变更走 I13），审批清单补 TA-Lib 依赖项 |
 | 2026-11-07 | 0.4 | **对抗性自检修复（1 处不变量过强）**：F2 原"warm-up 后任何 NULL = bug"在**市场缺口**（0002 I22 明确缺口合法、真实数据 73 万处）下会误判——缺口 bar 缺失传播到依赖窗口特征是**合法** NULL，非 bug。修订为"NULL 位置 ⊆ warm-up 前缀 ∪ 上游缺失传播闭包"（方向由 I1 因果性保证）；测试 `test_warmup_null_prefix_only` 更名为 `test_warmup_null_semantics` 并补缺口传播断言。其余候选项（F1/F4/F5、K2 复制体积、K5 与缺口交互、snapshot id 派生串长度）经核验为误报或已覆盖，不改 |
+| 2026-11-07 | 0.5 | **用户拍板两点，落 K7/K8**：① **自研特征管理（K7）**——用户问"Supertrend 为什么自研"：TA-Lib **确无** Supertrend（moneta/nova 头注释均确认），自研特征比库实现更严：参数显式入注册表（禁硬编码）+ 契约卡强制 + golden test 用 moneta/nova 同源参考实现逐点交叉验证（<1e-12，不自己验自己）+ 语义变更必须 I13+1 并说明理由。② **参数网格纪律（K8，用户拍板）**——用户指出 14 是 Wilder "14 交易日≈2 周"遗留、要求尽量用 6/12/24/60 且参数不要太多防极窄参数过拟合；前代背书：moneta `catalogue.py` 对网格外窗口直接 `raise ValueError("window outside CFD grid")`、nova 研究特征实际全用 6/12/24/60 → **ATR/RSI 改 6/12/24/60 网格**、`atr_sma_14` 双平滑变体删除、SMA/EMA 补 12、Supertrend ATR 窗口 14→24、归一化分母 `atr_wilder_14`→`atr_24`（K6 更新）；例外：PSAR (0.02,0.2) 非窗口参数保留。同步 R3.1（requirements 中英权威清单）+ §3.4 表 + 测试（+`test_grid_only_windows`/`test_supertrend_k7_management`，2 个 14 相关用例改网格版）。测试 22→**24** |
