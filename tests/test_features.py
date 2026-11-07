@@ -167,6 +167,35 @@ def test_heikin_asi_k7_management():
         assert spec.warmup_bars >= 16, name
 
 
+def test_heikin_asi_marker_survives_load_from():
+    """M2 (batch-1 review): the K7 self_implemented marker must survive
+    load_from's per-spec copy — before the fix it was dropped in
+    v1.0–v1.3, silently downgrading ha_* in the registry the real CLI uses.
+    Pass a non-existent directory: load_from seeds the core through register()
+    and returns early, exercising exactly the copy path under test."""
+    reg = features.load_from("/nonexistent-alpha-dir-xyz")
+    for name in ("ha_o", "ha_h", "ha_l", "ha_c"):
+        spec = reg.get(name)
+        assert spec.self_implemented is True, (
+            f"{name}: K7 self_implemented marker lost in load_from"
+        )
+    # sanity: other specs (TA-Lib-backed) must NOT be marked self_implemented
+    assert reg.get("sma_12").self_implemented is False
+
+
+def test_params_are_read_only():
+    """M1 (batch-1 review): spec.params is a MappingProxyType — in-place
+    mutation raises TypeError instead of silently corrupting the registry's
+    SQL right-value contract (no current code mutates it; this is the guard)."""
+    reg = features.build_registry()
+    spec = reg.get("sma_12")
+    import types
+    assert isinstance(spec.params, types.MappingProxyType)
+    import pytest
+    with pytest.raises(TypeError):
+        spec.params["n"] = 999  # noqa: F841 — must raise, not mutate
+
+
 # --- v1.3 trend-strength / efficiency family (TRIX/TSI/VHF/Vortex/Aroon) ---
 
 def test_v13_family_known_values_and_invariants(ctx, data):

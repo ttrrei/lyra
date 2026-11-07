@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
 
@@ -106,13 +107,18 @@ class Registry:
                 ) from None
         if warmup_bars < 0:
             raise ValueError(f"{name}: warmup_bars must be >= 0, got {warmup_bars}")
+        # M1: freeze params to a read-only view. FeatureSpec is frozen (attribute
+        # reassignment already blocked); the dict *value* is otherwise mutable in
+        # place. No code mutates it (read-only), but the proxy makes any
+        # accidental `spec.params[...] = ...` raise TypeError instead of silently
+        # corrupting the registry's SQL right-value contract.
         spec = FeatureSpec(
             name=name,
             kind=kind,
             unit=unit,
             warmup_bars=warmup_bars,
             family=family,
-            params=dict(params or {}),
+            params=MappingProxyType(dict(params or {})),
             window_params=tuple(window_params or ()),
             self_implemented=self_implemented,
             compute=compute,

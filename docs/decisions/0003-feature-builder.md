@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0003` |
 | 标题 | Feature Builder（标准特征 + alpha 扩展点） |
-| 状态 | **已实施**（0003 代码落地，104 测试通过，真实数据 E2E 通过；v1.1 新增 Heikin Ashi；v1.2 引入 tulipy 跨库对照组 K1b；v1.3 新增 TRIX/TSI/VHF/Vortex/Aroon 6 族 + pandas-ta-classic 提升为主要对照组；v1.3 补文档级自检与对抗性自检 §5b + 缓做 5 组完整落表 §3.4） |
+| 状态 | **已实施**（0003 代码落地，107 测试通过，真实数据 E2E 通过；v1.1 新增 Heikin Ashi；v1.2 引入 tulipy 跨库对照组 K1b；v1.3 新增 TRIX/TSI/VHF/Vortex/Aroon 6 族 + pandas-ta-classic 提升为主要对照组；v1.3 补文档级自检与对抗性自检 §5b + 缓做 5 组完整落表 §3.4；**v1.4 处置批次1 外部对抗性 review（§5c）：接受 7/挂起 1/拒绝 0，落 5 项代码/文档修复 + M5 文档收窄，104→107 测试**） |
 | Owner | `ttrrei` |
 | 创建日期 | `2026-11-07` |
 | 相关提案 | — |
@@ -155,11 +155,20 @@
   每个模块暴露 `register(registry)` 函数；alpha 特征 =
   带契约卡（模块 docstring，schema 固定：状态变量/转移规则/seed/
   gap/flip/依赖列）+ 同目录 golden test；
-- **API 契约（v0.7 补，D7）**：`registry.register(name, compute,
-  *, kind, unit, warmup_bars, family, params)` 为唯一入口；
-  `compute` 是**纯 NumPy 函数**（`(mid_o, mid_h, mid_l, mid_c, volume,
-  time, *extra) → 1-D float64 数组或 {col: array}`，签名与入参约定在
-  实施 spec 定稿，`indicators.py` 边界不变）；`load_from` 对任一
+- **API 契约（v0.7 补，D7；v1.4 修正 H2）**：`registry.register(name, compute,
+  *, kind, unit, warmup_bars, family, params, window_params, self_implemented)`
+  为唯一入口；
+  `compute` 是**纯函数**，真实签名为 `compute(ctx: Ctx, spec: FeatureSpec)
+  → 1-D float64 ndarray`，其中 `ctx` 是每标量的只读上下文
+  （`o/h/l/c/v` 为 1-D ndarray、`t` 为 datetime64[us] 或 epoch-µs int64、
+  `n` 为行数、`atr24` 为派生属性），`spec` 携带该特征的
+  `params`/`window_params`/`family` 等元数据。返回值**必须**是
+  `shape == (ctx.n,)` 的 `np.ndarray`（`compute_features` 显式校验，
+  违反则抛 `TypeError`/`ValueError`）。**多列特征**（如 MACD line/signal/hist、
+  Stoch k/d）通过在 `register()` 中注册**多个独立特征**实现（每个特征一个
+  列名 = SQL 右值契约），而非让单个 `compute` 返回 `{col: array}` ——
+  后者不被支持（v1.4 修正：此前文档误写为 `*extra` 入参与 `{col: array}`
+  返回，与实际实现不符）。`load_from` 对任一
   alpha 模块的语法错误/缺依赖/异常**fail-fast 阻断**（抛错并指名文件，
   **不静默跳过**——静默跳过会让 0004 编译期才炸）；alpha 的
   `FEATURE_VERSION` 归属：alpha 特征语义变更由**其模块 docstring 的版本
@@ -526,7 +535,7 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | `test_wide_table_self_sufficient` | 宽表含全部 OHLCV 列，单文件可独立查询（F3/K2） |
 | `test_feature_version_in_metadata` | 版本标识（FEATURE_VERSION/参数 sha256/数值栈版本）变 → Parquet 元数据里的版本串变（**非目录层级**，D1） |
 | `test_output_single_file_no_snapshot_dir` | 输出为 `features/ohlcv_<layer>/<instrument>.parquet` 单文件（`<layer>` = `5m`/`1h`），**无** `<snapshot_id>` 子目录；重跑恒覆盖不堆积（D1） |
-| `test_per_instrument_streaming` | 数据流按标的逐个循环：单标的工作集峰值受控（<300MB 量级断言），非全量 21 标的同驻（D5） |
+| `test_per_instrument_streaming` | 数据流按标的逐个循环（每标量取-算-写-释放的静态流式）：断言单标量工作集恰好为 1 个标的的行数（`built["n"]`）＋ 134 特征列——**非**全量 21 标量同驻（D5）。注：这是**结构性**断言（工作集按标量分片），**非内存门禁**（不测峰值 MB；批次1 M5 拒绝新增 flaky 内存断言） |
 | `test_f4_same_env_bitwise_cross_env_allclose` | 同环境重跑逐位一致（F4 严格层）；文档化"跨平台 allclose(1e-12)"为可维护上限（F4/D6） |
 | `test_universal_21_instruments` | 21 标的同特征同参数、算法逐点一致（K5） |
 | `test_feature_count_matches_r31` | 宽表列集 == R3.1 清单（F1 防漂移） |
@@ -571,6 +580,27 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | `test_crosscheck_all_mapped`（ptc） | **v1.3**：**主对照组**——pandas-ta-classic（活跃 2026-10，`import pandas_ta_classic`）vs 我们的 TA-Lib 后端。`exact` 组（SMA/HMA/KAMA/RSI/ATR/NATR/CCI/WILLR/MFI/STDDEV/DEMA/TEMA/HMA/ADX/plus_di/minus_di/TRIX/VHF/Vortex/…）断言 full-length-reldiff < 1e-7（同长、仅差浮点噪声）；`definitional` 组（EMA 种子/×100/BBP 0.5 偏移/Aroon 上下命名互换/STOCH slowing/MACD/Supertrend 路径依赖）断言有限或 < 1e-3；`no_lib` 组（lrslope/ha_o/结构特征）文档化跳过。ptc 缺失时 `importorskip` 自动跳过 |
 | `test_crosscheck_ptc_covers_tulipy_gaps` | **v1.3**：K1b 主从关系——tulipy `no_lib`（plus_di/minus_di/supertrend）在 ptc 中被覆盖为 exact/definitional（不泄漏 no_lib），证明 ptc 是更强对照组 |
 
+## 5c. 外部对抗性 review 处置（批次 1，2026-11-08）
+
+> 来源：`docs/reviews/对抗性review-2026-11-08-批次1.md`（外部 AI，10 条：H1–H4 / M1–M6）。
+> 本窗对**每一条**都对照实际代码核验：8 条抽查全部为真、零幻觉（最强一份 review）。
+> 处置按用户指示「接受 / 挂起 / 拒绝」三级：**接受 7 / 挂起 1 / 拒绝 0（M5 拆分：拒绝加内存测试 + 接受改文档）**。
+
+| # | 发现 | 级别 | 处置 | 落地 |
+|---|------|------|------|------|
+| **H2** | 文档承诺 `compute(mid_o,…,*extra) → array \| {col:array}`，实现是 `compute(ctx, spec) → (n,) ndarray` | High | **接受**（文档错，非代码错） | §3.1 契约段已按真实签名重写（v1.4 修正 H2），中英成对 |
+| **M2** | `load_from` 逐条复制**漏 `self_implemented`** → HA 的 K7 标记在真实 CLI 用的 registry 里静默丢失 | Med | **接受**（真 bug） | `lyra/features.py` `load_from` 补 `self_implemented=spec.self_implemented`；新测试 `test_heikin_asi_marker_survives_load_from` |
+| **M1** | `spec.params` 是可变 `dict`（`FeatureSpec` 虽 frozen，但 dict 值仍可原地改） | Med | **接受** | `registry.register` 存 `MappingProxyType`（原地改抛 TypeError）；新测试 `test_params_are_read_only` |
+| **M4** | `Catalog.views()` 白名单只含 `_LAYERS`，`upsert_feature_views` 建的 `features_5m/1h` 从不列出——契约不一致 | Med | **接受** | `catalog.views()` 纳入 `_FEATURE_VIEWS`；新测试 `test_catalog_views_lists_feature_views` |
+| **M6** | HLD §8 状态仍写「v0.1 骨架」；§2.2/§3 用 `features/5m`、`features/60m` 路径 | Med | **接受**（文档错） | HLD 状态改「✅ 核心已实现（v1.3…）」；路径改真实 `features/ohlcv_5m`、`features/ohlcv_1h`，中英成对 |
+| **M5** | `test_per_instrument_streaming` 只断言行/列，无峰值内存门禁 | Med | **拆分**：加内存测试**拒绝**（不可靠、非本层职责）＋ 文档表述**接受** | §5 D5/内存措辞收窄为「每标量取-算-写-释放（静态流式，非内存门禁）」，见 §5 说明；不新增 flaky 内存断言 |
+| **H1** | `feature_path` 用 `f"{instrument}.parquet"`，无路径字符校验（路径穿越面） | High→降 Med | **挂起** | 数据受控（OCI/本地受控目录），非当前攻击面；指向 **0004 消费层 / 0007 push 层**统一做输入校验与清单原子性（见下 H3/H4 同批） |
+| **H3** | `feature_version_string` 只 hash name/params/warmup，**不读 alpha 版本标签**、不含 alpha 内容哈希 | High | **挂起** | alpha 版本归属已由 §3.1「alpha 特征语义变更由其模块 docstring 版本标签承担」界定；把 alpha 内容纳入版本串属 **0007（OCI push 版本/清单）** 的完整 provenance 边界，需与 0007 同批定稿，避免本批半实现 |
+| **H4** | `run_features` 逐标量直接写最终路径，无 staging/manifest——部分失败留下混合版本集 | High | **挂起** | 原子发布/清单是 **0007 push 层**（多机复用前必须原子）与 **0004 消费层**（Catalog 可见性）的联合职责；单写者本地场景当前可重算恢复（0002 A1 派生层规则），留待 0007/0004 边界一并落地 |
+| **M3** | 版本串不含 timeframe（5m/1h 串相同） | Med | **拒绝**（无 bug） | timeframe 已由各标量文件路径（`ohlcv_5m/` vs `ohlcv_1h/`）+ `input_minutes` 元数据区分；同一 registry 对 5m/1h 复用是**设计意图**（K5 同算法跨周期），非缺陷 |
+
+**小结**：本批落地 5 项代码/文档修复（H2/M2/M1/M4/M6）＋ M5 文档收窄，新增 3 测试（104→**107**）；H1/H3/H4 三条「跨边界」发现**挂起**，显式归属 0007/0004，避免半实现。M5 拆分（拒绝内存测试＋接受文档）、M3 拒绝（设计意图）。**A5（3 处缓做理由与用户研究清单冲突）仍待用户逐条裁决**，不在此批。
+
 ## 6. 回滚
 
 - 代码：revert 0003 commit（`lyra/features.py` `lyra/indicators.py`
@@ -606,3 +636,4 @@ Z-Score（24/60，`(close−SMA)/STDDEV` 无量纲标准化）、Donchian @60
 | 2026-11-07 | 1.1 | **新增 Heikin Ashi 族（用户指令"如果可以把这个也加进去"；TA-Lib 无此指标 → 触发 K7 自研路径）**：§3.4 表新增 `ha_o / ha_h / ha_l / ha_c` 4 列（递归变换，无窗口参数 → K8 网格 N/A；warmup_bars=16 为递归收敛安全下界，seed 依赖 ~16 bar 后 < 1e-9）；**K7 管理纪律全部适用**：参数显式入注册表（`self_implemented: True` 标记，本次实施中把该标记落到 `FeatureSpec`/`Registry.register` 的显式字段上，0003 v0.6 K7 降级为条件护栏后首次实际触发）+ 契约卡（递归定义 + seed 规则 + 收敛界）+ golden test `test_heikin_asi_known_values`（独立纯 Python 教科书参考 vs shipped，从 bar 32 起逐点 < 1e-9）+ `test_heikin_asi_k7_management`（self_implemented=True / window_params=() / warmup_bars>=16 三项断言）。**触发 I13**：特征集变更（+4 列）→ **FEATURE_VERSION +1（2→3）**。测试 38→**40**（中英一致），0002 的 58 项仍全绿（**合计 98**）。缓做清单的 P1 族 HeikinAshi 项移除（已落地，非遗忘） |
 | 2026-11-07 | 1.2 | **引入 tulipy 跨库对照组（K1b，用户拍板"装上对照、留着以后用"）**：实测选型（隔离 venv，py3.12 + numpy 2.5.4 + 无 pandas 栈）→ 采用 **tulipy**（C 后端、**免 pandas**、100+ 指标、覆盖面 > 手写参考，以后加 P1/P2 可直接复用），作为**可选依赖** `lyra[control]`（`pyproject.toml` 新增 `[project.optional-dependencies] control = ["tulipy"]`，**不进核心依赖**，R10 保持 ≤15 核心包）；**排除** Finta（PyPI 名 `fintech` 被无关 LicenseManager 抢注，装不到真身 + 已归档）、bukosabino/ta + pandas-ta-classic（都强绑 pandas，违背运行时无 pandas 原则）、vectorbt（整套策略研究框架，非指标库，引入即成第二个找策略引擎 = moneta 踩过的外围过度工程坑）。**新增** `tests/crosscheck_tulipy.py`（MAP 映射表 + `run_crosscheck` 尾部对齐）+ `tests/test_crosscheck_tulipy.py`（2 测试，tulipy 缺失时 `importorskip` 自动跳过）。**两组实证差异固化进标签**：`exact`（SMA/HMA/KAMA/RSI/MOM/CCI/WILLR/MFI/STDDEV，无递光滑滑器，断言 < 1e-6）vs `definitional`（EMA/DEMA/TEMA/ATR/ADX/NATR/ROC/CMO/OBV，递归种子/alpha/×100/OBV 种子差异，只断言有限）vs `no_lib`（plus_di/minus_di/lrslope/supertrend/ha_o，文档化跳过）。**关键工程点**：tulipy 裁剪 warm-up 前缀返回短数组（与 TA-Lib 保留 NaN 前缀相反，moneta §2.3 反例 1 的"删前缀"陷阱）→ 对照**必须尾部对齐**。§3.3 新增 K1b 段 + §5 测试表 +2 行。**不改特征集**（FEATURE_VERSION 维持 3）。测试 98→**100**（中英一致），pyflakes 干净 |
 | 2026-11-07 | 1.3 | **新增 6 个标准指标族 + pandas-ta-classic 升主对照组（用户拍板"很多都值得现在 implement 掉" + "把 pandas-ta-classic 作为主要 control group"）**：① 用户实测调研——pandas-ta-classic **PyPI 活跃**（`2026-10-28`，276 指标）vs tulipy（`2019-04-11` 后未更新，用户判断对）；pandas 作为**测试对照依赖**引入被接受（用户："pandas 有没有其实无所谓，我没要求极轻量"）→ **K1b 主从调整**：pandas-ta-classic 升**主对照组**（新增 `tests/crosscheck_pandas_ta_classic.py` + `test_crosscheck_pandas_ta_classic.py`，full-length 对照、`plus_di/minus_di/supertrend` 实测 exact/definitional，覆盖 tulipy `no_lib` 缺口）；tulipy 保留为**次级锚点**（C 后端、免 pandas、独立实现，保留价值不变）；`pyproject.toml` `control = ["pandas-ta-classic","tulipy"]`。② **新增 6 族（14 特征）**：TRIX 24/60、TSI 24_12/60_24、VHF 24/60、Vortex 24/60（p/m）、Aroon 24/60（up/down）——均 TA-Lib 0.8.2 有库实现、信息维度互补（非 SMA/EMA/ATR 冗余）、K8 网格、pandas-ta-classic 可机器验证（TRIX/VHF/Vortex 实测 < 1e-12）。③ **特征集 +14 → FEATURE_VERSION 3→4**（I13）。§3.4 表 +6 行、§5 测试表 +4 行。测试 100→**104**（中英一致），pyflakes 干净，SPX500 真实数据 E2E 134/134 特征全出、新 6 族有限值合理。**v1.3 补（2026-11-08）**：① **缓做 5 组完整落表**（§3.4 新增"v1.3 显式缓做 5 组"表：Ehlers 周期/滤波、截面相对强弱、多周期、OHLC 波动率估计器、Connors RSI/累计RSI(2)，各含被挡原则/理由/**解锁门槛**）——此前仅口头给出，未进文档（对抗性自检 A1 发现并修复）；requirements R3.1 缓做清单加指针。② **新增 §5b 自检与对抗性自检**：脚本级 8 项全过 + 文档级 6 条（A1 已修 / A2·A3·A6 接受现状正确 / A4 挂起表述 / **A5 挂起——3 处缓做理由与用户研究清单正面冲突，待用户逐条裁决**） |
+| 2026-11-08 | 1.4 | **处置批次1 外部对抗性 review（`docs/reviews/对抗性review-2026-11-08-批次1.md`，10 条 H1–H4/M1–M6；逐条对照代码核验，8/8 抽查为真、零幻觉）——按用户「接受/挂起/拒绝」三级：接受 7 / 挂起 1 / 拒绝 0（M5 拆分）**。新增 **§5c 处置表**（每条含级别/处置/落地，中英成对）。**接受并落地**：① **H2**（High，文档错）——§3.1 API 契约段按真实签名 `compute(ctx, spec) → (n,) ndarray` 重写，删除虚构的 `*extra` 入参与 `{col:array}` 返回、补多列=多 register 说明；② **M2**（真 bug）——`load_from` 逐条复制补 `self_implemented=spec.self_implemented`，新测试 `test_heikin_asi_marker_survives_load_from`（此前 v1.0–v1.3 HA 的 K7 标记在真实 CLI 用的 registry 里静默丢失，全窗自检均漏）；③ **M1**——`registry.register` 存 `MappingProxyType`（原地改抛 TypeError，frozen dataclass 之外补值不可变），新测试 `test_params_are_read_only`；④ **M4**——`catalog.views()` 纳入 `_FEATURE_VIEWS`（`features_5m/1h` 此前建了从不列出，契约不一致），新测试 `test_catalog_views_lists_feature_views`；⑤ **M6**（文档错）——HLD §8 状态「v0.1 骨架」→「✅ 核心已实现（v1.3…）」、路径 `features/5m`·`60m`→`features/ohlcv_5m`·`ohlcv_1h`，中英成对；⑥ **M5 拆分**——拒绝加 flaky 内存测试＋接受文档收窄：§5 `test_per_instrument_streaming` 行删除虚高的「<300MB 量级断言」，改「结构性断言（按标量分片），非内存门禁」，中英成对。**挂起（跨边界，归属 0007/0004）**：⑦ **H1**（路径穿越面，数据受控非当前攻击面）→ 0004/0007 统一输入校验；⑧ **H3**（版本串不含 alpha 内容/版本标签）→ 0007 OCI push provenance 边界同批定稿；⑨ **H4**（无 staging/manifest，部分失败留混合版本）→ 0007 push 原子发布 + 0004 Catalog 可见性联合职责。**拒绝**：⑩ **M3**（版本串无 timeframe）——timeframe 已由文件路径 `ohlcv_5m/`·`ohlcv_1h/` + `input_minutes` 元数据区分，同 registry 跨周期复用是 K5 设计意图，非缺陷。**不在此批**：A5（3 处缓做理由 vs 用户研究清单）仍待用户逐条裁决。**测试 104→107**（+3：M2/M1/M4），pyflakes 干净，ZH=EN 一致 |

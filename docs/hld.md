@@ -178,7 +178,7 @@ local data/bronze/...  (清洗后的 1m, 单文件外部表)
 local data/ohlcv_5m/ohlcv_5m.parquet + data/ohlcv_1h/ohlcv_1h.parquet
         │  (单文件外部表 —— 0002 D4 已废弃目录级 <snapshot_id> 层级)
         ▼  lyra features --minutes 5 60
-local data/features/5m/<instrument>.parquet + data/features/60m/<instrument>.parquet
+local data/features/ohlcv_5m/<instrument>.parquet + data/features/ohlcv_1h/<instrument>.parquet
         │  (每标的一个 Parquet, 版本入元数据 —— 0003 v0.7)
         ▼
 OCI (lyra/data/market/ + lyra/data/features/)  ← 可选 push, 供多机复用
@@ -327,7 +327,7 @@ lyra/
 |---|---|---|---|
 | 1 | repo + OCI split | `0001-repo-and-oci-split.md` | ✅ 已写 |
 | 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ 已完成（2026-11-07，真实数据端到端 + 批次1(2026-11-07) 对抗性审查 D1–D6 全修复，v1.1） |
-| 3 | Feature builder（标准 + alpha 扩展点） | `0003-feature-builder.md` | ⬜ 进行中（v0.1 骨架，moneta/nova 借鉴扫描回填中） |
+| 3 | Feature builder（标准 + alpha 扩展点） | `0003-feature-builder.md` | ✅ 核心已实现（v1.3：134 特征/6 指标族 + pandas-ta-classic 对照组 + 107 测试；alpha 扩展点 `load_from` 已实现） |
 | 4 | YAML compiler（含 feature-vs-feature） | `0004-yaml-compiler.md` | ⬜ 待写 |
 | 5 | Trade engine（2% stop / next-open / 成本） | `0005-trade-engine.md` | ⬜ 待写 |
 | 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ 待写 |

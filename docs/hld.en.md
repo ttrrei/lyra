@@ -198,7 +198,7 @@ local data/ohlcv_5m/ohlcv_5m.parquet + data/ohlcv_1h/ohlcv_1h.parquet
         │  (single-file external tables — 0002 D4 deprecated the
         │   directory-level <snapshot_id> hierarchy)
         ▼  lyra features --minutes 5 60
-local data/features/5m/<instrument>.parquet + data/features/60m/<instrument>.parquet
+local data/features/ohlcv_5m/<instrument>.parquet + data/features/ohlcv_1h/<instrument>.parquet
         │  (one Parquet per instrument, version in metadata — 0003 v0.7)
         ▼
 OCI (lyra/data/market/ + lyra/data/features/)  ← optional push, for
@@ -352,7 +352,7 @@ blocked by this ordering.
 |---|---|---|---|
 | 1 | repo + OCI split | `0001-repo-and-oci-split.md` | ✅ written |
 | 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ complete (2026-11-07, real data end-to-end + Batch-01 (2026-11-07) adversarial review D1–D6 all fixed, v1.1) |
-| 3 | Feature builder (standard + alpha extension point) | `0003-feature-builder.md` | ⬜ in progress (v0.4 decision doc, ZH+EN; moneta/nova borrowings filled; awaiting user approval) |
+| 3 | Feature builder (standard + alpha extension point) | `0003-feature-builder.md` | ✅ core implemented (v1.3: 134 features/6 indicator families + pandas-ta-classic control + 107 tests; alpha extension point `load_from` implemented) |
 | 4 | YAML compiler (incl. feature-vs-feature) | `0004-yaml-compiler.md` | ⬜ pending |
 | 5 | Trade engine (2% stop / next-open / costs) | `0005-trade-engine.md` | ⬜ pending |
 | 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ pending |

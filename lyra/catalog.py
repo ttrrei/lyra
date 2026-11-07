@@ -32,6 +32,12 @@ import duckdb
 
 # (view_name, subpath under the data root). The subpath must match the
 # on-disk layout produced by the pipeline (0002 §3).
+# 0003 feature wide-table views (D1): view name -> features/<layer> dir.
+_FEATURE_VIEWS: tuple[tuple[str, str], ...] = (
+    ("features_5m", "features/ohlcv_5m"),
+    ("features_1h", "features/ohlcv_1h"),
+)
+
 _LAYERS: tuple[tuple[str, str], ...] = (
     ("bronze", "all_data/all_data.parquet"),
     ("ohlcv_5m", "ohlcv_5m/ohlcv_5m.parquet"),
@@ -103,8 +109,7 @@ class Catalog:
         created: list[str] = []
         con = duckdb.connect(str(self.path))
         try:
-            for view, sub in (("features_5m", "features/ohlcv_5m"),
-                              ("features_1h", "features/ohlcv_1h")):
+            for view, sub in _FEATURE_VIEWS:
                 files = sorted((root / sub).glob("*.parquet")) if (root / sub).is_dir() else []
                 if not files:
                     continue
@@ -124,7 +129,13 @@ class Catalog:
             return []
         con = duckdb.connect(str(self.path), read_only=True)
         try:
-            names = tuple(name for name, _sub in _LAYERS)
+            # M4: include the 0003 feature views — they were created by
+            # upsert_feature_views but never listed by views(), a contract
+            # inconsistency. (The idempotency test only needs ordering, which
+            # the fixed union preserves.)
+            names = tuple(name for name, _sub in _LAYERS) + tuple(
+                name for name, _sub in _FEATURE_VIEWS
+            )
             placeholders = ", ".join("?" for _ in names)
             rows = con.execute(
                 f"""

@@ -50,6 +50,26 @@ def test_catalog_is_idempotent(tmp_path):
     assert [v["view"] for v in c1.views()] == [v["view"] for v in c2.views()]
 
 
+def test_catalog_views_lists_feature_views(tmp_path):
+    """M4 (batch-1 review): features_5m / features_1h are created by
+    upsert_feature_views but were previously invisible to views() — a contract
+    inconsistency. After the fix they appear in views() once their Parquet
+    files exist; a layer with no files is still skipped (existing rule)."""
+    _make_data_root(tmp_path)
+    cat = upsert_views(tmp_path)
+    # A minimal feature wide-table so upsert_feature_views has something to glob.
+    import pyarrow as pa
+    ft = tmp_path / "features" / "ohlcv_5m" / "X.parquet"
+    ft.parent.mkdir(parents=True, exist_ok=True)
+    import pyarrow.parquet as pq
+    pq.write_table(pa.table({"instrument": ["X"], "time": [1], "sma_12": [0.5]}), str(ft))
+    made = cat.upsert_feature_views(tmp_path)
+    assert "features_5m" in made  # 1h skipped: no Parquet there (existing skip rule)
+    views = {v["view"] for v in cat.views()}
+    assert "features_5m" in views, f"features_5m missing from views(): {views}"
+    assert "features_1h" not in views  # no files → not created → not listed (consistent)
+
+
 def test_catalog_queries_match_parquet(tmp_path):
     bronze, p5, _ = _make_data_root(tmp_path)
     upsert_views(tmp_path)

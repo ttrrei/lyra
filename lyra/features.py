@@ -639,6 +639,7 @@ def load_from(directory: str | Path, core: Registry | None = None) -> Registry:
             spec.name, spec.compute, kind=spec.kind, unit=spec.unit,
             warmup_bars=spec.warmup_bars, family=spec.family, params=spec.params,
             window_params=spec.window_params,
+            self_implemented=spec.self_implemented,  # M2: preserve the K7 marker (was dropped in v1.0-v1.3)
         )
     d = Path(directory)
     if not d.exists():
