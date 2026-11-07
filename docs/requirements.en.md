@@ -84,11 +84,24 @@ authoritative grid**). Initial list:
 - OBV + `obv_slope_24` (cumulative volume + 24-bar slope)
 - LINEARREG_SLOPE (normalized slope): 24, 60
 - KAMA (adaptive moving average): 24
-- **Parked (with rationale)**: PPO (normalized MACD variant, redundant);
-  TRIX / ULTOSC / AROON (niche variants); STDDEV (ATR + BBANDS already
-  cover volatility); CORREL / BETA (no natural reference series in a
-  single-instrument universe); HT_* (overfitting risk); CDL* (needs a
-  statistical pre-screen first)
+- **v0.9 additions (P0 gap fill)**:
+  - DEMA (double exponential MA): 6, 24, 60
+  - TEMA (triple exponential MA): 6, 24, 60
+  - HMA (Hull MA): 24, 60
+  - MOM (n-bar momentum = close diff): 6, 24, 60
+  - Rolling StdDev (price dispersion): 24, 60
+  - Z-Score (standardized price position): 24, 60
+  - Efficiency Ratio @60 (v0.8 has eff_24): 60
+  - Donchian @60 (prior60_high / prior60_low; v0.8 has prior24_*): 60
+- **Parked (with rationale, not forgotten)**:
+  - Keltner (= EMA±2×ATR; BBANDS already covers the "mean ± n-volatility band" signal)
+  - Choppiness (= 100×LOG(SUM(TR)/MAXHIGH−MINLOW); a composite of ATR+Donchian, not an independent signal)
+  - Relative Volume / VWMA (v0.8 rel_quote_activity already covers relative-volume signal)
+  - PPO (normalized MACD variant, redundant); TRIX / ULTOSC / AROON / TSI / SMI (niche momentum variants, parameter surface too large)
+  - CMF / EFI / PVT / VHF (volume-direction ratios, overlapping with MFI/OBV)
+  - Vortex / QQE / RSX / VFI / Squeeze / Schaff / Ichimoku / Heikin Ashi / Inside Bar / Williams Fractal (need self-implementation or parameter explosion)
+  - CORREL / BETA (no natural reference series in a single-instrument universe)
+  - HT_* (overfitting risk); CDL* (needs a statistical pre-screen first)
 - Semantic / structure: `sma_cross_up_6_24 / sma_cross_down_6_24`,
   `sma_alignment_6_24 ∈ {-1, 0, 1}`, `rsi_divergence_up / down`,
   `psar_bullish / bearish`, `supertrend_bullish / bearish`
@@ -337,3 +350,4 @@ directions are fully peer.
 | 2026-11-07 | 0.9 | **R3.1 grid discipline (user decision, 0003 K8)**: window parameters only take the CFD grid {6,12,24,60} — no Wilder "14 ≈ 2 weeks" legacy parameter; a narrow parameter surface suppresses overfitting into a narrow parameter environment. ATR re-registered as 6/12/24/60 (24 = default normalization denominator), RSI as 6/12/24/60, SMA/EMA gain 12, Supertrend's ATR window 14→24; exception: PSAR (0.02,0.2) kept (not a window parameter). Prior-generation evidence: moneta `catalogue.py` `raise ValueError("window outside CFD grid")` for off-grid windows; nova's research features in practice all use 6/12/24/60. Synced with 0003 v0.5 (K6/K7/K8 + §3.4 + 24 tests) |
 | 2026-11-07 | 0.10 | **R3.1 two updates (user directives)**: ① **grid adds 120** → {6,12,24,60,120}, **aligned with moneta `catalogue.py`'s authoritative grid**; ATR/RSI/SMA/EMA each gain a `*_120` variant. ② **Supertrend switched to the library** — measured evidence overturns the prior generations' assumption: the moneta/nova headers' "TA-Lib ships no Supertrend" is a stale-version misconception, and the **TA-Lib 0.8.2** both generations lock does ship `SUPERTREND` (a real import probe confirms it); a real-data dual-library parity test (SPX500_USD 1h, 5000 bars) shows the self-implementation and `talib.SUPERTREND` **match bar-for-bar 100%** → R3.1's Supertrend row changed from "self-implemented" to "`talib.SUPERTREND` library implementation + the moneta/nova self-implementation reference as golden cross-anchor". Synced with 0003 v0.6 (K1/K7/K8 + §3.4 + 25 tests) |
 | 2026-11-07 | 0.11 | **R3.1 expanded standard-indicator set (user approved "recommended scope")**: added **13 families** — NATR / MACD (curated triplets 6_12_6/6_24_6/12_60_12) / ROC / STOCH (%K/%D) / BBANDS (%B + bandwidth, no raw bands) / ADX + PLUS_DI + MINUS_DI / CCI / WILLR / MFI / CMO / OBV (slope) / LINEARREG_SLOPE / KAMA. All window parameters restricted to the K8 grid {6,12,24,60,120} (the external suggestion list's 5/10/14/20 parameters are all rejected). Parameter-surface discipline: MACD curated triplets (not full grid expansion), trend-strength/momentum/oscillator families take 24/60 only, BBANDS/OBV use dimensionless forms. **Parked** (with rationale): PPO/TRIX/ULTOSC/AROON/STDDEV (redundant or niche), CORREL/BETA (no reference series in a single-instrument universe), HT_*/CDL* (overfitting risk / need a statistical pre-screen first). **Triggers I13: FEATURE_VERSION +1**. Synced with 0003 v0.8 (§3.4 + D4 gate + 34 tests) |
+| 2026-11-07 | 0.12 | **R3.1 v0.9 fills the P0 gap (8 items)**: DEMA (6/24/60), TEMA (6/24/60), HMA (24/60), MOM (6/24/60), Rolling StdDev (24/60), Z-Score (24/60), Efficiency Ratio @60, Donchian @60 (prior24_* extended to prior60_*). **Parked additions**: Keltner (=EMA±2×ATR, BBANDS covers it), Choppiness (=ATR+Donchian composite transform), Relative Volume/VWMA (rel_quote_activity covers it), all P1 families (parameter surface too large or need self-implementation, deferred to batch 2). **Triggers I13: FEATURE_VERSION +1** (v0.8 already +1, this +1 more = cumulative +2). Synced 0003 v0.9 (§3.4 + 6 new tests) |

@@ -24,15 +24,15 @@
 
 | 项 | 值 |
 |---|---|
-| 更新于 | 2026-11-07（#59） |
+| 更新于 | 2026-11-07（#60） |
 | 构建顺序 | `docs/hld.md` §8（0001→0009，唯一事实来源） |
-| 已完成 | **0001**；**0002 完成并收口**——`lyra/` 包 + **58 个测试全绿**、pyflakes 干净、**真实 `lyra pull` 端到端跑通**（moneta 真实 PAR，12 GB / 4884 万行 bronze → 998 万 5m bars → 84 万 1h bars，21 标的，2020→2026）；**真实 `lyra oanda` 回补 2019-11/12 全 21 标的 = 42/42 成功、0 失败、943,529 根 1m K 线**；批次4+5+6+7 与 11-07 批次1 审查全部闭环（D1–D9 + D1–D6 全修复，D7/D8 回归测试吸收）。**0003 决策文档 v0.8（中英成对）**：11-07 批次 02 外部红队 D1–D8 全处置（D1/D3/D5/D6/D8 接受、D4/D7 挂起+过程门禁、D2 拒绝其核心主张——TA-Lib 0.8.2 官方 PyPI wheel 打包 C runtime 实测证据）；**v0.8 扩充标准指标集 13 族**（NATR/MACD/ROC/STOCH/BBANDS/ADX 族/CCI/WILLR/MFI/CMO/OBV/回归斜率/KAMA，参数全按 K8 网格，外部建议参数一律不采用）；**hld §2.1/§2.2/§3 数据流图同步**（v0.5）；**R3.1 权威清单同步 v0.11**；测试 25→28→**34**（中英一致） |
-| 进行中 | **0003 v0.8**——扩充标准指标集 **13 族**（NATR/MACD/ROC/STOCH/BBANDS/ADX 族/CCI/WILLR/MFI/CMO/OBV/回归斜率/KAMA，参数全按 K8 网格，**外部建议的 5/10/14/20 参数一律不采用**），FEATURE_VERSION +1，34 测试（中英一致） |
-| 下一步 | ① **用户批准 0003 v0.8**（可再找另一 AI 复核新增 13 族的参数选择 + D2 澄清 + hld 同步）；② 批准后进入 0003 实施（实施前须满足 **D4 过程门禁**：全部自研特征精确数学定义 + **5 个新除法特征** natr_*/bband_pctb_*/bband_bw_*/lrslope_*/mfi_* 的零分母兜底）；③ 可选：`lyra pull` 把 943K 新 2019-11/12 行并入 bronze（推荐留给 0003 首测消费） |
-| 代码状态 | `lyra/` 包在真实 12 GB 数据上端到端可跑；**58 测试全绿**；pyflakes 干净；0002 全部收口；0003 尚无代码（决策文档 v0.8 阶段，本轮仅改文档） |
-| 代码交付顺序 | 0002 已收口 → **0003 feature builder（v0.8 待批准）** → 0004 compiler → 0005 trade engine → 0006 metrics/runner → 0007 push/backup |
-| 未决问题 | ① hld §4 L148/155/179 的 **OCI push（0007）snapshot id** 属 0007 未定语义，留待 0007 决策时对齐；② D2 残留"某平台无官方 wheel"风险记为实施期环境验证项；③ **FEATURE_VERSION 需 +1**（0003 v0.8 特征集变更，实施时落实） |
-| 待用户输入 | ① 确认新增 13 族的**参数选择**（MACD 精选三元组 6_12_6/6_24_6/12_60_12、趋势强度/动量族仅 24/60 等）是否符合防过拟合预期；② 缓做族（PPO/TRIX/ULTOSC/AROON/STDDEV/CORREL/BETA/HT_*/CDL*）是否认可缓做理由；③ 批准后启动 0003 编码 |
+| 已完成 | **0001**；**0002 完成并收口**——`lyra/` 包 + **58 个测试全绿**、pyflakes 干净、**真实 `lyra pull` 端到端跑通**（moneta 真实 PAR，12 GB / 4884 万行 bronze → 998 万 5m bars → 84 万 1h bars，21 标的，2020→2026）；**真实 `lyra oanda` 回补 2019-11/12 全 21 标的 = 42/42 成功、0 失败、943,529 根 1m K 线**；批次4+5+6+7 与 11-07 批次1 审查全部闭环（D1–D9 + D1–D6 全修复，D7/D8 回归测试吸收）。**0003 决策文档 v0.9（中英成对）**：11-07 批次 02 外部红队 D1–D8 全处置（D1/D3/D5/D6/D8 接受、D4/D7 挂起+过程门禁、D2 拒绝其核心主张——TA-Lib 0.8.2 官方 PyPI wheel 打包 C runtime 实测证据）；**v0.8 扩充标准指标集 13 族**（NATR/MACD/ROC/STOCH/BBANDS/ADX 族/CCI/WILLR/MFI/CMO/OBV/回归斜率/KAMA）+ **v0.9 补 P0 缺口 8 项**（DEMA/TEMA/HMA/MOM/StdDev/Z-Score 6 族 + Donchian@60 + EfficiencyRatio@60，**STDDEV 撤销缓做**用户拍板）；参数全按 K8 网格，外部建议参数一律不采用；**hld §2.1/§2.2/§3 数据流图同步**（v0.5）；**R3.1 权威清单同步 v0.12**；测试 25→28→34→**37**（中英一致） |
+| 进行中 | **0003 v0.9**——v0.8 13 族基础上**补 P0 基础指标缺口 8 项**（DEMA/TEMA/HMA/MOM/StdDev/Z-Score 6 族 + Donchian@60 + EfficiencyRatio@60；**STDDEV 撤销 v0.8 缓做**，用户拍板"stddev 直接做了"），参数全按 K8 网格，FEATURE_VERSION 累计 +2，37 测试（中英一致） |
+| 下一步 | ① **用户批准 0003 v0.9**（可再找另一 AI 复核 v0.8 13 族 + v0.9 8 项的参数选择 + STDDEV 撤销缓做的理由）；② 批准后进入 0003 实施（实施前须满足 **D4 过程门禁**：全部自研特征精确数学定义 + **6 个新除法特征** natr_*/bband_pctb_*/bband_bw_*/lrslope_*/mfi_*/**zscore_*** 的零分母兜底）；③ 可选：`lyra pull` 把 943K 新 2019-11/12 行并入 bronze（推荐留给 0003 首测消费） |
+| 代码状态 | `lyra/` 包在真实 12 GB 数据上端到端可跑；**58 测试全绿**；pyflakes 干净；0002 全部收口；0003 尚无代码（决策文档 v0.9 阶段，本轮仅改文档） |
+| 代码交付顺序 | 0002 已收口 → **0003 feature builder（v0.9 待批准）** → 0004 compiler → 0005 trade engine → 0006 metrics/runner → 0007 push/backup |
+| 未决问题 | ① hld §4 L148/155/179 的 **OCI push（0007）snapshot id** 属 0007 未定语义，留待 0007 决策时对齐；② D2 残留"某平台无官方 wheel"风险记为实施期环境验证项；③ **FEATURE_VERSION 需累计 +2**（0003 v0.8 +1 / v0.9 再 +1，实施时落实） |
+| 待用户输入 | ① 确认 v0.9 的**参数选择**（v0.8 13 族 + v0.9 8 项 P0 缺口：DEMA/TEMA/HMA/MOM/StdDev/Z-Score 的 6/24/60 网格、Donchian@60、EfficiencyRatio@60）是否符合防过拟合预期；② **STDDEV 撤销缓做**是否认可（理由：价格围绕均值的离散/位置维度与 ATR/BBANDS 不完全重叠，P0 要求覆盖）；③ 批准后启动 0003 编码 |
 
 ## 图例
 
@@ -141,3 +141,4 @@
 | 2026-11-07 | 1.6 | 补 **#57（0003 feature builder 决策文档 11-07 批次 02 专项对抗性红队审查）**：对 0003-feature-builder.md (v0.6) 展开深度审查，抓出 8 项缺陷（D1 存储路径与 snapshot_id 架构同 0002/HLD 断层脱节 / D2 强引入 TA-Lib C 库破坏 R8 跨平台免编译承诺 / D3 不变量 F2 缺口传播概念虚妄 / D4 19 个自研特征数学定义真空 / D5 全量数据流加载缺乏单标的流式约束引发 OOM / D6 不变量 F4 逐位一致脱离浮点硬件现实 / D7 Alpha 扩展点缺乏计算函数签名契约 / D8 1m 粒度特征叙述与 CLI 冲突）；报告落盘 `docs/reviews/对抗性review-2026-11-07-批次2.md` + `.en.md`。状态块同步更新。 |
 | 2026-11-07 | 1.7 | 补 **#58（批次2 D1–D8 按用户接受/挂起/拒绝三级处置）**：接受 D1/D3/D5/D6/D8（snapshot_id 目录废除→单文件+元数据+Catalog、F2 幽灵概念清除、per-instrument 流式控制律、F4 两级确定性、输入口径 5m/1h 聚合层）；挂起 D4（过程门禁：实施前补数学定义+零分母兜底）/ D7（API 契约+纯 NumPy+fail-fast）；**拒绝 D2 核心主张**（TA-Lib 0.8.2 官方 PyPI wheel 打包 C runtime，非 fork，R8 未破坏，残留记实施期验证）。另修 v0.5 遗留不一致（test_supertrend_k7_management→test_supertrend_registry_params）。hld v0.5 同步（§2.1/§2.2/§3）。0003 v0.7，测试 25→28 |
 | 2026-11-07 | 1.8 | 补 **#59（0003 v0.8 扩充标准指标集 13 族）**：NATR/MACD(精选三元组)/ROC/STOCH/BBANDS(%B+带宽)/ADX 族/CCI/WILLR/MFI/CMO/OBV(斜率)/LINEARREG_SLOPE/KAMA，参数全按 K8 网格 {6,12,24,60,120}（外部建议的 5/10/14/20 参数一律不采用）；缓做族 6 项（PPO/TRIX/ULTOSC/AROON/STDDEV/CORREL/BETA/HT_*/CDL*，均有理由）；D4 门禁补 5 个新除法特征；+6 测试（34 中英一致）；触发 FEATURE_VERSION +1；R3.1 同步 v0.11 |
+| 2026-11-07 | 1.9 | 补 **#60（0003 v0.9 补全 P0 基础指标缺口 8 项）**：DEMA(6/24/60)/TEMA(6/24/60)/HMA(24/60)/MOM(6/24/60)/StdDev(24/60)/Z-Score(24/60) 6 族 + Donchian@60 + EfficiencyRatio@60；**STDDEV 撤销 v0.8 缓做**（用户拍板）；缓做清单增补（Keltner/Choppiness/Relative Volume-VWMA/P1 全族）；D4 门禁 +`zscore_*`（第 6 个新除法特征）；`test_grid_only_windows` 扩范围；+3 测试（37 中英一致）；FEATURE_VERSION 再 +1（累计 +2）；R3.1 同步 v0.12 |
