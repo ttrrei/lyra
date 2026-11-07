@@ -341,8 +341,8 @@ blocked by this ordering.
 | # | Feature | Decision doc | Status |
 |---|---|---|---|
 | 1 | repo + OCI split | `0001-repo-and-oci-split.md` | ✅ written |
-| 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ⬜ pending |
-| 3 | Feature builder (standard + alpha extension point) | `0003-feature-builder.md` | ⬜ pending |
+| 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ complete (2026-11-07, real data end-to-end + Batch-01 (2026-11-07) adversarial review D1–D6 all fixed, v1.1) |
+| 3 | Feature builder (standard + alpha extension point) | `0003-feature-builder.md` | ⬜ in progress (v0.4 decision doc, ZH+EN; moneta/nova borrowings filled; awaiting user approval) |
 | 4 | YAML compiler (incl. feature-vs-feature) | `0004-yaml-compiler.md` | ⬜ pending |
 | 5 | Trade engine (2% stop / next-open / costs) | `0005-trade-engine.md` | ⬜ pending |
 | 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ pending |

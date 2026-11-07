@@ -317,8 +317,8 @@ lyra/
 | # | Feature | 决策文档 | 状态 |
 |---|---|---|---|
 | 1 | repo + OCI split | `0001-repo-and-oci-split.md` | ✅ 已写 |
-| 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ⬜ 待写 |
-| 3 | Feature builder（标准 + alpha 扩展点） | `0003-feature-builder.md` | ⬜ 待写 |
+| 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ 已完成（2026-11-07，真实数据端到端 + 批次1(2026-11-07) 对抗性审查 D1–D6 全修复，v1.1） |
+| 3 | Feature builder（标准 + alpha 扩展点） | `0003-feature-builder.md` | ⬜ 进行中（v0.1 骨架，moneta/nova 借鉴扫描回填中） |
 | 4 | YAML compiler（含 feature-vs-feature） | `0004-yaml-compiler.md` | ⬜ 待写 |
 | 5 | Trade engine（2% stop / next-open / 成本） | `0005-trade-engine.md` | ⬜ 待写 |
 | 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ 待写 |
