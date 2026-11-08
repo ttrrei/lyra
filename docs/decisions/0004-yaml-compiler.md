@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0004` |
 | 标题 | YAML Compiler（策略验证 + past-only SQL codegen） |
-| 状态 | **已实施（2026-11-08）**——用户裁决定稿后，本轮已落地：`lyra/strategy_schema.py`（YAML 安全加载 + schema 校验 + AST + StrategySpec）、`lyra/compiler.py`（确定性 past-only SQL codegen + CompiledPlan）、`lyra/cli.py` 的 `validate`/`compile` 命令、`tests/test_compiler.py`（28 测试全绿，含 live DuckDB 时序断言）。边界判定不变（确定性输入 / 廉价 validate / past-only SQL / per-instrument 归 runner）。**注意**：332 legacy 策略的 feature 缺口见 `open-questions.md` O16（阻塞 0008，不阻塞本编译器） |
+| 状态 | **已实施（2026-11-08）+ 批次 2 对抗性复核已处置（H1–H4/M1–M4 全接受，v0.4）**——用户裁决定稿后，本轮已落地：`lyra/strategy_schema.py`（YAML 安全加载 + schema 校验 + AST + StrategySpec + 未知键/类型/alias 严格化）、`lyra/compiler.py`（确定性 past-only SQL codegen + CompiledPlan + plan_hash 范围固化）、`lyra/cli.py` 的 `validate`/`compile` 命令、`tests/test_compiler.py`（50 测试全绿，含 live DuckDB 时序断言 + 批次 2 回归 22 项）。边界判定不变（确定性输入 / 廉价 validate / past-only SQL / per-instrument 归 runner）。**注意**：332 legacy 策略的 feature 缺口见 `open-questions.md` O16（阻塞 0008，不阻塞本编译器） |
 | Owner | `ttrrei` |
 | 创建日期 | `2026-11-08` |
 | 相关提案 | `docs/proposals/vectorbt-and-multi-ai-strategy-search.md` |
@@ -93,7 +93,7 @@ Lyra 需要把受限 YAML 规则安全、确定地转为 DuckDB 可执行的 pas
 | C2 | 只有 SQL TRUE 是候选信号；NULL 不会借 `not` 变成开仓条件 | past-only / warm-up contract |
 | C3 | 每个策略只读一个 timeframe；无跨 instrument 窗口或比较 | R2 / HLD §2.3 |
 
-## 5. 测试（**已实施** — `tests/test_compiler.py`，28 测试全绿，含 live DuckDB 时序断言）
+## 5. 测试（**已实施** — `tests/test_compiler.py`，50 测试全绿（含 live DuckDB 时序断言 + 批次 2 回归 22 项））
 
 下表是 0004 §5 计划矩阵；**已实现**的列在 `tests/test_compiler.py`（同名或等价断言），
 未单列的（`timeframe_and_instrument_partition`、`duckdb_fixture_truth_table`、`all_available_legacy_yaml`）
@@ -132,7 +132,7 @@ legacy 332 回归归 0008 — 见 O16）。
 
 - [ ] 用户 review（本稿提出的语法别名、`after_event` 精确语义、2% stop schema 行为）
 - [ ] AI review（另一模型）
-- [x] 实施测试全绿（`tests/test_compiler.py` 28 测试 + 全仓 135 测试通过；pyflakes 干净）
+- [x] 实施测试全绿（`tests/test_compiler.py` 50 测试 + 全仓 157 测试通过；pyflakes 干净）
 - [ ] 332 策略回归通过（0008）— **阻塞于 O16**（20 个缺失 feature 待用户裁决）
 - [ ] OCI 端到端（不适用于 compiler-only feature；OCI reader integration 若纳入另行列项）
 
@@ -159,10 +159,32 @@ legacy 332 回归归 0008 — 见 O16）。
 | README 与策略 YAML schema 不一致 | 随意只支持一个格式会破坏示例或旧策略；盲目接受所有别名又会掩盖含义差异 | 本稿显式列别名与语义；实施前确认 332 语料并对 aliases 做 fixture 测试 |
 | Compiler 把 `stop_loss_pct` 当作可放宽参数 | 会绕过 2% mandatory stop | 缺省由 trade engine强制 2%；显式值只允许 0.02，实际状态机归 0005 |
 
+### 批次 2 对抗性复核处置（2026-11-08）
+
+对 `docs/reviews/对抗性review-2026-11-08-批次2.md` 的 8 项（H1–H4 / M1–M4）逐条复核后
+处置完毕，全部**接受**（M1 收敛、M4 最小）：
+
+| 发现 | 判定 | 落点（代码 / 测试） |
+|---|---|---|
+| H1 STATE 布尔↔序数类型混淆 | 接受 | `strategy_schema._state_is_ordinal` + 比较叶门控；`test_h1_*` |
+| H2 exit.take_profit_pct 丢失 | 接受 | `_normalize_exit_and_execution`（统一 ExecutionMeta）；`test_h2_*` |
+| H3 exit 层成本/持仓绕过校验 | 接受 | `_check_opt_nonneg/_check_opt_positive_int`；`test_h3_*` |
+| H4 未知字段被忽略 | 接受 | `_reject_unknown_keys` + 各层白名单；`test_h4_*` |
+| M1 递归 alias→RecursionError | 接受（收敛） | `_materialize`（拒真·环、物化跨分支复用）；`test_m1_*` |
+| M2 结构错误裸异常/CLI 只拦 parse | 接受 | 结构检查 + `cli.py` 统一 INVALID；`test_m2_*` |
+| M3 元数据弱类型 | 接受 | `_validate_doc`（tfm 整数 / direction·parents·inherited 类型）；`test_m3_*` |
+| M4 plan_hash 范围 | 接受（最小） | `compiler._plan_hash`（纳入 catalog snapshot、排除 execution）；`test_m4_*` |
+
+**验证**：0004 专项 50/50、全仓 157/157 绿、pyflakes 干净；nova+lyra 169 个真实策略
+YAML 对新校验 **0 个**回归失败（165 仍失败于既有 O16 unknown-feature，4 失败于既有
+STATE op 门控，二者范围外）。M1 处置特别记录：**不拒绝所有 alias**——语料用 `&id001`
+把同一条件 factor 到多空两侧是合法写法（8 个文件），改为只拒真·环并物化复用。
+
 ## 修订记录
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
+| 2026-11-08 | 0.4 | **批次 2 对抗性复核处置（2026-11-08）**：对 `对抗性review-2026-11-08-批次2.md` 的 H1–H4 / M1–M4 逐条复核，**全部接受**（M1 收敛、M4 最小）。修复：H1 ordinal-vs-boolean 类型门控（`_state_is_ordinal`，`sma_alignment_6_24` 只接受 {−1,0,1}、布尔状态只接受 true/false）；H2/H3 exit 与 execution 元数据统一到同一 `ExecutionMeta` 校验器（`_normalize_exit_and_execution`，take_profit_pct 进入 CompiledPlan、负成本/零持仓被拒）；H4 各 mapping 层未知键白名单（`_reject_unknown_keys`）；M1 递归 alias 改为遍历栈检测真·环并 SchemaError、跨分支 alias 复用物化为独立副本（`_materialize`，保留语料 `&id001` 合法用法）；M2 entry/exit/after_event 非 mapping → SchemaError + CLI 统一 INVALID；M3 timeframe/direction/parents/inherited 严格类型；M4 plan_hash 纳入 feature_catalog_snapshot、明确排除 execution 元数据。新增 22 项回归（`test_h1_*`…`test_m4_*`），0004 专项 50/50、全仓 157/157 绿、pyflakes 干净；nova+lyra 169 个真实策略 YAML 对新校验 0 回归失败。 |
 | 2026-11-08 | 0.3 | **实施完成（2026-11-08）**：落地 `lyra/strategy_schema.py` + `lyra/compiler.py` + `lyra/cli.py`（`validate`/`compile`）+ `tests/test_compiler.py`（28 测试全绿，含 live DuckDB 时序断言 N−1/N/N+1、NULL gate、after_event exact-age、param/`?` 数不变式）。对抗自检修复 3 处：DuckDB 2.0 named-window-with-frame 不能被 >1 函数引用 → 改 inline window；temporal condition 内联到 2 个 SQL 位置导致参数错位 → 每处独立 emit；`exit.stop_loss_pct` 放宽未被拒绝 → 补 execution 与 exit 两条路径的 2% 强制。332 语料回归归 0008（O16 缺口阻塞）。 |
 | 2026-11-08 | 0.2 | **用户裁决定稿（2026-11-08）**：接受当前边界判定（含综合稿 §5 收口：确定性输入、廉价 validate、past-only SQL、per-instrument 归 runner；git commit 只作 provenance；track 不入 SQL AST）。状态改为"定稿，待排期开发"；对抗自检的 cap 行同步 2026-11-08 每 track 8 语义。本轮未实施代码。 |
 | 2026-11-08 | 0.1 | 初稿：确定 compiler 边界、建议 grammar/SQL 生成策略、测试矩阵与文档级对抗性自检；待用户审阅后才能实现。 |

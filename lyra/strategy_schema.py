@@ -245,7 +245,7 @@ def _collect_params(node: ExprNode, out: list[Any]) -> None:
 # ---------------------------------------------------------------------------
 
 class _SafeLoader(yaml.SafeLoader):
-    """A safe loader that additionally rejects duplicate mapping keys."""
+    """A safe loader that rejects duplicate keys and anchor aliases."""
 
 
 def _construct_mapping_no_dup(loader: _SafeLoader, node: yaml.MappingNode,
@@ -271,16 +271,57 @@ def _construct_mapping_no_dup(loader: _SafeLoader, node: yaml.MappingNode,
 _SafeLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping_no_dup)
 
+#: Hard depth cap for the NaN/Inf sweep.  A strategy YAML is flat by design;
+#: anything deeper is either malformed or an attack (batch-2 review M1: a
+#: recursive structure must fail closed with ``SchemaError`` instead of
+#: escaping as a raw ``RecursionError``).
+_MAX_NESTING_DEPTH = 64
 
-def _reject_nan_inf(node: Any, path: str) -> None:
-    if isinstance(node, float) and (math.isnan(node) or math.isinf(node)):
-        raise SchemaError(f"NaN/Infinity is not allowed at {path}")
+
+def _materialize(node: Any, path: str, file: str, depth: int = 0,
+                 stack: tuple[int, ...] = ()) -> Any:
+    """Return a clean, alias-free tree; reject NaN/Inf, depth, and cycles.
+
+    Batch-2 adversarial review M1, disposition refined against the real
+    corpus: the legacy strategies use YAML anchors to *factor out a shared
+    condition* (e.g. ``&id001`` reused on both the long and short sides) — a
+    legitimate idiom we must keep working.  What must fail is the *dangerous*
+    case: a **cyclic** alias (``a: *a``), which otherwise escapes as a raw
+    ``RecursionError`` deep in validation.
+
+    We therefore do not reject all aliases.  Instead each container is
+    rebuilt on every visit, so a shared node referenced on two branches is
+    materialized into two independent copies (this also resolves the
+    "edit one, both change" audit concern), while a node that is an *ancestor
+    of itself* — a true cycle — is detected via the current traversal stack
+    and rejected with a ``SchemaError``.
+    """
+    if depth > _MAX_NESTING_DEPTH:
+        raise SchemaError(
+            f"YAML nesting too deep at {path} (max {_MAX_NESTING_DEPTH}) — "
+            f"recursive or malformed structure", file=file, yaml_path=path)
     if isinstance(node, dict):
-        for k, v in node.items():
-            _reject_nan_inf(v, f"{path}.{k}")
-    elif isinstance(node, (list, tuple)):
-        for i, v in enumerate(node):
-            _reject_nan_inf(v, f"{path}[{i}]")
+        if id(node) in stack:
+            raise SchemaError(
+                f"cyclic alias at {path} (recursive YAML structure is not "
+                f"allowed)", file=file, yaml_path=path)
+        stack = stack + (id(node),)
+        return {k: _materialize(v, f"{path}.{k}", file, depth + 1, stack)
+                for k, v in node.items()}
+    if isinstance(node, (list, tuple)):
+        if id(node) in stack:
+            raise SchemaError(
+                f"cyclic alias at {path} (recursive YAML structure is not "
+                f"allowed)", file=file, yaml_path=path)
+        stack = stack + (id(node),)
+        out = [_materialize(v, f"{path}[{i}]", file, depth + 1, stack)
+               for i, v in enumerate(node)]
+        return type(node)(out)
+    if isinstance(node, float) and (math.isnan(node) or math.isinf(node)):
+        raise SchemaError(
+            f"NaN/Infinity is not allowed at {path}",
+            file=file, yaml_path=path)
+    return node
 
 
 # load_strategy_yaml / _load_yaml_text / parse_yaml / parse_strategy /
@@ -306,6 +347,19 @@ def _resolve_column(name: str, registry: Registry, *, file: str | None,
         f"unknown feature or column {name!r} (must be a registered feature "
         f"or one of open/high/low/close)",
         file=file, yaml_path=f"{yaml_path}.feature" if yaml_path else None)
+
+
+def _state_is_ordinal(name: str, registry: Registry) -> bool:
+    """True when a STATE feature emits an enumerated ordinal value.
+
+    ``sma_alignment_6_24`` is registered ``unit="state{-1,0,1}"`` — an
+    ordinal in {-1, 0, +1}, not a boolean.  Boolean states (psar/supertrend)
+    carry ``unit="state"``.  Batch-2 review H1: comparing an ordinal state
+    to ``false``/``true`` compiled and matched the *neutral* (0) row in
+    DuckDB because ``false == 0`` — a silent semantic bug.  We therefore
+    gate the constant type per feature instead of per kind.
+    """
+    return name in registry and "{" in (registry.get(name).unit or "")
 
 
 def _collect_features(node: ExprNode, acc: set[str]) -> None:
@@ -372,6 +426,38 @@ def _parse_expr(node: Any, registry: Registry, *, file: str | None,
                     file=file, yaml_path=f"{yaml_path}.op")
             is_const, const_value, right_col = _parse_value_rhs(
                 node["value"], registry, file=file, yaml_path=yaml_path)
+
+            # H1 (batch-2 adversarial review): gate the constant type against
+            # the feature's *value domain*, not just its kind.  A boolean
+            # state/event feature only accepts booleans; an ordinal state
+            # feature (unit "state{...}", e.g. sma_alignment_6_24 → {-1,0,1})
+            # only accepts an integer within its enumerated set.  Previously
+            # ``sma_alignment_6_24 == false`` compiled and, in DuckDB,
+            # ``false == 0`` silently matched the neutral-state rows.
+            if is_const and left_kind is FeatureKind.STATE:
+                if _state_is_ordinal(left_col, registry):
+                    if not isinstance(const_value, int) or isinstance(const_value, bool):
+                        raise SchemaError(
+                            f"ordinal state {left_col!r} compares only to an "
+                            f"integer in its domain {-1, 0, 1}; got "
+                            f"{const_value!r} (a boolean matches 0 — rejected)",
+                            file=file, yaml_path=f"{yaml_path}.value")
+                    if const_value not in (-1, 0, 1):
+                        raise SchemaError(
+                            f"ordinal state {left_col!r} domain is {{-1,0,1}}, "
+                            f"got {const_value}",
+                            file=file, yaml_path=f"{yaml_path}.value")
+                elif not isinstance(const_value, bool):
+                    raise SchemaError(
+                        f"boolean state {left_col!r} compares only to "
+                        f"true/false, got {const_value!r}",
+                        file=file, yaml_path=f"{yaml_path}.value")
+            elif is_const and left_kind is FeatureKind.EVENT:
+                if not isinstance(const_value, bool):
+                    raise SchemaError(
+                        f"event {left_col!r} compares only to true/false, "
+                        f"got {const_value!r}",
+                        file=file, yaml_path=f"{yaml_path}.value")
             return _LeafNode(cmp=ComparisonLeaf(
                 left_col=left_col, op=op, right_is_const=is_const,
                 right_const=const_value, right_col=right_col, left_kind=left_kind),
@@ -411,12 +497,20 @@ def _parse_expr(node: Any, registry: Registry, *, file: str | None,
         # after_event: {bars: N, event: expr, condition: expr}
         if keys == {"after_event"}:
             ae = node["after_event"]
+            if not isinstance(ae, Mapping):
+                raise SchemaError(
+                    "after_event must be a mapping, "
+                    f"got {type(ae).__name__}",
+                    file=file, yaml_path=f"{yaml_path}.after_event")
             need = {"bars", "event", "condition"}
             if not need.issubset(ae.keys()):
                 raise SchemaError(
                     f"after_event requires bars, event, condition "
                     f"(got {sorted(ae.keys())})",
                     file=file, yaml_path=f"{yaml_path}.after_event")
+            _reject_unknown_keys(
+                ae, frozenset(need),
+                file=file, yaml_path=f"{yaml_path}.after_event")
             bars = _check_bars(ae.get("bars"), file, f"{yaml_path}.after_event")
             event = _parse_expr(ae["event"], registry, file=file,
                                 yaml_path=f"{yaml_path}.after_event.event")
@@ -437,8 +531,13 @@ def _parse_expr(node: Any, registry: Registry, *, file: str | None,
 
 def _parse_temporal(kind: str, block: Any, cond_key: str, registry: Registry,
                     *, file: str | None, yaml_path: str) -> ExprNode:
-    if not isinstance(block, dict):
-        raise SchemaError(f"{kind} must be a mapping", file=file, yaml_path=yaml_path)
+    if not isinstance(block, Mapping):
+        raise SchemaError(
+            f"{kind} must be a mapping, got {type(block).__name__}",
+            file=file, yaml_path=yaml_path)
+    # H4 (batch-2 adversarial review): unknown keys rejected (not ignored).
+    _reject_unknown_keys(block, frozenset({"bars", cond_key}),
+                         file=file, yaml_path=yaml_path)
     if "bars" not in block or cond_key not in block:
         raise SchemaError(f"{kind} requires bars and {cond_key}",
                           file=file, yaml_path=yaml_path)
@@ -461,46 +560,77 @@ def _check_bars(bars: Any, file: str | None, yaml_path: str) -> int:
 # Top-level parse (strategy → StrategySpec)
 # ---------------------------------------------------------------------------
 
+def _reject_unknown_keys(raw: Mapping, allowed: frozenset[str], *,
+                         file: str | None, yaml_path: str) -> None:
+    """Reject any key outside ``allowed`` (strict schema; batch-2 review H4).
+
+    Silently ignoring a typo'd key (``stop_loss_pct`` → ``stop_los_pct``)
+    is worse than failing: the strategy runs with *default* semantics while
+    the author believes the field was honoured.  We fail closed and point
+    at the exact YAML field.
+    """
+    extra = sorted(set(raw.keys()) - set(allowed))
+    if extra:
+        raise SchemaError(
+            f"unknown key(s) {extra} at {yaml_path}; allowed: {sorted(allowed)} "
+            f"(strict schema: unknown keys are rejected, never ignored)",
+            file=file, yaml_path=f"{yaml_path}.{extra[0]}")
+
+
+#: Root-level keys a strategy YAML may carry (0004 §3.1 canonical + the
+#: README / tracked-example / audit aliases this loader documents).
+_ROOT_KEYS = frozenset({
+    "version", "id", "direction", "family", "hypothesis", "timeframe_minutes",
+    "entry", "exit", "execution", "parents", "parent", "inherited",
+    "driven_by_lesson",
+})
+#: exit-block keys (direction expressions + the exit-level metadata aliases).
+_EXIT_KEYS = frozenset({
+    "long", "short", "feature",
+    "stop_loss_pct", "take_profit_pct", "max_holding_bars", "time_bars",
+    "spread_bps", "slippage_bps_per_side", "commission_bps_round_trip",
+    "financing_bps_per_day",
+})
+#: execution-block keys (all optional cost / exit metadata).
+_EXECUTION_KEYS = frozenset({
+    "stop_loss_pct", "take_profit_pct", "max_holding_bars",
+    "spread_bps", "slippage_bps_per_side", "commission_bps_round_trip",
+    "financing_bps_per_day",
+})
+
+
 def _parse_execution(raw: Mapping | None, *, file: str | None,
                      yaml_path: str) -> ExecutionMeta:
-    """Normalize exit/execution metadata; enforce the mandatory 2% stop."""
-    raw = dict(raw or {})
+    """Normalize a single execution block; enforce the mandatory 2% stop.
 
-    # stop_loss_pct: optional; if present it MUST be exactly 0.02 (0004 rule).
-    stop = raw.get("stop_loss_pct", MANDATORY_STOP_PCT)
-    if isinstance(stop, bool) or not isinstance(stop, (int, float)):
-        raise SchemaError("stop_loss_pct must be a number", file=file,
-                          yaml_path=f"{yaml_path}.stop_loss_pct")
-    if abs(float(stop) - MANDATORY_STOP_PCT) > 1e-9:
+    Kept for direct / single-block callers; the full document path uses
+    :func:`_normalize_execution` (which also folds + strictly validates the
+    exit-level aliases).
+    """
+    if raw is not None and not isinstance(raw, Mapping):
         raise SchemaError(
-            f"stop_loss_pct is mandatory at {MANDATORY_STOP_PCT}; a strategy "
-            f"cannot widen or disable it (got {stop!r})",
-            file=file, yaml_path=f"{yaml_path}.stop_loss_pct")
+            "execution must be a mapping, "
+            f"got {type(raw).__name__}",
+            file=file, yaml_path="execution")
+    _reject_unknown_keys(raw or {}, _EXECUTION_KEYS,
+                         file=file, yaml_path="execution")
+    raw = dict(raw or {})
+    stop = raw.get("stop_loss_pct", MANDATORY_STOP_PCT)
+    _check_stop(stop, file, f"{yaml_path}.stop_loss_pct")
 
     tp = raw.get("take_profit_pct")
-    if tp is not None:
-        if isinstance(tp, bool) or not isinstance(tp, (int, float)) or float(tp) <= 0:
-            raise SchemaError("take_profit_pct must be a positive number",
-                              file=file, yaml_path=f"{yaml_path}.take_profit_pct")
+    take_profit = _check_opt_positive(tp, file, f"{yaml_path}.take_profit_pct")
 
     mhb = raw.get("max_holding_bars")
-    if mhb is not None and (isinstance(mhb, bool) or not isinstance(mhb, int) or mhb < 1):
-        raise SchemaError("max_holding_bars must be a positive integer",
-                          file=file, yaml_path=f"{yaml_path}.max_holding_bars")
+    max_holding = _check_opt_positive_int(mhb, file, f"{yaml_path}.max_holding_bars")
 
     def _opt_bps(name: str) -> float | None:
-        v = raw.get(name)
-        if v is None:
-            return None
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or float(v) < 0:
-            raise SchemaError(f"{name} must be a non-negative number", file=file,
-                              yaml_path=f"{yaml_path}.{name}")
-        return float(v)
+        return _check_opt_nonneg(raw.get(name), file, f"{yaml_path}.{name}")
 
     return ExecutionMeta(
         stop_loss_pct=MANDATORY_STOP_PCT,
-        take_profit_pct=float(tp) if tp is not None else None,
-        max_holding_bars=mhb,
+        take_profit_pct=take_profit,
+        max_holding_bars=max_holding,
         spread_bps=_opt_bps("spread_bps"),
         slippage_bps_per_side=_opt_bps("slippage_bps_per_side"),
         commission_bps_round_trip=_opt_bps("commission_bps_round_trip"),
@@ -508,42 +638,133 @@ def _parse_execution(raw: Mapping | None, *, file: str | None,
     )
 
 
-def _normalize_exit(exit_raw: Mapping | None, registry: Registry, *,
-                    file: str | None, yaml_path: str) -> tuple[ExprNode | None, ExprNode | None]:
-    """Return (exit_long, exit_short) from the ``exit`` block.
+def _check_stop(stop: Any, file: str | None, yaml_path: str) -> None:
+    """stop_loss_pct, if present, MUST be exactly the mandatory 2%."""
+    if isinstance(stop, bool) or not isinstance(stop, (int, float)):
+        raise SchemaError("stop_loss_pct must be a number", file=file,
+                          yaml_path=yaml_path)
+    if abs(float(stop) - MANDATORY_STOP_PCT) > 1e-9:
+        raise SchemaError(
+            f"stop_loss_pct is mandatory at {MANDATORY_STOP_PCT}; a strategy "
+            f"cannot widen or disable it (got {stop!r})",
+            file=file, yaml_path=yaml_path)
 
-    Normalizes the README legacy shape ``exit.feature.when`` into the same
-    exit expression for both directions (0004 §3.1).
+
+def _check_opt_positive(v: Any, file: str | None, yaml_path: str) -> float | None:
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or float(v) <= 0:
+        raise SchemaError(f"{yaml_path.split('.')[-1]} must be a positive number",
+                          file=file, yaml_path=yaml_path)
+    return float(v)
+
+
+def _check_opt_positive_int(v: Any, file: str | None, yaml_path: str) -> int | None:
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        raise SchemaError(f"{yaml_path.split('.')[-1]} must be a positive integer",
+                          file=file, yaml_path=yaml_path)
+    return v
+
+
+def _check_opt_nonneg(v: Any, file: str | None, yaml_path: str) -> float | None:
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or float(v) < 0:
+        raise SchemaError(
+            f"{yaml_path.split('.')[-1]} must be a non-negative number",
+            file=file, yaml_path=yaml_path)
+    return float(v)
+
+
+def _normalize_exit_and_execution(data: dict, registry: Registry, *,
+                                  file: str | None):
+    """Parse exit expressions + fold exit/execution metadata into one meta.
+
+    Batch-2 adversarial review H2/H3/H4: exit-level metadata
+    (``take_profit_pct``, cost fields, ``max_holding_bars``) is now validated
+    through the *same* strict validators as the ``execution`` block, unknown
+    keys in either block are rejected, and ``take_profit_pct`` is actually
+    folded into the resulting :class:`ExecutionMeta` (previously silently
+    dropped from the ``CompiledPlan``).  ``execution`` wins on conflict; a
+    conflicting ``stop_loss_pct`` is rejected (the mandatory 2% is invariant).
+    Returns ``(exit_long, exit_short, execution)``.
     """
-    if exit_raw is None:
-        return None, None
-    exit_raw = dict(exit_raw)
+    exit_raw = data.get("exit")
+    exit_long = exit_short = None
+    exit_meta: dict[str, Any] = {}
+    if exit_raw is not None:
+        if not isinstance(exit_raw, Mapping):
+            raise SchemaError(
+                "exit must be a mapping (long/short/feature blocks), "
+                f"got {type(exit_raw).__name__}", file=file, yaml_path="exit")
+        exit_raw = dict(exit_raw)
+        _reject_unknown_keys(exit_raw, _EXIT_KEYS,
+                             file=file, yaml_path="exit")
 
-    # Legacy README form: exit.feature.when → shared for both directions.
-    legacy_when = None
-    feature_block = exit_raw.get("feature")
-    if isinstance(feature_block, dict) and "when" in feature_block:
-        legacy_when = feature_block["when"]
-        exit_raw = {k: v for k, v in exit_raw.items() if k != "feature"}
+        # Legacy README form: exit.feature.when → shared for both directions.
+        legacy_when = None
+        feature_block = exit_raw.get("feature")
+        if isinstance(feature_block, dict) and "when" in feature_block:
+            legacy_when = feature_block["when"]
 
-    long_expr = exit_raw.get("long")
-    short_expr = exit_raw.get("short")
+        for side in ("long", "short"):
+            expr = exit_raw.get(side)
+            if expr is not None:
+                node = _parse_expr(expr, registry, file=file,
+                                   yaml_path=f"exit.{side}")
+                if side == "long":
+                    exit_long = node
+                else:
+                    exit_short = node
+        if legacy_when is not None:
+            shared = _parse_expr(legacy_when, registry, file=file,
+                                 yaml_path="exit.feature.when")
+            if exit_long is None:
+                exit_long = shared
+            if exit_short is None:
+                exit_short = shared
 
-    exit_long = _parse_expr(long_expr, registry, file=file,
-                            yaml_path=f"{yaml_path}.long") if long_expr else None
-    exit_short = _parse_expr(short_expr, registry, file=file,
-                             yaml_path=f"{yaml_path}.short") if short_expr else None
+        # Exit-level metadata aliases (strictly validated, same rules).
+        if "stop_loss_pct" in exit_raw:
+            _check_stop(exit_raw["stop_loss_pct"], file, "exit.stop_loss_pct")
+        if "take_profit_pct" in exit_raw:
+            exit_meta["take_profit_pct"] = _check_opt_positive(
+                exit_raw["take_profit_pct"], file, "exit.take_profit_pct")
+        if "max_holding_bars" in exit_raw:
+            exit_meta["max_holding_bars"] = _check_opt_positive_int(
+                exit_raw["max_holding_bars"], file, "exit.max_holding_bars")
+        if "time_bars" in exit_raw:  # legacy alias → max_holding_bars
+            exit_meta.setdefault("max_holding_bars", _check_opt_positive_int(
+                exit_raw["time_bars"], file, "exit.time_bars"))
+        for bps in ("spread_bps", "slippage_bps_per_side",
+                    "commission_bps_round_trip", "financing_bps_per_day"):
+            if bps in exit_raw:
+                exit_meta[bps] = _check_opt_nonneg(exit_raw[bps], file,
+                                                   f"exit.{bps}")
 
-    if legacy_when is not None:
-        shared = _parse_expr(legacy_when, registry, file=file,
-                             yaml_path=f"{yaml_path}.feature.when")
-        # Tracked-example canonical fields take priority over the legacy alias.
-        if exit_long is None:
-            exit_long = shared
-        if exit_short is None:
-            exit_short = shared
+    # --- execution block ---------------------------------------------------
+    execution = _parse_execution(data.get("execution"), file=file,
+                                 yaml_path="execution")
 
-    return exit_long, exit_short
+    # Fold exit-level metadata into execution (execution wins on conflict).
+    updates: dict[str, Any] = {}
+    for k, v in exit_meta.items():
+        if getattr(execution, k, "___sentinel___") is None:
+            updates[k] = v
+        elif k in exit_meta and exit_raw is not None \
+                and exit_raw.get(k) is not None:
+            # Both present with different values → fail closed.
+            if float(v) != float(getattr(execution, k)):
+                raise SchemaError(
+                    f"{k} differs between exit ({exit_raw.get(k)!r}) and "
+                    f"execution ({getattr(execution, k)!r}); drop one",
+                    file=file, yaml_path=f"exit.{k}")
+    if updates:
+        execution = _replace(execution, updates)
+
+    return exit_long, exit_short, execution
 
 
 def load_strategy_yaml(path: str | Path) -> Any:
@@ -564,8 +785,11 @@ def _load_yaml_text(raw: str, file: str) -> Any:
         raise SchemaError(f"YAML parse error: {msg}", file=file) from exc
     if not isinstance(data, dict):
         raise SchemaError("top-level YAML must be a mapping", file=file)
-    _reject_nan_inf(data, "$")
-    return data
+    # M1 (batch-2 adversarial review): materialize aliases into independent
+    # copies, reject NaN/Inf + cycles + depth.  Legitimate cross-branch
+    # anchor reuse keeps working; a recursive alias (a: *a) is rejected
+    # instead of escaping as a raw RecursionError.
+    return _materialize(data, "$", file)
 
 
 def parse_yaml(text: str, registry: Registry) -> StrategySpec:
@@ -591,6 +815,10 @@ def parse_strategy(path: str | Path, registry: Registry) -> StrategySpec:
 
 def _validate_doc(data: dict, registry: Registry, file: str) -> StrategySpec:
     """Validate an already-loaded strategy mapping into a :class:`StrategySpec`."""
+    # H4 (batch-2 adversarial review): unknown root keys are rejected, never
+    # silently ignored — a typo'd field would otherwise run with defaults.
+    _reject_unknown_keys(data, _ROOT_KEYS, file=file, yaml_path="$")
+
     if "version" not in data:
         raise SchemaError("missing required field: version", file=file, yaml_path="version")
     version = data["version"]
@@ -604,6 +832,13 @@ def _validate_doc(data: dict, registry: Registry, file: str) -> StrategySpec:
                           file=file, yaml_path="id")
 
     tfm = data.get("timeframe_minutes")
+    # M3 (batch-2 adversarial review): strict integer — 60.0 previously passed
+    # via float==int equality; the contract is a discrete minute count.
+    if isinstance(tfm, bool) or not isinstance(tfm, int):
+        raise SchemaError(
+            "timeframe_minutes must be an integer number of minutes, "
+            f"got {tfm!r}",
+            file=file, yaml_path="timeframe_minutes")
     if tfm not in ALLOWED_TIMEFRAMES:
         raise SchemaError(
             f"timeframe_minutes must be one of {sorted(ALLOWED_TIMEFRAMES)} "
@@ -614,6 +849,15 @@ def _validate_doc(data: dict, registry: Registry, file: str) -> StrategySpec:
     # direction (canonical) with `family` as a compatibility alias (0004 §3.1).
     direction = data.get("direction")
     family = data.get("family")
+    if direction is not None and not isinstance(direction, str):
+        raise SchemaError(
+            "direction must be a string (a direction slug), "
+            f"got {type(direction).__name__}",
+            file=file, yaml_path="direction")
+    if family is not None and not isinstance(family, str):
+        raise SchemaError(
+            "family must be a string (legacy alias of direction)",
+            file=file, yaml_path="family")
     if direction is not None and family is not None and direction != family:
         raise SchemaError(
             f"direction={direction!r} and family={family!r} both present and "
@@ -628,13 +872,21 @@ def _validate_doc(data: dict, registry: Registry, file: str) -> StrategySpec:
     # --- entry / exit expression trees ------------------------------------
     entry_raw = data.get("entry")
     entry_long = entry_short = None
-    if isinstance(entry_raw, dict):
-        for side, key in (("long", "long"), ("short", "short")):
-            expr = entry_raw.get(key)
+    if entry_raw is not None:
+        if not isinstance(entry_raw, Mapping):
+            raise SchemaError(
+                "entry must be a mapping of long/short expressions, "
+                f"got {type(entry_raw).__name__}",
+                file=file, yaml_path="entry")
+        # H4: unknown keys in the entry block are rejected (not ignored).
+        _reject_unknown_keys(entry_raw, frozenset({"long", "short"}),
+                             file=file, yaml_path="entry")
+        for side in ("long", "short"):
+            expr = entry_raw.get(side)
             if expr is None:
                 continue
             node = _parse_expr(expr, registry, file=file,
-                               yaml_path=f"entry.{key}")
+                               yaml_path=f"entry.{side}")
             if side == "long":
                 entry_long = node
             else:
@@ -643,49 +895,37 @@ def _validate_doc(data: dict, registry: Registry, file: str) -> StrategySpec:
         raise SchemaError("entry must define at least one of long/short",
                           file=file, yaml_path="entry")
 
-    exit_long, exit_short = _normalize_exit(data.get("exit"), registry,
-                                            file=file, yaml_path="exit")
-
-    # exit-level stop_loss_pct (README / tracked-example shape): if explicitly
-    # written it MUST be exactly the mandatory 2% — a strategy may not widen or
-    # disable the stop (0004 §3.1 / I3).  Reject any other value (fail closed).
-    if isinstance(data.get("exit"), dict):
-        e_stop = data["exit"].get("stop_loss_pct")
-        if e_stop is not None:
-            if isinstance(e_stop, bool) or not isinstance(e_stop, (int, float)):
-                raise SchemaError("exit.stop_loss_pct must be a number",
-                                  file=file, yaml_path="exit.stop_loss_pct")
-            if abs(float(e_stop) - MANDATORY_STOP_PCT) > 1e-9:
-                raise SchemaError(
-                    f"exit.stop_loss_pct is mandatory at {MANDATORY_STOP_PCT}; a "
-                    f"strategy may not widen/disable it, got {e_stop!r}",
-                    file=file, yaml_path="exit.stop_loss_pct")
-
-    # --- execution metadata ----------------------------------------------
-    execution = _parse_execution(data.get("execution"), file=file, yaml_path="execution")
-    # exit-level cost fields (README legacy top-of-exit) fold into execution.
-    if isinstance(data.get("exit"), dict):
-        for bps_key in ("spread_bps", "slippage_bps_per_side",
-                        "commission_bps_round_trip", "financing_bps_per_day"):
-            v = data["exit"].get(bps_key)
-            if v is not None and getattr(execution, bps_key, None) is None:
-                execution = _replace(execution, {bps_key: v})
-        mhb = data["exit"].get("max_holding_bars")
-        if mhb is not None and execution.max_holding_bars is None:
-            execution = _replace(execution, {"max_holding_bars": mhb})
-        # legacy alias time_bars → max_holding_bars (0004 §3.1)
-        tb = data["exit"].get("time_bars")
-        if tb is not None and execution.max_holding_bars is None:
-            if isinstance(tb, bool) or not isinstance(tb, int) or tb < 1:
-                raise SchemaError("time_bars must be a positive integer",
-                                  file=file, yaml_path="exit.time_bars")
-            execution = _replace(execution, {"max_holding_bars": tb})
+    # --- exit expressions + unified exit/execution metadata ---------------
+    # H2/H3/H4 (batch-2 adversarial review): exit-level metadata is validated
+    # through the same strict rules as ``execution`` and folded into a single
+    # ExecutionMeta (take_profit_pct previously dropped; negative cost /
+    # zero max_holding_bars previously bypassed range checks).
+    exit_long, exit_short, execution = _normalize_exit_and_execution(
+        data, registry, file=file)
 
     # --- audit metadata (retained, never enters SQL) -----------------------
-    parents = tuple(data.get("parents") or ([data["parent"]] if data.get("parent") else []))
-    if data.get("parent") and not isinstance(data["parent"], str):
+    # M3 (batch-2 adversarial review): parents is a list of slugs, never a
+    # single string — ``parents: "v01"`` previously became ("v","0","1").
+    parents_raw = data.get("parents")
+    if parents_raw is not None:
+        if isinstance(parents_raw, str) or not isinstance(parents_raw, (list, tuple)) \
+                or not all(isinstance(p, str) for p in parents_raw):
+            raise SchemaError(
+                "parents must be a list of direction slugs, "
+                f"got {parents_raw!r}",
+                file=file, yaml_path="parents")
+    parent = data.get("parent")
+    if parent is not None and not isinstance(parent, str):
         raise SchemaError("parent must be a string", file=file, yaml_path="parent")
-    inherited = tuple(data.get("inherited") or ())
+    parents = tuple(parents_raw or ([parent] if parent else ()))
+    inherited = data.get("inherited")
+    if inherited is not None and (not isinstance(inherited, (list, tuple))
+                                  or not all(isinstance(x, str) for x in inherited)):
+        raise SchemaError(
+            "inherited must be a list of slugs, "
+            f"got {inherited!r}",
+            file=file, yaml_path="inherited")
+    inherited = tuple(inherited or ())
 
     # --- collect referenced features --------------------------------------
     acc: set[str] = set()

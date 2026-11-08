@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0004` |
 | Title | YAML compiler (strategy validation + past-only SQL codegen) |
-| Status | **Implemented (2026-11-08)** — after the user's finalizing ruling, this round landed: `lyra/strategy_schema.py` (YAML safe-load + schema validation + AST + StrategySpec), `lyra/compiler.py` (deterministic past-only SQL codegen + CompiledPlan), the `validate`/`compile` commands in `lyra/cli.py`, and `tests/test_compiler.py` (28 tests green, incl. live DuckDB temporal assertions). Boundary decisions unchanged (deterministic inputs / cheap validate / past-only SQL / per-instrument in the runner). **Note**: the 332 legacy strategies' feature gap is `open-questions.md` O16 (blocks 0008, does not block this compiler) |
+| Status | **Implemented (2026-11-08) + batch-2 adversarial re-review disposed (H1–H4/M1–M4 all accepted, v0.4)** — after the user's finalizing ruling, this round landed: `lyra/strategy_schema.py` (YAML safe-load + schema validation + AST + StrategySpec + unknown-key/type/alias strictness), `lyra/compiler.py` (deterministic past-only SQL codegen + CompiledPlan + plan_hash scope pinned), the `validate`/`compile` commands in `lyra/cli.py`, and `tests/test_compiler.py` (50 tests green, incl. live DuckDB temporal assertions + 22 batch-2 regressions). Boundary decisions unchanged (deterministic inputs / cheap validate / past-only SQL / per-instrument in the runner). **Note**: the 332 legacy strategies' feature gap is `open-questions.md` O16 (blocks 0008, does not block this compiler) |
 | Owner | `ttrrei` |
 | Created | `2026-11-08` |
 | Related proposal | `docs/proposals/vectorbt-and-multi-ai-strategy-search.en.md` |
@@ -93,7 +93,7 @@ Lyra needs to translate constrained YAML rules into safe, deterministic, past-on
 | C2 | Only SQL TRUE is a candidate signal; NULL cannot become an entry through `not` | Past-only / warm-up contract |
 | C3 | A strategy reads one timeframe only; no cross-instrument windows/comparisons | R2 / HLD §2.3 |
 
-## 5. Tests (**Implemented** — `tests/test_compiler.py`, 28 tests green, incl. live DuckDB temporal assertions)
+## 5. Tests (**Implemented** — `tests/test_compiler.py`, 50 tests green (live DuckDB temporal assertions + 22 batch-2 regressions))
 
 The table below is the 0004 §5 plan; the **implemented** ones are in `tests/test_compiler.py`
 (same name or equivalent assertions). The ones not listed separately (`timeframe_and_instrument_partition`,
@@ -133,7 +133,7 @@ regression is in 0008 — see O16).
 
 - [ ] User review (proposed grammar aliases, exact `after_event` semantics, 2% stop schema behavior)
 - [ ] AI review (second model)
-- [x] Implementation tests all pass (`tests/test_compiler.py` 28 tests + 135 repo-wide; pyflakes clean)
+- [x] Implementation tests all pass (`tests/test_compiler.py` 50 tests + 157 repo-wide; pyflakes clean)
 - [ ] 332-strategy regression passes (0008) — **blocked by O16** (20 missing features await user decision)
 - [ ] OCI end-to-end (not applicable to compiler-only feature; list separately if OCI reader integration is included)
 
@@ -160,10 +160,34 @@ regression is in 0008 — see O16).
 | README and strategy YAML schemas differ | Supporting only one may break examples/legacy files; accepting every alias may hide semantic differences | List aliases and semantics explicitly; confirm 332 corpus and test accepted aliases before implementation |
 | Treat `stop_loss_pct` as user-relaxable | Could bypass the mandatory 2% stop | Omission defaults to engine-mandated 2%; explicit value must be 0.02; state machine is 0005 |
 
+### Batch-2 adversarial re-review disposition (2026-11-08)
+
+All 8 findings from `docs/reviews/对抗性review-2026-11-08-批次2.md` (H1–H4 / M1–M4)
+were re-reviewed and disposed — **all accepted** (M1 scoped, M4 minimal):
+
+| Finding | Verdict | Landing spot (code / tests) |
+|---|---|---|
+| H1 STATE boolean↔ordinal type conflation | accept | `strategy_schema._state_is_ordinal` + comparison-leaf gate; `test_h1_*` |
+| H2 exit.take_profit_pct dropped | accept | `_normalize_exit_and_execution` (unified ExecutionMeta); `test_h2_*` |
+| H3 exit-level cost/holding bypass checks | accept | `_check_opt_nonneg/_check_opt_positive_int`; `test_h3_*` |
+| H4 unknown fields ignored | accept | `_reject_unknown_keys` + per-mapping allow-lists; `test_h4_*` |
+| M1 recursive alias→RecursionError | accept (scoped) | `_materialize` (reject true cycles; materialize cross-branch reuse); `test_m1_*` |
+| M2 structural errors bare / CLI only catches parse | accept | structural checks + `cli.py` unified INVALID; `test_m2_*` |
+| M3 weak metadata typing | accept | `_validate_doc` (tfm int / direction·parents·inherited types); `test_m3_*` |
+| M4 plan_hash scope | accept (minimal) | `compiler._plan_hash` (catalog snapshot in, execution out); `test_m4_*` |
+
+**Verification**: 0004 suite 50/50, full suite 157/157 green, pyflakes clean; 169 real
+strategy YAMLs across nova+lyra show **0** regressions from the new validation (165 still
+fail on the pre-existing O16 unknown-feature gap; 4 on the pre-existing STATE op gate —
+both out of scope). M1 disposition is recorded explicitly: **do not reject all aliases** —
+the corpus uses `&id001` to factor one condition into both sides (8 files), a legitimate
+idiom; only true cycles are rejected, and reuse is materialized.
+
 ## Revision history
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-11-08 | 0.4 | **Batch-2 adversarial re-review disposed (2026-11-08)**: re-reviewed H1–H4/M1–M4 of `对抗性review-2026-11-08-批次2.md`, all **accepted** (M1 scoped, M4 minimal). Fixes: H1 ordinal-vs-boolean type gate (`_state_is_ordinal`; `sma_alignment_6_24` accepts only {−1,0,1}, boolean states only true/false); H2/H3 exit+execution metadata unified through one `ExecutionMeta` validator (`_normalize_exit_and_execution`; take_profit_pct reaches CompiledPlan; negative cost / zero holding rejected); H4 per-mapping unknown-key allow-lists (`_reject_unknown_keys`); M1 recursive alias → traversal-stack cycle detection + SchemaError, cross-branch alias reuse materialized into independent copies (`_materialize`; keeps the corpus `&id001` idiom); M2 non-mapping entry/exit/after_event → SchemaError + CLI unified INVALID; M3 strict types for timeframe/direction/parents/inherited; M4 plan_hash includes feature_catalog_snapshot, excludes execution metadata. Added 22 regressions (`test_h1_*`…`test_m4_*`); 0004 suite 50/50, full 157/157 green, pyflakes clean; 169 real strategy YAMLs show 0 regressions from the new validation. |
 | 2026-11-08 | 0.3 | **Implemented (2026-11-08)**: landed `lyra/strategy_schema.py` + `lyra/compiler.py` + `lyra/cli.py` (`validate`/`compile`) + `tests/test_compiler.py` (28 tests green, incl. live DuckDB temporal assertions N−1/N/N+1, NULL gate, after_event exact-age, param/`?`-count invariant). Adversarial self-check fixed 3 issues: DuckDB 2.0 named-window-with-frame can't be referenced by >1 function → inlined the window spec; a temporal condition inlined into two SQL positions desynced params → emit per occurrence; `exit.stop_loss_pct` widen was not rejected → added the 2% enforcement on both the execution and exit paths. Legacy-332 regression is in 0008 (O16 gap blocks). |
 | 2026-11-08 | 0.2 | **Finalized by user ruling (2026-11-08)**: current boundary decisions accepted (including consolidated §5: deterministic inputs, cheap validate, past-only SQL, per-instrument in the runner; git commit = provenance only; track does not enter the SQL AST). Status changed to "finalized, pending scheduling for implementation"; the cap row in the adversarial self-check synced to the 2026-11-08 per-track-8 semantics. No code implemented this round. |
 | 2026-11-08 | 0.1 | Initial draft: compiler boundary, proposed grammar/SQL generation, test matrix, and document-level adversarial self-check; implementation awaits user review. |

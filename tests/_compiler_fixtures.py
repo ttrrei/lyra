@@ -120,7 +120,11 @@ VALID_NESTED = {
                 {"feature": "rsi_6", "op": "lt", "value": 35},
                 {"any": [
                     {"feature": "roc_6", "op": "gt", "value": 0},
-                    {"feature": "sma_alignment_6_24", "op": "eq", "value": True},
+                    # H1 (batch-2 adversarial review): sma_alignment_6_24 is
+                    # ordinal {-1,0,+1}; the fixture's old `eq true` compiled
+                    # and, in DuckDB, `true == 1` matched the bullish row —
+                    # semantically plausible but type-wrong.  Use the domain.
+                    {"feature": "sma_alignment_6_24", "op": "eq", "value": 1},
                 ]},
                 {"not": {"feature": "psar_bearish", "op": "eq", "value": True}},
             ]
@@ -130,7 +134,9 @@ VALID_NESTED = {
                 {"feature": "rsi_6", "op": "gt", "value": 65},
                 {"any": [
                     {"feature": "roc_6", "op": "lt", "value": 0},
-                    {"feature": "sma_alignment_6_24", "op": "eq", "value": False},
+                    # H1: ordinal domain {-1,0,+1} (old `eq false` matched the
+                    # neutral 0-state in DuckDB — rejected by the type gate).
+                    {"feature": "sma_alignment_6_24", "op": "eq", "value": -1},
                 ]},
             ]
         },

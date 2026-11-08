@@ -9,6 +9,8 @@ timeframe rejection, and a live DuckDB execution of the temporal plans.
 """
 from __future__ import annotations
 
+import yaml
+
 import pytest
 
 from lyra import compiler as cc
@@ -466,3 +468,222 @@ def test_compiler_param_count_matches_question_marks_all_fixtures():
         assert plan.sql.count("?") == len(plan.params), (
             f"{spec.id}: {plan.sql.count('?')} placeholders vs "
             f"{len(plan.params)} params")
+
+
+# ===========================================================================
+# Batch-2 adversarial review (docs/reviews/对抗性review-2026-11-08-批次2.md)
+# H1–H4 + M1–M4 regression tests.  Each asserts the *new* fail-closed /
+# domain-correct behaviour, plus that the legitimate case still works.
+# ===========================================================================
+
+def _base(**over):
+    d = {
+        "version": 1, "id": "t", "direction": "x", "timeframe_minutes": 60,
+        "entry": {"long": {"feature": "rsi_6", "op": "lt", "value": 30}},
+        "exit": {"long": {"feature": "rsi_6", "op": "gt", "value": 50}},
+        "execution": {"spread_bps": 5, "slippage_bps_per_side": 2,
+                      "commission_bps_round_trip": 0.5},
+    }
+    d.update(over)
+    return d
+
+
+# --- H1: ordinal state (sma_alignment_6_24, unit "state{-1,0,1}") type gate -
+
+def test_h1_ordinal_state_rejects_boolean_constant():
+    # sma_alignment_6_24 == false previously compiled and, in DuckDB,
+    # `false == 0` matched the *neutral* state row — a silent semantic bug.
+    d = _base(entry={"long": {"feature": "sma_alignment_6_24", "op": "eq",
+                              "value": False}})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_h1_ordinal_state_rejects_out_of_domain():
+    d = _base(entry={"long": {"feature": "sma_alignment_6_24", "op": "eq",
+                              "value": 5}})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_h1_boolean_state_rejects_integer_constant():
+    # psar_bullish is a real boolean state; comparing it to 1 (vs true) is a
+    # type error even though DuckDB would coerce it.
+    d = _base(entry={"long": {"feature": "psar_bullish", "op": "eq",
+                              "value": 1}})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_h1_ordinal_state_accepts_in_domain_integers():
+    for v in (-1, 0, 1):
+        d = _base(entry={"long": {"feature": "sma_alignment_6_24",
+                                  "op": "eq", "value": v}})
+        spec = _parse(d)
+        plan = cc.compile_strategy(spec, REGISTRY)
+        assert plan.sql
+
+
+# --- H2: exit.take_profit_pct must reach the CompiledPlan -------------------
+
+def test_h2_exit_take_profit_pct_folded_into_plan():
+    d = _base(exit={"long": {"feature": "rsi_6", "op": "gt", "value": 50},
+                    "take_profit_pct": 0.06})
+    plan = cc.compile_strategy(_parse(d), REGISTRY)
+    assert plan.take_profit_pct == 0.06
+
+
+# --- H3: exit-level cost/holding validated with the same rules -------------
+
+def test_h3_exit_negative_cost_rejected():
+    d = _base(exit={"long": {"feature": "rsi_6", "op": "gt", "value": 50},
+                    "spread_bps": -50})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_h3_exit_zero_max_holding_rejected():
+    d = _base(exit={"long": {"feature": "rsi_6", "op": "gt", "value": 50},
+                    "max_holding_bars": 0})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_h3_exit_stop_widen_rejected():
+    d = _base(exit={"long": {"feature": "rsi_6", "op": "gt", "value": 50},
+                    "stop_loss_pct": 0.05})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_h3_exit_cost_fold_into_execution():
+    # execution lacks spread_bps; exit provides it → folded into the plan.
+    d = _base(exit={"long": {"feature": "rsi_6", "op": "gt", "value": 50},
+                    "spread_bps": 7},
+              execution={"slippage_bps_per_side": 2,
+                         "commission_bps_round_trip": 0.5})
+    plan = cc.compile_strategy(_parse(d), REGISTRY)
+    assert plan.spread_bps == 7.0
+    assert plan.slippage_bps_per_side == 2.0
+
+
+# --- H4: unknown keys rejected at every level -------------------------------
+
+def test_h4_root_unknown_key_rejected():
+    d = _base(); d["stratagy_id_typo"] = "z"
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_h4_execution_unknown_key_rejected():
+    d = _base(execution={"spread_bps": 5, "commission_bps_typo": 1})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_h4_exit_unknown_key_rejected():
+    d = _base(exit={"long": {"feature": "rsi_6", "op": "gt", "value": 50},
+                    "take_prof_typo": 0.06})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_h4_entry_unknown_key_rejected():
+    d = _base(entry={"long": {"feature": "rsi_6", "op": "lt", "value": 30},
+                     "entry_typo": 1})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+# --- M1: cyclic alias rejected; legitimate cross-branch alias reuse works ---
+
+def test_m1_legitimate_cross_branch_alias_reuse_works():
+    # The legacy corpus factors a shared condition (&id001) into both sides.
+    # It must keep working (materialized into independent copies).
+    yml = (
+        "version: 1\nid: t\ndirection: x\ntimeframe_minutes: 60\n"
+        "entry:\n"
+        "  long:\n    all:\n"
+        "    - {feature: rsi_6, op: lt, value: 30}\n"
+        "    - &cond\n      {feature: roc_6, op: gt, value: 0}\n"
+        "  short:\n    all:\n"
+        "    - {feature: rsi_6, op: gt, value: 70}\n"
+        "    - *cond\n"
+        "exit:\n  long: {feature: rsi_6, op: gt, value: 50}\n"
+        "execution: {spread_bps: 5}\n"
+    )
+    spec = ss.parse_yaml(yml, REGISTRY)
+    assert spec.entry_long is not None
+
+
+def test_m1_cyclic_alias_rejected_not_recursionerror():
+    yml = (
+        "version: 1\nid: t\ndirection: x\ntimeframe_minutes: 60\n"
+        "loop: &x\n  a: *x\n"
+        "entry: {long: {feature: rsi_6, op: lt, value: 30}}\n"
+        "exit: {long: {feature: rsi_6, op: gt, value: 50}}\n"
+        "execution: {spread_bps: 5}\n"
+    )
+    # Must fail with a SchemaError (or YAML parse error → SchemaError),
+    # never escape as a raw RecursionError.
+    with pytest.raises((ss.SchemaError, yaml.YAMLError)):
+        ss.parse_yaml(yml, REGISTRY)
+
+
+# --- M2: structural (non-mapping) errors surface as SchemaError ------------
+
+def test_m2_exit_non_mapping_rejected():
+    d = _base(exit="oops")
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_m2_entry_non_mapping_rejected():
+    d = _base(entry=42)
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+# --- M3: strict scalar types ------------------------------------------------
+
+def test_m3_timeframe_float_rejected():
+    d = _base(timeframe_minutes=60.0)
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_m3_direction_list_rejected():
+    d = _base(direction=["x"])
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_m3_parents_string_rejected():
+    d = _base(parents="v01")  # must not split into ('v','0','1')
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_m3_parents_list_of_slugs_accepted():
+    d = _base(parents=["v01", "v02"])
+    spec = _parse(d)
+    assert spec.parents == ("v01", "v02")
+
+
+# --- M4: plan_hash scope (catalog snapshot IN, execution metadata OUT) -----
+
+def test_m4_plan_hash_includes_catalog_snapshot_not_execution():
+    d1 = _base(execution={"spread_bps": 5})
+    d2 = _base(execution={"spread_bps": 50})  # different cost, same signal
+    p1 = cc.compile_strategy(_parse(d1), REGISTRY)
+    p2 = cc.compile_strategy(_parse(d2), REGISTRY)
+    assert p1.plan_hash == p2.plan_hash, \
+        "execution metadata is OUT of plan_hash (documented contract)"
+
+    p3 = cc.compile_strategy(_parse(d1), REGISTRY,
+                             feature_catalog_snapshot="snap-A")
+    p4 = cc.compile_strategy(_parse(d1), REGISTRY,
+                             feature_catalog_snapshot="snap-B")
+    assert p3.plan_hash != p4.plan_hash, \
+        "catalog snapshot is IN of plan_hash (working contract)"
+    assert p3.plan_hash != p1.plan_hash

@@ -311,9 +311,26 @@ _OHLC_COLS = frozenset({"mid_o", "mid_h", "mid_l", "mid_c"})
 
 
 def _plan_hash(sql: str, params: tuple[Any, ...], features: tuple[str, ...],
-               schema_version: int, compiler_version: str) -> str:
+               schema_version: int, compiler_version: str,
+               feature_catalog_snapshot: str | None = None) -> str:
+    """Deterministic identity of the *signal* a plan selects.
+
+    M4 (batch-2 adversarial review) — hash scope is documented, not implicit:
+    * IN  : sql, params, features, schema_version, compiler_version, and the
+      feature_catalog_snapshot (the working contract requires snapshot
+      identity to cover inputs / timeframe / feature settings & versions —
+      the same signal over a different feature build must have a
+      different hash).
+    * OUT : execution metadata (stop/take-profit/costs/max_holding_bars)
+      and audit metadata (direction/parents).  These are *report-layer*
+      fields: they never change which bars are selected (the SQL) — the
+      stop is mandatory 2% by contract, costs are trade-level inputs — so
+      including them would conflate "same signal, different costing" with
+      "different signal".  They travel as explicit CompiledPlan fields.
+    """
     canonical = "|".join(
-        [sql, str(schema_version), compiler_version, ",".join(features)]
+        [sql, str(schema_version), compiler_version, ",".join(features),
+         feature_catalog_snapshot or ""]
         + [str(p) for p in params]
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -361,7 +378,7 @@ def compile_strategy(
         direction=spec.direction,
         parents=spec.parents,
         plan_hash=_plan_hash(sql, tuple(params), features, spec.version,
-                             compiler_version),
+                             compiler_version, feature_catalog_snapshot),
         schema_version=spec.version,
         feature_catalog_snapshot=feature_catalog_snapshot,
         compiler_version=compiler_version,

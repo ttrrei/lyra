@@ -251,10 +251,16 @@ def validate(
     reg = _registry_for(alpha_dir, config)
     try:
         spec = schema_mod.parse_strategy(strategy, reg)
+        # M2 (batch-2 adversarial review): compile-stage errors
+        # (e.g. an unregistered feature) surface as a clean INVALID line,
+        # not a raw traceback.
+        plan = compiler_mod.compile_strategy(spec, reg)
     except schema_mod.SchemaError as exc:
         typer.secho(f"INVALID: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
-    plan = compiler_mod.compile_strategy(spec, reg)
+    except Exception as exc:  # defensive: no raw tracebacks from malformed YAML
+        typer.secho(f"INVALID: {type(exc).__name__}: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
     typer.secho(f"VALID: {spec.id} → view={spec.view} timeframe={spec.timeframe_minutes}m",
                 fg=typer.colors.GREEN)
     typer.echo(f"features   : {', '.join(plan.features_used) or '(none)'}")
@@ -280,10 +286,14 @@ def compile(
     reg = _registry_for(alpha_dir, config)
     try:
         spec = schema_mod.parse_strategy(strategy, reg)
+        # M2 (batch-2 adversarial review): compile-stage errors are clean.
+        plan = compiler_mod.compile_strategy(spec, reg)
     except schema_mod.SchemaError as exc:
         typer.secho(f"INVALID: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
-    plan = compiler_mod.compile_strategy(spec, reg)
+    except Exception as exc:  # defensive: no raw tracebacks from malformed YAML
+        typer.secho(f"INVALID: {type(exc).__name__}: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
     typer.echo(f"-- strategy : {plan.strategy_id}")
     typer.echo(f"-- view     : {plan.view} ({plan.timeframe_minutes}m)")
     typer.echo(f"-- params   : {list(plan.params)}")
