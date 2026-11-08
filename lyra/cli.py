@@ -236,6 +236,80 @@ def features(
 
 
 @app.command()
+def validate(
+    strategy: str = typer.Argument(..., help="Path to a strategy YAML"),
+    alpha_dir: str | None = typer.Option(None, "--alpha-dir", help="Alpha feature directory (R3.2); default = config local.alpha (may be empty)"),
+    config: str = typer.Option("config/config.yml", "--config"),
+) -> None:
+    """Validate a strategy YAML (0004): schema + registry + timeframe + SQL codegen.
+
+    Cheap pre-run check (0004 §3.1).  Does NOT execute the generated SQL.
+    """
+    from . import compiler as compiler_mod
+    from . import strategy_schema as schema_mod
+
+    reg = _registry_for(alpha_dir, config)
+    try:
+        spec = schema_mod.parse_strategy(strategy, reg)
+    except schema_mod.SchemaError as exc:
+        typer.secho(f"INVALID: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    plan = compiler_mod.compile_strategy(spec, reg)
+    typer.secho(f"VALID: {spec.id} → view={spec.view} timeframe={spec.timeframe_minutes}m",
+                fg=typer.colors.GREEN)
+    typer.echo(f"features   : {', '.join(plan.features_used) or '(none)'}")
+    typer.echo(f"stop_loss  : {plan.stop_loss_pct}  take_profit: {plan.take_profit_pct}")
+    typer.echo(f"max_holding: {plan.max_holding_bars}  params: {list(plan.params)}")
+    typer.echo(f"plan_hash  : {plan.plan_hash}")
+
+
+@app.command()
+def compile(
+    strategy: str = typer.Argument(..., help="Path to a strategy YAML"),
+    alpha_dir: str | None = typer.Option(None, "--alpha-dir", help="Alpha feature directory (R3.2)"),
+    config: str = typer.Option("config/config.yml", "--config"),
+) -> None:
+    """Compile a strategy YAML to past-only DuckDB signal SQL (0004 §3.1).
+
+    Prints the SQL + bound parameters + summary for human inspection.  Does NOT
+    execute the SQL or run the trade engine (0005).
+    """
+    from . import compiler as compiler_mod
+    from . import strategy_schema as schema_mod
+
+    reg = _registry_for(alpha_dir, config)
+    try:
+        spec = schema_mod.parse_strategy(strategy, reg)
+    except schema_mod.SchemaError as exc:
+        typer.secho(f"INVALID: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    plan = compiler_mod.compile_strategy(spec, reg)
+    typer.echo(f"-- strategy : {plan.strategy_id}")
+    typer.echo(f"-- view     : {plan.view} ({plan.timeframe_minutes}m)")
+    typer.echo(f"-- params   : {list(plan.params)}")
+    typer.echo(f"-- stop     : {plan.stop_loss_pct}  tp: {plan.take_profit_pct}  mhb: {plan.max_holding_bars}")
+    typer.echo(f"-- plan_hash: {plan.plan_hash}")
+    typer.echo("")
+    typer.echo(plan.sql)
+
+
+def _registry_for(alpha_dir: str | None, config: str):
+    """Build the feature registry (core + optional alpha extension point, R3.2/I16)."""
+    from . import features as feat
+    from .config import ConfigError, load_config, local_from_dict
+
+    if alpha_dir is None:
+        try:
+            data = load_config(config or "config/config.yml")
+            local = local_from_dict(data)
+            alpha_dir = getattr(local, "alpha", None) or ""
+        except ConfigError:
+            alpha_dir = ""
+    alpha = Path(alpha_dir) if alpha_dir else Path("_no_alpha_dir_")
+    return feat.load_from(alpha)
+
+
+@app.command()
 def version() -> None:
     """Print the installed Lyra version."""
     typer.echo(__version__)

@@ -267,7 +267,7 @@ lyra/
 │   │   ├── 0001-repo-and-oci-split.md
 │   │   ├── 0002-ohlcv-data-sync.md       (已完成)
 │   │   ├── 0003-feature-builder.md       (v1.4 已实现)
-│   │   ├── 0004-yaml-compiler.md         (已定稿 2026-11-08，待排期开发)
+│   │   ├── 0004-yaml-compiler.md         (已实施 2026-11-08：validate/compile + 28 测试)
 │   │   ├── 0005-trade-engine.md          (待写)
 │   │   ├── 0006-metrics-and-runner.md    (待写)
 │   │   ├── 0007-oci-push-and-backup.md   (待写)
@@ -331,7 +331,7 @@ lyra/
 | 1 | repo + OCI split | `0001-repo-and-oci-split.md` | ✅ 已写 |
 | 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ 已完成（2026-11-07，真实数据端到端 + 批次1(2026-11-07) 对抗性审查 D1–D6 全修复，v1.1） |
 | 3 | Feature builder（标准 + alpha 扩展点） | `0003-feature-builder.md` | ✅ 核心已实现（v1.4：134 特征/6 指标族 + pandas-ta-classic 对照组 + 107 测试；alpha 扩展点 `load_from` 已实现） |
-| 4 | YAML compiler（含 feature-vs-feature） | `0004-yaml-compiler.md` | 🟡 **已定稿（用户 2026-11-08 裁决，含综合稿 §5 收口）**；待排期开发 |
+| 4 | YAML compiler（含 feature-vs-feature） | `0004-yaml-compiler.md` | ✅ **已实施（2026-11-08）**：`validate`/`compile` 命令 + 28 测试全绿（含 live DuckDB 时序断言）。332 语料回归归 0008（O16 缺口待用户裁决） |
 | 5 | Trade engine（2% stop / next-open / 成本） | `0005-trade-engine.md` | ⬜ 待写 |
 | 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ 待写 |
 | 7 | OCI push + backup | `0007-oci-push-and-backup.md` | ⬜ 待写 |
@@ -347,6 +347,7 @@ lyra/
 | 2026-11-05 | 0.3 | §2.3 移除"不生成新策略（future campaign）"冲突行，补"策略演进"块（context / new-version / compare / merge / push-direction）对齐 R12 + 版本树 + AI 自由交叉；§7 目录树补 0008/0009（ZH 缺 0008、EN 缺 0009，0007 误用 └──）；**§4 不变量表补齐 I15-I17**（原只列到 I14，但 AGENTS/0001 都引用 I15-I17，hld 作骨架应自洽）。 |
 | 2026-11-06 | 0.4 | 批次2 对抗性 review 修复：I17 改**两级**（Immutable/Append-only，L1）；I11 补 `alpha/`（L5）。 |
 | 2026-11-07 | 0.5 | **0003 v0.7 对齐**（批次2 红队 D1/D5/D6/D3 接受后的 hld 同步）：① §2.1 市场层缓存路径由历史草稿 `data/market/<m>/<snapshot_id>/` 改为 0002 实际产出的单文件外部表 `ohlcv_5m/ohlcv_5m.parquet` / `ohlcv_1h/ohlcv_1h.parquet`（0002 D4 已废弃目录级 snapshot，hld 早期措辞为草稿，标注以 0002 为准）；② §2.2 features 组件：发布路径改 `data/features/<m>/<instrument>.parquet` 单文件、版本入 Parquet 元数据、关键不变量"snapshot id 单调整数"改"派生字符串入元数据"、Warm-up NULL 收紧对齐 0003 F2；③ §3 数据流图同步（bronze→ohlcv_5m/1h 单文件→features 单文件）。注：§4 L148/155/179 的 **OCI push（0007）snapshot id** 属 0007 未定语义，本轮**不**改（0007 未写，避免越权改 0007 范围），留待 0007 决策时对齐 |
+| 2026-11-08 | 0.8 | **0004 已实施（2026-11-08）**：`lyra/strategy_schema.py` + `lyra/compiler.py` + `lyra/cli.py`（`validate`/`compile`）+ `tests/test_compiler.py`（28 测试全绿，含 live DuckDB 时序断言 N−1/N/N+1 / NULL gate / after_event exact-age / param 不变式）。对抗自检修复 DuckDB 2.0 inline-window、temporal 参数错位、exit.stop_loss_pct 放宽 3 处。§8 0004 状态改"已实施"；332 语料回归归 0008（见 open-questions O16，20 个缺失 feature 待用户裁决）。 |
 | 2026-11-08 | 0.7 | **用户裁决同步（#73）**：0004 状态改"已定稿（2026-11-08 裁决），待排期开发"；R12 AI tracks + 每 track 8 cap + VectorBT 抛弃见 requirements v0.16 / oci-alpha-layout §2.3 / 综合稿 §9（本文件不展开）。 |
 | 2026-11-08 | 0.6 | 同步 **0003 v1.4 / 107 tests** 当前状态；0004 状态改为"提案已写、待用户审阅、未实现"；§7 proposals 目录列出 VectorBT / 多 AI 策略搜索评估（中英成对）。 |
 | 2026-11-08 | 0.7 | §7 proposals 目录登记 v2 来源稿与本轮综合稿（中英成对）；来源提案保留，综合稿待用户裁决。 |

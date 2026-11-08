@@ -24,6 +24,71 @@
 | O13 | 并发活跃分支数上限（Active Branch Cap）？ | **2026-11-06 定案（用户）：每方向全局 8**（防 AI 靠无限 fork 规避 kill criteria；超额必须显式 prune）。**2026-11-08 用户裁决修订：cap 按 track 计，每 track 8 个 active branches，tracks 之间互不挤占**（"互不影响"优先；取代 11-06 的方向级全局语义）。落点：requirements R12（v0.16）、oci-alpha-layout §2.3、综合稿 §9 | **已关闭（2026-11-06 定案；2026-11-08 修订语义，终态）** |
 | O14 | 标的代码清单与标识规范？ | **已定（用户）**：代码格式**继承 moneta** 的 `BASE_QUOTE` 约定（`XAU_USD`/`XAG_USD`/`EUR_USD`/`BTC_USD` 等，非 `GOLD`/`WTI`）；moneta 无单一 21 标的清单文件，**权威完整清单在 0002 数据同步时从 moneta 实际数据文件枚举确认** | **已关闭**（用户 2026-11-06；清单枚举归 0002） |
 | O15 | `financing_per_day` 的 "elapsed day" 如何定义？ | **已定（用户）**：严格按**交易日**计，**周末不计**，**新年/圣诞等市场节假日也不计**（即 elapsed = 持仓区间内的交易日数，非物理日历天） | **已关闭**（用户 2026-11-06） |
+| O16 | 332 legacy 策略引用的 feature 中，**20 个不在 lyra 0003 registry**（326/332 至少引用 1 个缺失项）。是否扩展 0003？ | **0004 实施时核实（2026-11-08）**：lyra registry 仅 134 feature；332 策略引用 24 个 feature，**4 个命中**（`sma_alignment_6_24`/`sma_cross_up_6_24`/`sma_cross_down_6_24`/`utc_hour`），**20 个缺失**（见下）。缺失项分三类：(A) **参数 gap** 1 个 — `rsi_14`（lyra 有 `rsi_{6,12,24,60,120}` 但无 14）；(B) **命名漂移** 8 个 — nova 的 `psar_direction/psar_flip_{up,down}`↔lyra `psar_bullish/bearish`、`supertrend_direction/supertrend_flip_{up,down}`↔lyra `supertrend_bullish/bearish`、`breakout_{up,down}_24`↔lyra `breakout_{up,down}`、`failed_breakout_{up,down}_24`↔lyra `failed_breakout_{up,down}`；(C) **真缺失** 11 个 — `range_position_24`(888)、`close_sma24_distance_atr`(316)、`efficiency_24`(300)、`ema_alignment_6_24`(194)、`close_ema60_distance_atr`(182)、`range_atr`(146, lyra 有 `bar_range_atr`)、`relative_volume_24`(106)、`return_6_atr`(60)、`range_width_atr_24`(28) 等 | **待用户决策**（P0 阻塞 0008 的 332 回归门禁；见下） |
+
+## O16 详情：332 策略的 feature 缺口（2026-11-08 核实）
+
+**背景**：`requirements.md` R10/R11 的验收标准是"332 legacy 策略全部 `lyra validate` 通过"。
+0004 编译器实现 + 自检时（2026-11-08）逐一对照 lyra registry 发现：
+**332 策略里有 326 个至少引用 1 个不在 lyra 0003 registry 的 feature**。
+这不是 0004 编译器的 bug —— 编译器按 registry 正确 fail-closed（未知 feature 即报错）；
+缺口在 0003 的 feature 覆盖。
+
+**核实方式**：对 nova 只读目录（`runs/research_campaign` 293、`strategies/directions` 12、
+`runs/directions` 12、`strategies` 7）grep 全部 `feature:` 引用，与 `build_registry()`（134 feature）交叉比对。
+24 个去重 feature：4 个命中，20 个缺失。缺失项按参考次数排序（次数=nova 中引用该 feature 的表达式数）：
+
+| # | 缺失 feature | 引用次数 | 分类 | lyra 候选 |
+|---|---|---|---|---|
+| 1 | `range_position_24` | 888 | C 真缺失 | — |
+| 2 | `close_sma24_distance_atr` | 316 | C 真缺失 | — |
+| 3 | `efficiency_24` | 300 | C 真缺失 | — |
+| 4 | `rsi_14` | 210 | **A 参数 gap** | `rsi_{6,12,24,60,120}` 无 14 |
+| 5 | `ema_alignment_6_24` | 194 | C 真缺失 | （lyra 有 `sma_alignment_6_24`） |
+| 6 | `close_ema60_distance_atr` | 182 | C 真缺失 | — |
+| 7 | `range_atr` | 146 | C 真缺失 | `bar_range_atr`（口径需核对） |
+| 8 | `supertrend_direction` | 112 | **B 命名漂移** | `supertrend_bullish/bearish` |
+| 9 | `relative_volume_24` | 106 | C 真缺失 | — |
+| 10 | `breakout_up_24` | 91 | **B 命名漂移** | `breakout_up` |
+| 11 | `breakout_down_24` | 91 | **B 命名漂移** | `breakout_down` |
+| 12 | `psar_direction` | 86 | **B 命名漂移** | `psar_bullish/bearish` |
+| 13 | `psar_flip_up` | 78 | **B 命名漂移** | —（lyra 无 flip 事件） |
+| 14 | `psar_flip_down` | 78 | **B 命名漂移** | —（lyra 无 flip 事件） |
+| 15 | `return_6_atr` | 60 | C 真缺失 | — |
+| 16 | `failed_breakout_up_24` | 39 | **B 命名漂移** | `failed_breakout_up` |
+| 17 | `failed_breakout_down_24` | 39 | **B 命名漂移** | `failed_breakout_down` |
+| 18 | `utc_hour` | 36 | 已命中 | `utc_hour` |
+| 19 | `range_width_atr_24` | 28 | C 真缺失 | — |
+| 20 | `supertrend_flip_up` | 2 | **B 命名漂移** | —（lyra 无 flip 事件） |
+| — | `supertrend_flip_down` | 2 | **B 命名漂移** | —（lyra 无 flip 事件） |
+
+**三类处置选项**（待用户裁决）：
+
+- **B 命名漂移（8 个）**：语义基本对应，但 `psar_flip_*` / `supertrend_flip_*`（"翻转当根"事件）
+  lyra 无对应 EVENT feature —— 需要 0003 新增 flip 事件 feature，或把 nova 的 flip 用法改写
+  为"当根 state 翻转"的等价的 within/after_event 组合（可能改变语义，需逐条核对）。
+- **A 参数 gap（1 个：`rsi_14`）**：0003 增加 `rsi_14`（参数网格加 14）即解决。
+- **C 真缺失（11 个）**：需在 0003 新增 feature（`range_position_24`、`efficiency_24`、
+  `ema_alignment_6_24`、`*_distance_atr`、`relative_volume_24`、`return_6_atr`、`range_width_atr_24` 等），
+  每个都要 contract card + golden test（0003 约定）。
+
+**影响面**：
+- **阻塞 0008 的 332 回归门禁**（R10/R11 要求 332 全部 validate 通过）。
+- **不阻塞 0004 编译器本身**：编译器对"用已注册 feature 写出的策略"已完整可用
+  （`lyra validate` / `lyra compile` 已落地，26+ 测试通过，含 live DuckDB 时序断言）。
+- lyra tracked example `momentum_breakout/v01.yaml` 也引用 3 个缺失 feature
+  （`range_high_12`/`range_low_12`/`range_position_24`），当前 `lyra validate` 会 fail-closed。
+  已新增 `strategies/examples/rsi_pullback/v01.yaml`（只用已注册 feature）作为可 validate 的示例。
+
+**建议路径（待用户确认，尚未执行）**：
+1. 先收口 0003 v1.5：处置 B（命名映射 / 新增 flip 事件）→ A（`rsi_14`）→ C（11 个新 feature）。
+2. 每加一个 feature 走 0003 既有流程（contract card + golden test + `FEATURE_VERSION` bump）。
+3. 完成后 0008 的 332 回归门禁才有意义。
+
+**用户待决策**：
+- [ ] B 类：flip 事件新增 feature vs 改写为 within/after_event（可能改语义）？
+- [ ] C 类：11 个真缺失 feature 是否全部纳入 0003 v1.5？优先级？
+- [ ] `range_atr` 与 lyra `bar_range_atr` 口径是否等价（需核对 nova 定义）？
 
 ## O10 候选清单（lyra-doctor 检查项）
 
@@ -60,3 +125,4 @@
 | 2026-11-06 | 0.4 | **O5 关闭**（`0002` §2 定案：PAR 用户侧管理 + `lyra pull` 过期诊断 + 0009 doctor 体检）。**至此 O1–O5、O11–O15 全部关闭，无未决问题。** |
 | 2026-11-08 | 0.6 | **O13 语义修订（用户 2026-11-08 裁决）**：Active Branch Cap 从"每方向全局 8"改为"**每 track 8 个 active branches，tracks 互不挤占**"（多 AI 互不影响；单 track 防无限 fork 原意仍满足）。O13 终态关闭；11-06 定案保留为历史。落点：requirements R12 v0.16、oci-alpha-layout §2.3、综合稿 §9。 |
 | 2026-11-06 | 0.5 | **O1 正式补关闭**（批次7 D4）：0002 v0.5 已实际废弃目录级 snapshot_id（单文件外部表 + raw md5 溯源），但本文档此前仍写"待 0002 决策"，与 ACTION_LOG"O1 已关闭"矛盾——本轮把裁决落进本文档，消除断层。O2/O3 仍分别待 0007 / 0003。 |
+| 2026-11-08 | 0.7 | 0004 编译器实施 + 自检时核实 **O16**：332 legacy 策略有 326 个引用至少 1 个不在 lyra 0003 registry 的 feature（24 去重 feature 中 4 命中 / 20 缺失，分 A 参数 gap / B 命名漂移 / C 真缺失三类）。O16 待用户决策，阻塞 0008 的 332 回归门禁；不阻塞 0004 编译器本身（已落地可 validate/compile 已注册 feature 的策略）。 |

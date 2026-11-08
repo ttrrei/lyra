@@ -2,6 +2,8 @@
 
 > **中文**: [2026-11-08-vectorbt-eval-and-multi-ai-v2.md](./2026-11-08-vectorbt-eval-and-multi-ai-v2.md)
 >
+> **[Audit note 2026-11-08]** This source draft has been **superseded** by the user's rulings in [2026-11-08-vectorbt-multi-ai-consolidated.en.md](./2026-11-08-vectorbt-multi-ai-consolidated.en.md) **v0.3 §9** (including the final cap semantics = **8 per track**, the removal of the file-lock backstop, and git commit = provenance). The body is preserved for audit; **do not rely on this draft's wording**.
+>
 > This file answers the two independent questions the user raised before starting 0004:
 > ① should we adopt vectorbt ("no need to reinvent the wheel"); ② how to support **multiple AIs
 > (of different capability)** iterating on the **same direction**, each at its own pace, without

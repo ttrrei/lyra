@@ -4,6 +4,8 @@
 >
 > Status: independent evaluation / proposal; no code change is approved. This document does not read or rely on evaluation documents written by another AI for this topic.
 >
+> **[Audit note 2026-11-08]** This source draft has been **superseded** by the user's rulings in [2026-11-08-vectorbt-multi-ai-consolidated.en.md](./2026-11-08-vectorbt-multi-ai-consolidated.en.md) **v0.3 §9** (including §4.4's "global 8" recommendation — the user ultimately ruled **8 per track**). The body is preserved for audit; **do not rely on this draft's wording**.
+>
 > Scope: assess VectorBT as a Lyra dependency/backtest engine; propose practical boundaries for different AI models to search strategies independently within the same direction and at their own pace; explain the implications for 0004 compiler.
 
 ## 1. Summary

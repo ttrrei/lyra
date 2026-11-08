@@ -289,7 +289,7 @@ lyra/
 │   │   ├── 0001-repo-and-oci-split.md (+ .en.md)
 │   │   ├── 0002-ohlcv-data-sync.md    (+ .en.md)  (complete)
 │   │   ├── 0003-feature-builder.md    (+ .en.md)  (v1.4 implemented)
-│   │   ├── 0004-yaml-compiler.md      (+ .en.md)  (finalized 2026-11-08; pending scheduling)
+│   │   ├── 0004-yaml-compiler.md      (+ .en.md)  (implemented 2026-11-08: validate/compile + 28 tests)
 │   │   ├── 0005-trade-engine.md       (+ .en.md)  (pending)
 │   │   ├── 0006-metrics-and-runner.md (+ .en.md)  (pending)
 │   │   ├── 0007-oci-push-and-backup.md(+ .en.md)  (pending)
@@ -356,7 +356,7 @@ blocked by this ordering.
 | 1 | repo + OCI split | `0001-repo-and-oci-split.md` | ✅ written |
 | 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ complete (2026-11-07, real data end-to-end + Batch-01 (2026-11-07) adversarial review D1–D6 all fixed, v1.1) |
 | 3 | Feature builder (standard + alpha extension point) | `0003-feature-builder.md` | ✅ core implemented (v1.4: 134 features/6 indicator families + pandas-ta-classic control + 107 tests; alpha extension point `load_from` implemented) |
-| 4 | YAML compiler (incl. feature-vs-feature) | `0004-yaml-compiler.md` | 🟡 **Finalized (user ruling 2026-11-08, incl. consolidated §5 scope)**; pending scheduling |
+| 4 | YAML compiler (incl. feature-vs-feature) | `0004-yaml-compiler.md` | ✅ **Implemented (2026-11-08)**: `validate`/`compile` + 28 tests green (incl. live DuckDB temporal assertions). 332-corpus regression is in 0008 (O16 gap awaits user decision) |
 | 5 | Trade engine (2% stop / next-open / costs) | `0005-trade-engine.md` | ⬜ pending |
 | 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ pending |
 | 7 | OCI push + backup | `0007-oci-push-and-backup.md` | ⬜ pending |
@@ -375,3 +375,4 @@ blocked by this ordering.
 | 2026-11-08 | 0.7 | **User rulings synced (#73)**: 0004 status changed to "finalized (2026-11-08 ruling), pending scheduling"; R12 AI tracks + 8-per-track cap + VectorBT dropped — see requirements v0.16 / oci-alpha-layout §2.3 / consolidated §9 (not expanded here). |
 | 2026-11-08 | 0.6 | Synced current **0003 v1.4 / 107 tests**; changed 0004 status to "proposal drafted, awaiting user review, not implemented"; listed the VectorBT / multi-AI strategy-search evaluation in the §7 proposal tree (bilingual pair). |
 | 2026-11-08 | 0.7 | Added the v2 source draft and this synthesis to the §7 proposal tree as bilingual pairs; source proposals are preserved and the synthesis awaits the user's ruling. |
+| 2026-11-08 | 0.8 | **0004 implemented (2026-11-08)**: `lyra/strategy_schema.py` + `lyra/compiler.py` + `lyra/cli.py` (`validate`/`compile`) + `tests/test_compiler.py` (28 tests green, incl. live DuckDB temporal assertions N−1/N/N+1 / NULL gate / after_event exact-age / param invariant). Adversarial self-check fixed DuckDB 2.0 inline-window, temporal param-desync, and exit.stop_loss_pct widen (3 spots). §8 0004 status → "implemented"; the 332 corpus regression is in 0008 (see open-questions O16 — 20 missing features await user decision). |

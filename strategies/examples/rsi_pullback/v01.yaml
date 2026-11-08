@@ -1,0 +1,32 @@
+# 示例策略（valid example）——使用已注册 feature，`lyra validate` 应通过。
+# 与 `momentum_breakout/v01.yaml`（legacy shape，含 0003 v1.5 前缺失的 feature）
+# 并置，用于演示 0004 schema 的可用子集。
+# 真实策略按 R12 创建；元数据约定见 docs/proposals/oci-alpha-layout.md §2.3。
+version: 1
+id: rsi_pullback_1h
+direction: mean_reversion
+hypothesis: >-
+  RSI(6) mean reversion on 1h: long when RSI(6) < 30 while SMA(6) > SMA(24)
+  (uptrend context), short when RSI(6) > 70 while SMA(6) < SMA(24).
+  2% hard stop caps gap risk.
+timeframe_minutes: 60
+
+# entry / exit 使用 0003 已注册 feature（rsi_6, sma_6, sma_24）。
+entry:
+  long:
+    all:
+      - {feature: rsi_6, op: lt, value: 30}
+      - {feature: sma_6, op: gt, value: sma_24}
+  short:
+    all:
+      - {feature: rsi_6, op: gt, value: 70}
+      - {feature: sma_6, op: lt, value: sma_24}
+exit:
+  long: {feature: rsi_6, op: gt, value: 55}
+  short: {feature: rsi_6, op: lt, value: 45}
+  stop_loss_pct: 0.02          # 2% 硬止损（I3，mandatory）
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

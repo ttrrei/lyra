@@ -9,6 +9,8 @@
 >
 > **本文独立、自足**：不依赖、不引用其他 AI 在别处写下的同类评估（用户明确指示忽略那一份）。
 >
+> **【审计注 2026-11-08】**本稿为来源稿，已被 [2026-11-08-vectorbt-multi-ai-consolidated.md](./2026-11-08-vectorbt-multi-ai-consolidated.md) **v0.3 §9 用户裁决**取代（含 cap 语义最终定为**每 track 8**、文件锁兜底删除、git commit = provenance）。正文保留原样供审计，**勿以本稿措辞为准**。
+>
 > **命名说明（v2）**：本主题在同 repo 内已有另一份独立评估
 > `vectorbt-and-multi-ai-strategy-search.md`（另一 AI 所作，用户指示忽略其内容）。
 > 为**避免同名覆盖**，本文件以 **`-v2`** 后缀命名并存；两者内容**未做合并**，

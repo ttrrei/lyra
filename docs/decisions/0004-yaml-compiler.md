@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0004` |
 | 标题 | YAML Compiler（策略验证 + past-only SQL codegen） |
-| 状态 | **定稿（用户裁决 2026-11-08），待排期开发**——用户接受当前边界判定（含综合稿 §5：确定性输入 / 廉价 validate / past-only SQL / per-instrument 归 runner），本轮只定稿文档、未实施代码 |
+| 状态 | **已实施（2026-11-08）**——用户裁决定稿后，本轮已落地：`lyra/strategy_schema.py`（YAML 安全加载 + schema 校验 + AST + StrategySpec）、`lyra/compiler.py`（确定性 past-only SQL codegen + CompiledPlan）、`lyra/cli.py` 的 `validate`/`compile` 命令、`tests/test_compiler.py`（28 测试全绿，含 live DuckDB 时序断言）。边界判定不变（确定性输入 / 廉价 validate / past-only SQL / per-instrument 归 runner）。**注意**：332 legacy 策略的 feature 缺口见 `open-questions.md` O16（阻塞 0008，不阻塞本编译器） |
 | Owner | `ttrrei` |
 | 创建日期 | `2026-11-08` |
 | 相关提案 | `docs/proposals/vectorbt-and-multi-ai-strategy-search.md` |
@@ -93,21 +93,34 @@ Lyra 需要把受限 YAML 规则安全、确定地转为 DuckDB 可执行的 pas
 | C2 | 只有 SQL TRUE 是候选信号；NULL 不会借 `not` 变成开仓条件 | past-only / warm-up contract |
 | C3 | 每个策略只读一个 timeframe；无跨 instrument 窗口或比较 | R2 / HLD §2.3 |
 
-## 5. 测试（实施计划；本轮未运行 Lyra 测试）
+## 5. 测试（**已实施** — `tests/test_compiler.py`，28 测试全绿，含 live DuckDB 时序断言）
 
-| 测试 | 场景 |
-|---|---|
-| `test_compiler_compiles_registered_feature_vs_constant` | 标量和各比较符映射正确，参数绑定与 SQL token 安全 |
-| `test_compiler_compiles_feature_vs_feature` | RHS 注册列解析；未知列和类型错拒绝 |
-| `test_compiler_rejects_sql_injection_and_duplicate_yaml_keys` | SQL-like value、未知 key、重复 key 不可绕过 AST |
-| `test_compiler_nested_boolean_operators` | nested all/any/not 和 SQL NULL 三值逻辑 |
-| `test_compiler_held_for_full_window_and_null` | N 行边界、warm-up、NULL、N−1/N/N+1 断言 |
-| `test_compiler_within_requires_full_non_null_window` | 有一次 TRUE、全 FALSE、不完整/含 NULL 三种路径 |
-| `test_compiler_after_event_exact_age_and_past_only` | event 恰 N 行前、N 个后续条件、 off-by-one、NULL 与未来扰动 |
-| `test_compiler_timeframe_and_instrument_partition` | 5m/1h view 选择、跨标的不泄漏窗口 |
-| `test_compiler_yaml_alias_normalization` | direction/family、close/mid_c、README exit aliases 规范化；冲突拒绝 |
-| `test_compiler_duckdb_fixture_truth_table` | 执行生成 SQL 与独立参考期望逐行一致，信号只在 close 确认 |
-| `test_compiler_all_available_legacy_yaml` | 可用迁移语料 compile 全过；正式 332 语料在 0008 全回归 |
+下表是 0004 §5 计划矩阵；**已实现**的列在 `tests/test_compiler.py`（同名或等价断言），
+未单列的（`timeframe_and_instrument_partition`、`duckdb_fixture_truth_table`、`all_available_legacy_yaml`）
+已合并进现有测试（partition 由 DuckDB 断言覆盖、truth table 即三个 `*_executed_against_duckdb`、
+legacy 332 回归归 0008 — 见 O16）。
+
+| 测试 | 场景 | 状态 |
+|---|---|---|
+| `test_compiler_compiles_registered_feature_vs_constant` | 标量和各比较符映射正确，参数绑定与 SQL token 安全 | ✅（all_six_ops + constant_binds_parameter） |
+| `test_compiler_compiles_feature_vs_feature` | RHS 注册列解析；未知列和类型错拒绝 | ✅ |
+| `test_compiler_rejects_sql_injection_and_duplicate_yaml_keys` | SQL-like value、未知 key、重复 key 不可绕过 AST | ✅ |
+| `test_compiler_nested_boolean_operators` | nested all/any/not 和 SQL NULL 三值逻辑 | ✅ |
+| `test_compiler_held_for_full_window_and_null` | N 行边界、warm-up、NULL、N−1/N/N+1 断言 | ✅（+ `held_for_executed_against_duckdb`） |
+| `test_compiler_within_requires_full_non_null_window` | 有一次 TRUE、全 FALSE、不完整/含 NULL 三种路径 | ✅（+ `within_executed_against_duckdb`） |
+| `test_compiler_after_event_exact_age_and_past_only` | event 恰 N 行前、N 个后续条件、 off-by-one、NULL 与未来扰动 | ✅（+ `after_event_executed_against_duckdb`） |
+| `test_compiler_timeframe_and_instrument_partition` | 5m/1h view 选择、跨标的不泄漏窗口 | ✅（合并：view 断言 + DuckDB `PARTITION BY instrument`） |
+| `test_compiler_yaml_alias_normalization` | direction/family、close/mid_c、README exit aliases 规范化；冲突拒绝 | ✅（3 个 alias 测试 + direction_family_conflict） |
+| `test_compiler_duckdb_fixture_truth_table` | 执行生成 SQL 与独立参考期望逐行一致，信号只在 close 确认 | ✅（三个 `*_executed_against_duckdb`） |
+| `test_compiler_all_available_legacy_yaml` | 可用迁移语料 compile 全过；正式 332 语料在 0008 全回归 | ⏳（332 归 0008 — O16 缺口阻塞） |
+
+**附加安全测试**（对抗自检发现）：
+- `test_compiler_state_event_only_eq_ne` — STATE/EVENT 只允许 eq/ne。
+- `test_compiler_rejects_mandatory_stop_widen` + `test_compiler_rejects_exit_level_stop_widen` — 2% stop 不可放宽（execution 与 exit 两条路径）。
+- `test_compiler_rejects_nested_temporal` — 时间算子不可嵌套。
+- `test_compiler_rejects_unknown_feature` / `test_compiler_rejects_bad_timeframe`。
+- `test_compiler_deterministic_*` — 同输入同输出（SQL + params + plan_hash）。
+- `test_compiler_param_count_matches_question_marks_all_fixtures` — SQL `?` 数 == 绑定参数数（防参数错位回归）。
 
 ## 6. 回滚
 
@@ -119,8 +132,8 @@ Lyra 需要把受限 YAML 规则安全、确定地转为 DuckDB 可执行的 pas
 
 - [ ] 用户 review（本稿提出的语法别名、`after_event` 精确语义、2% stop schema 行为）
 - [ ] AI review（另一模型）
-- [ ] 实施测试全绿
-- [ ] 332 策略回归通过（0008）
+- [x] 实施测试全绿（`tests/test_compiler.py` 28 测试 + 全仓 135 测试通过；pyflakes 干净）
+- [ ] 332 策略回归通过（0008）— **阻塞于 O16**（20 个缺失 feature 待用户裁决）
 - [ ] OCI 端到端（不适用于 compiler-only feature；OCI reader integration 若纳入另行列项）
 
 ## 8. 自检与对抗性自检
@@ -150,5 +163,6 @@ Lyra 需要把受限 YAML 规则安全、确定地转为 DuckDB 可执行的 pas
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
+| 2026-11-08 | 0.3 | **实施完成（2026-11-08）**：落地 `lyra/strategy_schema.py` + `lyra/compiler.py` + `lyra/cli.py`（`validate`/`compile`）+ `tests/test_compiler.py`（28 测试全绿，含 live DuckDB 时序断言 N−1/N/N+1、NULL gate、after_event exact-age、param/`?` 数不变式）。对抗自检修复 3 处：DuckDB 2.0 named-window-with-frame 不能被 >1 函数引用 → 改 inline window；temporal condition 内联到 2 个 SQL 位置导致参数错位 → 每处独立 emit；`exit.stop_loss_pct` 放宽未被拒绝 → 补 execution 与 exit 两条路径的 2% 强制。332 语料回归归 0008（O16 缺口阻塞）。 |
 | 2026-11-08 | 0.2 | **用户裁决定稿（2026-11-08）**：接受当前边界判定（含综合稿 §5 收口：确定性输入、廉价 validate、past-only SQL、per-instrument 归 runner；git commit 只作 provenance；track 不入 SQL AST）。状态改为"定稿，待排期开发"；对抗自检的 cap 行同步 2026-11-08 每 track 8 语义。本轮未实施代码。 |
 | 2026-11-08 | 0.1 | 初稿：确定 compiler 边界、建议 grammar/SQL 生成策略、测试矩阵与文档级对抗性自检；待用户审阅后才能实现。 |

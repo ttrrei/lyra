@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0004` |
 | Title | YAML compiler (strategy validation + past-only SQL codegen) |
-| Status | **Finalized (user ruling 2026-11-08), pending scheduling for implementation** — the user accepted the current boundary decisions (including consolidated §5: deterministic inputs / cheap validate / past-only SQL / per-instrument in the runner); documentation finalized this round, no code implemented |
+| Status | **Implemented (2026-11-08)** — after the user's finalizing ruling, this round landed: `lyra/strategy_schema.py` (YAML safe-load + schema validation + AST + StrategySpec), `lyra/compiler.py` (deterministic past-only SQL codegen + CompiledPlan), the `validate`/`compile` commands in `lyra/cli.py`, and `tests/test_compiler.py` (28 tests green, incl. live DuckDB temporal assertions). Boundary decisions unchanged (deterministic inputs / cheap validate / past-only SQL / per-instrument in the runner). **Note**: the 332 legacy strategies' feature gap is `open-questions.md` O16 (blocks 0008, does not block this compiler) |
 | Owner | `ttrrei` |
 | Created | `2026-11-08` |
 | Related proposal | `docs/proposals/vectorbt-and-multi-ai-strategy-search.en.md` |
@@ -93,21 +93,35 @@ Lyra needs to translate constrained YAML rules into safe, deterministic, past-on
 | C2 | Only SQL TRUE is a candidate signal; NULL cannot become an entry through `not` | Past-only / warm-up contract |
 | C3 | A strategy reads one timeframe only; no cross-instrument windows/comparisons | R2 / HLD §2.3 |
 
-## 5. Tests (implementation plan; Lyra tests were not run this turn)
+## 5. Tests (**Implemented** — `tests/test_compiler.py`, 28 tests green, incl. live DuckDB temporal assertions)
 
-| Test | Scenario |
-|---|---|
-| `test_compiler_compiles_registered_feature_vs_constant` | Scalar values and comparison operators map correctly; bound parameters and SQL tokens are safe |
-| `test_compiler_compiles_feature_vs_feature` | Resolve RHS Registry column; reject unknown columns and type mismatch |
-| `test_compiler_rejects_sql_injection_and_duplicate_yaml_keys` | SQL-like values, unknown keys, and duplicate keys cannot bypass the AST |
-| `test_compiler_nested_boolean_operators` | Nested all/any/not and SQL NULL three-valued logic |
-| `test_compiler_held_for_full_window_and_null` | N-row boundary, warm-up, NULL, and N−1/N/N+1 assertions |
-| `test_compiler_within_requires_full_non_null_window` | One TRUE, all FALSE, incomplete/NULL paths |
-| `test_compiler_after_event_exact_age_and_past_only` | Event exactly N rows earlier, N following conditions, off-by-one, NULL, future perturbation |
-| `test_compiler_timeframe_and_instrument_partition` | 5m/1h view selection; no cross-instrument window leakage |
-| `test_compiler_yaml_alias_normalization` | Normalize direction/family, close/mid_c, README exit aliases; reject conflicts |
-| `test_compiler_duckdb_fixture_truth_table` | Execute generated SQL and match independent row-wise expectations; signals confirm at close |
-| `test_compiler_all_available_legacy_yaml` | Compile all available migration corpus; formal 332-file regression is in 0008 |
+The table below is the 0004 §5 plan; the **implemented** ones are in `tests/test_compiler.py`
+(same name or equivalent assertions). The ones not listed separately (`timeframe_and_instrument_partition`,
+`duckdb_fixture_truth_table`, `all_available_legacy_yaml`) are folded into existing tests (partition is
+covered by the DuckDB assertions, truth-table is the three `*_executed_against_duckdb` tests, legacy-332
+regression is in 0008 — see O16).
+
+| Test | Scenario | Status |
+|---|---|---|
+| `test_compiler_compiles_registered_feature_vs_constant` | Scalar values and comparison operators map correctly; bound parameters and SQL tokens are safe | ✅ (all_six_ops + constant_binds_parameter) |
+| `test_compiler_compiles_feature_vs_feature` | Resolve RHS Registry column; reject unknown columns and type mismatch | ✅ |
+| `test_compiler_rejects_sql_injection_and_duplicate_yaml_keys` | SQL-like values, unknown keys, and duplicate keys cannot bypass the AST | ✅ |
+| `test_compiler_nested_boolean_operators` | Nested all/any/not and SQL NULL three-valued logic | ✅ |
+| `test_compiler_held_for_full_window_and_null` | N-row boundary, warm-up, NULL, and N−1/N/N+1 assertions | ✅ (+ `held_for_executed_against_duckdb`) |
+| `test_compiler_within_requires_full_non_null_window` | One TRUE, all FALSE, incomplete/NULL paths | ✅ (+ `within_executed_against_duckdb`) |
+| `test_compiler_after_event_exact_age_and_past_only` | Event exactly N rows earlier, N following conditions, off-by-one, NULL, future perturbation | ✅ (+ `after_event_executed_against_duckdb`) |
+| `test_compiler_timeframe_and_instrument_partition` | 5m/1h view selection; no cross-instrument window leakage | ✅ (folded: view assertion + DuckDB `PARTITION BY instrument`) |
+| `test_compiler_yaml_alias_normalization` | Normalize direction/family, close/mid_c, README exit aliases; reject conflicts | ✅ (3 alias tests + direction_family_conflict) |
+| `test_compiler_duckdb_fixture_truth_table` | Execute generated SQL and match independent row-wise expectations; signals confirm at close | ✅ (three `*_executed_against_duckdb`) |
+| `test_compiler_all_available_legacy_yaml` | Compile all available migration corpus; formal 332-file regression is in 0008 | ⏳ (332 is in 0008 — blocked by O16 gap) |
+
+**Additional safety tests** (found in adversarial self-check):
+- `test_compiler_state_event_only_eq_ne` — STATE/EVENT only allow eq/ne.
+- `test_compiler_rejects_mandatory_stop_widen` + `test_compiler_rejects_exit_level_stop_widen` — 2% stop cannot be widened (execution and exit paths both).
+- `test_compiler_rejects_nested_temporal` — temporal operators cannot be nested.
+- `test_compiler_rejects_unknown_feature` / `test_compiler_rejects_bad_timeframe`.
+- `test_compiler_deterministic_*` — same input, same output (SQL + params + plan_hash).
+- `test_compiler_param_count_matches_question_marks_all_fixtures` — SQL `?` count == bound param count (guards the param-desync regression).
 
 ## 6. Rollback
 
@@ -119,8 +133,8 @@ Lyra needs to translate constrained YAML rules into safe, deterministic, past-on
 
 - [ ] User review (proposed grammar aliases, exact `after_event` semantics, 2% stop schema behavior)
 - [ ] AI review (second model)
-- [ ] Implementation tests all pass
-- [ ] 332-strategy regression passes (0008)
+- [x] Implementation tests all pass (`tests/test_compiler.py` 28 tests + 135 repo-wide; pyflakes clean)
+- [ ] 332-strategy regression passes (0008) — **blocked by O16** (20 missing features await user decision)
 - [ ] OCI end-to-end (not applicable to compiler-only feature; list separately if OCI reader integration is included)
 
 ## 8. Self-check and adversarial self-check
@@ -150,5 +164,6 @@ Lyra needs to translate constrained YAML rules into safe, deterministic, past-on
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-11-08 | 0.3 | **Implemented (2026-11-08)**: landed `lyra/strategy_schema.py` + `lyra/compiler.py` + `lyra/cli.py` (`validate`/`compile`) + `tests/test_compiler.py` (28 tests green, incl. live DuckDB temporal assertions N−1/N/N+1, NULL gate, after_event exact-age, param/`?`-count invariant). Adversarial self-check fixed 3 issues: DuckDB 2.0 named-window-with-frame can't be referenced by >1 function → inlined the window spec; a temporal condition inlined into two SQL positions desynced params → emit per occurrence; `exit.stop_loss_pct` widen was not rejected → added the 2% enforcement on both the execution and exit paths. Legacy-332 regression is in 0008 (O16 gap blocks). |
 | 2026-11-08 | 0.2 | **Finalized by user ruling (2026-11-08)**: current boundary decisions accepted (including consolidated §5: deterministic inputs, cheap validate, past-only SQL, per-instrument in the runner; git commit = provenance only; track does not enter the SQL AST). Status changed to "finalized, pending scheduling for implementation"; the cap row in the adversarial self-check synced to the 2026-11-08 per-track-8 semantics. No code implemented this round. |
 | 2026-11-08 | 0.1 | Initial draft: compiler boundary, proposed grammar/SQL generation, test matrix, and document-level adversarial self-check; implementation awaits user review. |
