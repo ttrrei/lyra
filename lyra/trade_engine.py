@@ -15,6 +15,8 @@ Does NOT:
 """
 from __future__ import annotations
 
+import datetime as dt
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -39,6 +41,43 @@ class Trade:
     net_return: float            # gross - costs
     stop_price: float            # entry * (1 - side * stop_loss_pct)
     take_profit_price: float | None  # entry * (1 + side * tp_pct), None if unset
+
+
+def _day_count(entry_time: Any, exit_time: Any, override: float | None) -> float:
+    """Financing day count for the held interval (R4/O15; 0005 O-0005-1).
+
+    If ``override`` is provided it is the caller-supplied trading-day count
+    and is used directly. Otherwise derive *natural* days from the bar
+    ``time`` stamps (the nova-compatible basis).
+
+    Fail-closed (review M2): if the override is not a usable finite number,
+    or the timestamps are missing / not subtractable datetimes, raise rather
+    than silently charging zero financing.
+    """
+    if override is not None:
+        try:
+            days = float(override)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "trading_days must be a finite number; got "
+                f"{override!r}"
+            ) from exc
+        if not math.isfinite(days) or days < 0:
+            raise ValueError(f"trading_days must be >= 0 and finite; got {override!r}")
+        return days
+    if not isinstance(entry_time, dt.datetime) or not isinstance(exit_time, dt.datetime):
+        raise ValueError(
+            f"cannot compute financing days: entry_time={entry_time!r}, "
+            f"exit_time={exit_time!r} are not datetimes (and no trading_days "
+            "override was supplied)"
+        )
+    try:
+        return (exit_time - entry_time).total_seconds() / 86400
+    except (AttributeError, TypeError) as exc:
+        raise ValueError(
+            f"cannot compute financing days: {entry_time!r} and {exit_time!r} "
+            "are not comparable datetimes (mixed naive/aware, or wrong types)"
+        ) from exc
 
 
 def _quote(
@@ -67,6 +106,8 @@ def _quote(
 def simulate(
     plan: CompiledPlan,
     bars: Sequence[Mapping[str, Any]],
+    *,
+    trading_days: float | None = None,
 ) -> list[Trade]:
     """Simulate one instrument, one trade at a time (0005 §4 I2-I5, T1-T8).
 
@@ -76,9 +117,29 @@ def simulate(
     ``entry_long``, ``entry_short``, ``exit_long``, ``exit_short``
     (booleans).
 
+    ``trading_days`` (0005 O-0005-1 / R4 / O15) is the **financing day
+    count** for the held interval, supplied per call by the caller:
+    * ``None`` (default) — the engine derives it from the ``time`` stamps
+      as *natural* elapsed days (``(exit - entry).total_seconds() / 86400``),
+      the nova-compatible basis, kept so the field-for-field cross-check
+      against ``nova.trades.simulate`` stays exact.
+    * a **number** — an explicit trading-day count for every trade in this
+      call (e.g. from the 0006 runner's calendar). Use this to apply the
+      R4/O15 rule — *trading* days, excluding weekends and market holidays —
+      which the engine cannot derive on its own: a Fri→Fri bar gap is
+      indistinguishable from an overnight gap when the data is sparse (daily
+      bars, or 24/7 data with weekend gaps), so the *correct* trading-day
+      count is a data/caller concern, not something derivable from the bars.
+    The day count must be a finite number; it must not be ``bars_held``
+    (that is a bar count, not a day count — 0005 O-0005-1 / review M1).
+
     Cost model (nova ``trades.py`` field-for-field):
     * slippage is folded into entry/exit *price* (T1/T2), NOT into costs
     * costs = commission_bps_round_trip/10000 + financing_bps_per_day/10000 * days
+
+    The day computation is **fail-closed** (0005 review M2): if ``time``
+    values are missing or not subtractable datetimes, the engine raises
+    instead of silently charging zero financing.
     """
     stop_pct = plan.stop_loss_pct or 0.02
     tp_pct = plan.take_profit_pct
@@ -105,11 +166,9 @@ def simulate(
         price = raw_price * (1 - side * slip)
         entry_px = position["price"]
         gross = side * (price - entry_px) / entry_px
-        # financing by days (nova trades.py:finish)
-        try:
-            days = (timestamp - position["time"]).total_seconds() / 86400
-        except (AttributeError, TypeError):
-            days = 0.0
+        # financing by days (nova trades.py:finish; R4/O15 trading-day basis
+        # via the trading_days override, see simulate())
+        days = _day_count(position["time"], timestamp, trading_days)
         costs = comm / 10000 + financ / 10000 * max(days, 0)
         result.append(Trade(
             instrument=bar["instrument"],

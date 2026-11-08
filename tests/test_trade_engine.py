@@ -277,6 +277,92 @@ def test_cost_financing_proportional():
     assert t.cost_return == pytest.approx(0.001 * days)
 
 
+def test_cost_financing_trading_days_override():
+    """H1 (review 批次3): R4/O15 financing must be charged in *trading*
+    days. The engine cannot derive a trading calendar from sparse bars
+    (a Fri→Fri gap is indistinguishable from an overnight gap), so the
+    caller (the 0006 runner, which owns the bar series + calendar) passes
+    the trading-day count via ``trading_days``.
+
+    Fri 2026-10-30 → Fri 2026-11-06 is **7 natural days** but **5 trading
+    days** (weekend + no market holiday excluded). With
+    financing_bps_per_day=100 (1%/day): natural basis = 0.07, R4/O15
+    trading basis = 0.05. The override must win.
+    """
+    entry = dt.datetime(2026, 10, 30, 0, 0, tzinfo=dt.timezone.utc)
+    exit_ = entry + dt.timedelta(days=7)
+    bars = [
+        {"instrument": "X", "time": entry, "mid_o": 1.0, "mid_h": 1.0,
+         "mid_l": 0.99, "mid_c": 1.0, "entry_long": True, "entry_short": False,
+         "exit_long": False, "exit_short": False},
+        {"instrument": "X", "time": entry + dt.timedelta(hours=1), "mid_o": 1.0,
+         "mid_h": 1.0, "mid_l": 0.99, "mid_c": 1.0, "entry_long": False,
+         "entry_short": False, "exit_long": False, "exit_short": False},
+        {"instrument": "X", "time": exit_, "mid_o": 1.0, "mid_h": 1.0,
+         "mid_l": 0.99, "mid_c": 1.0, "entry_long": False, "entry_short": False,
+         "exit_long": True, "exit_short": False},
+        {"instrument": "X", "time": exit_ + dt.timedelta(hours=1), "mid_o": 1.0,
+         "mid_h": 1.0, "mid_l": 0.99, "mid_c": 1.0, "entry_long": False,
+         "entry_short": False, "exit_long": False, "exit_short": False},
+    ]
+    plan = _plan(financing_bps_per_day=100)
+    # natural-day default (nova-compatible basis) = 7 * 1% = 0.07
+    natural = te.simulate(plan, bars)[0]
+    assert natural.cost_return == pytest.approx(0.07)
+    # R4/O15 trading-day basis via override = 5 * 1% = 0.05
+    trading = te.simulate(plan, bars, trading_days=5)[0]
+    assert trading.cost_return == pytest.approx(0.05)
+
+
+def test_cost_financing_fail_closed_mixed_tz():
+    """M2 (review 批次3): a naive ``time`` on one side and an aware one on
+    the other makes the day subtraction raise TypeError. The engine must
+    FAIL CLOSED (raise) rather than silently charging zero financing.
+    """
+    naive_entry = dt.datetime(2020, 3, 9, 3, 0)  # NO tzinfo
+    aware_exit = dt.datetime(2020, 3, 9, 6, 0, tzinfo=dt.timezone.utc)
+    bars = [
+        {"instrument": "X", "time": naive_entry, "mid_o": 1.0, "mid_h": 1.0,
+         "mid_l": 0.99, "mid_c": 1.0, "entry_long": True, "entry_short": False,
+         "exit_long": False, "exit_short": False},
+        {"instrument": "X", "time": naive_entry + dt.timedelta(hours=1),
+         "mid_o": 1.0, "mid_h": 1.0, "mid_l": 0.99, "mid_c": 1.0,
+         "entry_long": False, "entry_short": False, "exit_long": False,
+         "exit_short": False},
+        {"instrument": "X", "time": aware_exit, "mid_o": 1.0, "mid_h": 1.0,
+         "mid_l": 0.99, "mid_c": 1.0, "entry_long": False, "entry_short": False,
+         "exit_long": True, "exit_short": False},
+        {"instrument": "X", "time": aware_exit + dt.timedelta(hours=1),
+         "mid_o": 1.0, "mid_h": 1.0, "mid_l": 0.99, "mid_c": 1.0,
+         "entry_long": False, "entry_short": False, "exit_long": False,
+         "exit_short": False},
+    ]
+    with pytest.raises(ValueError):
+        te.simulate(_plan(financing_bps_per_day=100), bars)
+
+
+def test_cost_financing_rejects_bad_override():
+    """M2 (review 批次3): the trading_days override must be a usable
+    non-negative finite number — NaN / inf / negative / non-numeric all
+    raise, never silently drop financing."""
+    entry = T0
+    bars = [
+        {"instrument": "X", "time": entry, "mid_o": 1.0, "mid_h": 1.0,
+         "mid_l": 0.99, "mid_c": 1.0, "entry_long": True, "entry_short": False,
+         "exit_long": False, "exit_short": False},
+        {"instrument": "X", "time": entry + H1, "mid_o": 1.0, "mid_h": 1.0,
+         "mid_l": 0.99, "mid_c": 1.0, "entry_long": False, "entry_short": False,
+         "exit_long": True, "exit_short": False},
+        {"instrument": "X", "time": entry + 2 * H1, "mid_o": 1.0, "mid_h": 1.0,
+         "mid_l": 0.99, "mid_c": 1.0, "entry_long": False, "entry_short": False,
+         "exit_long": False, "exit_short": False},
+    ]
+    plan = _plan(financing_bps_per_day=100)
+    for bad in (float("nan"), float("inf"), -1, "three"):
+        with pytest.raises(ValueError):
+            te.simulate(plan, bars, trading_days=bad)
+
+
 def test_long_short_symmetry():
     """I2/T1-T2: same OHLC, long and short should be symmetric.
 

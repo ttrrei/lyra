@@ -268,7 +268,7 @@ lyra/
 │   │   ├── 0002-ohlcv-data-sync.md       (已完成)
 │   │   ├── 0003-feature-builder.md       (v1.4 已实现)
 │   │   ├── 0004-yaml-compiler.md         (已实施 2026-11-08：validate/compile + 28 测试)
-│   │   ├── 0005-trade-engine.md          (已实施 v0.3，O-0005-1 OPEN)
+│   │   ├── 0005-trade-engine.md          (已实施 v0.4，批次3 处置完成 #84，最终口径 0006/O17)
 │   │   ├── 0006-metrics-and-runner.md    (待写)
 │   │   ├── 0007-oci-push-and-backup.md   (待写)
 │   │   ├── 0008-migration-and-regression.md (待写)
@@ -332,11 +332,11 @@ lyra/
 | 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ 已完成（2026-11-07，真实数据端到端 + 批次1(2026-11-07) 对抗性审查 D1–D6 全修复，v1.1） |
 | 3 | Feature builder（标准 + alpha 扩展点） | `0003-feature-builder.md` | ✅ 核心已实现（v1.4：134 特征/6 指标族 + pandas-ta-classic 对照组 + 107 测试；alpha 扩展点 `load_from` 已实现） |
 | 4 | YAML compiler（含 feature-vs-feature） | `0004-yaml-compiler.md` | ✅ **已签收（#76，2026-11-08）**：批次2处置后 0004 专项 50/50、全仓 157/157，全 169 个现存策略 YAML 新校验零回归；O16 的 332 语料兼容仍归 0008。 |
-| 5 | Trade engine（2% stop / next-open / 成本） | `0005-trade-engine.md` | 🟢 **已实施（v0.3）**：`lyra/trade_engine.py` + 27 测试全绿；与 nova `trades.simulate` field-for-field cross-check（fuzz 300 例 / 381 笔）0 真实不一致；自检 9 条 + 对抗性自检 10 条全通过（探针 P1–P9 已执行）。**OPEN O-0005-1**：financing 天数口径——当前按 nova 自然日（cross-check 需要），与 R4/O15 交易日口径冲突，待用户拍板方案（见 0005 §5 未决项）。 |
-| 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ 待写 |
-| 7 | OCI push + backup | `0007-oci-push-and-backup.md` | ⬜ 待写 |
-| 8 | 332 策略迁移 + 回归 | `0008-migration-and-regression.md` | ⬜ 待写 |
-| 9 | Polish（README / CI / config_example） | `0009-polish.md` | ⬜ 待写 |
+| 5 | Trade engine（2% stop / next-open / 成本） | `0005-trade-engine.md` | ✅ **已实施 + 批次3 review 处置完成（per #83 发现 + #84 引擎侧落地）**：`lyra/trade_engine.py` 的 `simulate()` 是供 runner 调用的 Python API；不要求单独 CLI 命令，面向用户的 `lyra run --strategy` 归 0006。#83 复现批次3 H1/M1/M2（自然日融资 7% vs 交易日 5%、`bars_held` 跨 timeframe 非天数、时区混用静默归零）；**#84 接受并落地引擎侧**：新增 `trading_days` 参数（R4/O15 交易日口径由 caller 传入）+ `_day_count` fail-closed（非法 time/override 抛错，非静默 0 融资）+ 3 回归测试，专项 **30/30**、全仓 **187/187** 通过；默认保留 nova 自然日以维持 cross-check（已知分歧）。**最终融资口径在 0006 锁定（O17）**；O15 维持关闭。 |
+| 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ **待写（per ACTION_LOG #82）**：挂起 `lyra run --strategy`（执行 0004 SQL + 0005 simulate，输出逐标的/月 metrics 与 report）及 R12 track/context、new-version、sibling compare/merge 工作流。 |
+| 7 | OCI push + backup | `0007-oci-push-and-backup.md` | ⬜ **待写（per ACTION_LOG #82）**：挂起 `lyra push` / `backup` / `list` 与 push-direction/push-strategy 的 OCI 持久化命令。 |
+| 8 | 332 策略迁移 + 回归 | `0008-migration-and-regression.md` | ⬜ **待写（per ACTION_LOG #82）**：先处理 O16/按裁决补齐 0003 feature，再迁移并验证 332 策略；是全语料兼容门禁。 |
+| 9 | Polish（README / CI / config_example） | `0009-polish.md` | ⬜ **待写（per ACTION_LOG #82）**：挂起 `lyra-doctor`（R10/O10）及更新 README 安装、当前 CLI 命令参考；待 CLI 稳定后整理。 |
 
 ## 修订记录
 
@@ -351,6 +351,9 @@ lyra/
 | 2026-11-08 | 0.9 | 按 ACTION_LOG #77 同步 §8 当前阶段：0004 状态更新为 #76 处置后的 50 项专项 / 157 项全仓验证；0005 标为开发中（工作区可见决策稿、代码与测试草稿，尚未签收），并记录 financing 自然日与 R4 交易日口径冲突及 golden test 门槛待满足。 |
 | 2026-11-08 | 0.10 | **0005 已实施（v0.2）**：`lyra/trade_engine.py` + `tests/test_trade_engine.py`（23 测试全绿）；与 nova `trades.simulate` field-for-field cross-check diff=0（§5 记录 3 行偏差：exit_time_precision 精简 / signal_time 用 bar open / **financing 自然日 vs R4·O15 交易日**）；自检 + 对抗性自检 14 条全通过；§8 0005 状态改"已实施"，登记 **OPEN O-0005-1**（financing 口径，待用户拍板方案 1/2/3，默认方案 2 保持 nova 自然日）。 |
 | 2026-11-08 | 0.11 | **0005 自检 + 对抗性自检 详细执行（v0.3）**：探针 P1–P9（边界 / 优先级 / 方向特定 exit / re-entry）全通过；fuzz 300 例 / 381 笔与 nova 0 真实不一致（119 笔 cost/net-only 差异全由 O-0005-1 解释，`financing=0` 二次 fuzz 0 不一致）；新增 4 个对抗性回归测试（pending_exit vs inside-stop 顺序 ×3 + exit_long 方向隔离），测试 23→27、全仓 180→184 绿；§8 0005 状态同步（v0.3、27 测试、自检 9 条 + 对抗性 10 条已执行）。 |
+| 2026-11-08 | 0.12 | 按 ACTION_LOG #82 将未实现命令挂到对应阶段：0005 明确 `simulate()` 是 runner API（不单独要求 CLI）；0006 负责 `lyra run`/metrics/report 与 R12 工作流；0007 负责 OCI 命令；0008 负责 O16 后的 332 回归；0009 负责 doctor 与 README 命令指南。O-0005-1 升级到 open-questions O17。 |
+| 2026-11-08 | 0.13 | 按 ACTION_LOG #83 同步 0005 批次3对抗性检验：代码/测试已存在且 27/27 专项、184/184 全仓通过，但自然日 financing 违反 R4/O15（跨周末 7% vs 5%）；将 §8 标为“已实施但融资语义待修”，要求 0006 锁定成本前落实交易日计数与边界，除非用户明确推翻 O15。 |
+| 2026-11-08 | 0.14 | 按 ACTION_LOG #84 同步 0005 批次3 review 处置（#83 发现 → #84 引擎侧落地）：接受 H1/M1/M2——新增 `trading_days` 参数（R4/O15 交易日口径由 caller 传入）、`_day_count` fail-closed（非法 time/override 抛错，非静默 0 融资）、`bars_held` 明确非天数；3 回归测试，专项 27→30、全仓 184→187 绿、pyflakes 干净；默认保留 nova 自然日以维持 cross-check（已知分歧）。§8 0005 状态改"已实施 + 批次3 处置完成"，最终融资口径仍归 0006 锁定（O17）；O15 维持关闭。 |
 | 2026-11-08 | 0.7 | **用户裁决同步（#73）**：0004 状态改"已定稿（2026-11-08 裁决），待排期开发"；R12 AI tracks + 每 track 8 cap + VectorBT 抛弃见 requirements v0.16 / oci-alpha-layout §2.3 / 综合稿 §9（本文件不展开）。 |
 | 2026-11-08 | 0.6 | 同步 **0003 v1.4 / 107 tests** 当前状态；0004 状态改为"提案已写、待用户审阅、未实现"；§7 proposals 目录列出 VectorBT / 多 AI 策略搜索评估（中英成对）。 |
 | 2026-11-08 | 0.7 | §7 proposals 目录登记 v2 来源稿与本轮综合稿（中英成对）；来源提案保留，综合稿待用户裁决。 |

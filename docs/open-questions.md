@@ -25,6 +25,7 @@
 | O14 | 标的代码清单与标识规范？ | **已定（用户）**：代码格式**继承 moneta** 的 `BASE_QUOTE` 约定（`XAU_USD`/`XAG_USD`/`EUR_USD`/`BTC_USD` 等，非 `GOLD`/`WTI`）；moneta 无单一 21 标的清单文件，**权威完整清单在 0002 数据同步时从 moneta 实际数据文件枚举确认** | **已关闭**（用户 2026-11-06；清单枚举归 0002） |
 | O15 | `financing_per_day` 的 "elapsed day" 如何定义？ | **已定（用户）**：严格按**交易日**计，**周末不计**，**新年/圣诞等市场节假日也不计**（即 elapsed = 持仓区间内的交易日数，非物理日历天） | **已关闭**（用户 2026-11-06） |
 | O16 | 332 legacy 策略引用的 feature 中，**20 个不在 lyra 0003 registry**（326/332 至少引用 1 个缺失项）。是否扩展 0003？ | **0004 实施时核实（2026-11-08）**：lyra registry 仅 134 feature；332 策略引用 24 个 feature，**4 个命中**（`sma_alignment_6_24`/`sma_cross_up_6_24`/`sma_cross_down_6_24`/`utc_hour`），**20 个缺失**（见下）。缺失项分三类：(A) **参数 gap** 1 个 — `rsi_14`（lyra 有 `rsi_{6,12,24,60,120}` 但无 14）；(B) **命名漂移** 8 个 — nova 的 `psar_direction/psar_flip_{up,down}`↔lyra `psar_bullish/bearish`、`supertrend_direction/supertrend_flip_{up,down}`↔lyra `supertrend_bullish/bearish`、`breakout_{up,down}_24`↔lyra `breakout_{up,down}`、`failed_breakout_{up,down}_24`↔lyra `failed_breakout_{up,down}`；(C) **真缺失** 11 个 — `range_position_24`(888)、`close_sma24_distance_atr`(316)、`efficiency_24`(300)、`ema_alignment_6_24`(194)、`close_ema60_distance_atr`(182)、`range_atr`(146, lyra 有 `bar_range_atr`)、`relative_volume_24`(106)、`return_6_atr`(60)、`range_width_atr_24`(28) 等 | **待用户决策**（P0 阻塞 0008 的 332 回归门禁；见下） |
+| O17 | 0005 financing 天数应按自然日还是交易日？ | **冲突已核实**：R4/O15 定案为交易日（不计周末/市场假日）；0005 为保持 nova cross-check 目前按自然日。三种处置与影响见 `decisions/0005-trade-engine.md` §5。应在 0006 最终确定融资成本/报告口径前裁决；O15 保持关闭，不在此改写。 | **待用户决策**（不阻塞已签收的 0005；须在 0006 锁定 financing 计算前处理） |
 
 ## O16 详情：332 策略的 feature 缺口（2026-11-08 核实）
 
@@ -126,3 +127,4 @@
 | 2026-11-08 | 0.6 | **O13 语义修订（用户 2026-11-08 裁决）**：Active Branch Cap 从"每方向全局 8"改为"**每 track 8 个 active branches，tracks 互不挤占**"（多 AI 互不影响；单 track 防无限 fork 原意仍满足）。O13 终态关闭；11-06 定案保留为历史。落点：requirements R12 v0.16、oci-alpha-layout §2.3、综合稿 §9。 |
 | 2026-11-06 | 0.5 | **O1 正式补关闭**（批次7 D4）：0002 v0.5 已实际废弃目录级 snapshot_id（单文件外部表 + raw md5 溯源），但本文档此前仍写"待 0002 决策"，与 ACTION_LOG"O1 已关闭"矛盾——本轮把裁决落进本文档，消除断层。O2/O3 仍分别待 0007 / 0003。 |
 | 2026-11-08 | 0.7 | 0004 编译器实施 + 自检时核实 **O16**：332 legacy 策略有 326 个引用至少 1 个不在 lyra 0003 registry 的 feature（24 去重 feature 中 4 命中 / 20 缺失，分 A 参数 gap / B 命名漂移 / C 真缺失三类）。O16 待用户决策，阻塞 0008 的 332 回归门禁；不阻塞 0004 编译器本身（已落地可 validate/compile 已注册 feature 的策略）。 |
+| 2026-11-08 | 0.8 | 新增 **O17**：把 0005 O-0005-1（nova 自然日与 R4/O15 交易日口径冲突）纳入中央开放问题清单；保留已关闭 O15，只在 0006 锁定融资成本/报告口径前待裁决。 |
