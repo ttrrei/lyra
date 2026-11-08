@@ -454,6 +454,85 @@ def test_multiple_trades_sequence():
     assert trades[1].exit_reason == "indicator_exit"
 
 
+def test_pending_exit_beats_inside_stop_same_bar():
+    """Adversarial P5: pending indicator_exit (open-layer fill) has HIGHER
+    priority than an inside-bar stop on the fill bar — matches nova order
+    (stop_at_open → target_at_open → pending_exit → stop_inside/target_inside).
+
+    Entry bar 1. Bar 2: exit_long signal → pending. Bar 3: low=0.97 (inside
+    stop hit) — but pending_exit fills at open=1.00 FIRST (indicator_exit).
+    """
+    bars = [
+        _bar(0, 1.00, 1.01, 0.99, 1.00, entry_long=True),
+        _bar(1, 1.00, 1.01, 0.99, 1.00),
+        _bar(2, 1.00, 1.01, 0.99, 1.00, exit_long=True),  # pending
+        _bar(3, 1.00, 1.01, 0.97, 1.00),  # inside stop, but pending wins
+    ]
+    trades = te.simulate(_plan(), bars)
+    t = trades[0]
+    assert t.exit_reason == "indicator_exit"  # NOT stop_loss
+    assert t.exit_price == pytest.approx(1.00)
+
+
+def test_pending_exit_loses_to_stop_gap():
+    """Adversarial P5b: a stop-gap at the open still beats a pending exit
+    (the gap is the actual open price — worse than the stop, must be filled).
+
+    Entry bar 1. Bar 2: exit_long → pending. Bar 3: open=0.95 (< stop 0.98)
+    → stop_gap at open, not indicator_exit.
+    """
+    bars = [
+        _bar(0, 1.00, 1.01, 0.99, 1.00, entry_long=True),
+        _bar(1, 1.00, 1.01, 0.99, 1.00),
+        _bar(2, 1.00, 1.01, 0.99, 1.00, exit_long=True),  # pending
+        _bar(3, 0.95, 0.96, 0.94, 0.95),  # open gaps through stop
+    ]
+    trades = te.simulate(_plan(), bars)
+    t = trades[0]
+    assert t.exit_reason == "stop_gap"  # NOT indicator_exit
+    assert t.exit_price == pytest.approx(0.95)
+
+
+def test_pending_exit_loses_to_target_at_open():
+    """Adversarial P6: an open beyond the target beats a pending exit
+    (target_at_open is checked before pending_exit in nova's order).
+
+    Entry bar 1 (tp=2%, target=1.02). Bar 2: exit_long → pending.
+    Bar 3: open=1.03 (> target) → take_profit at 1.02 (limit semantics).
+    """
+    bars = [
+        _bar(0, 1.00, 1.01, 0.99, 1.00, entry_long=True),
+        _bar(1, 1.00, 1.01, 0.99, 1.00),
+        _bar(2, 1.00, 1.01, 0.99, 1.00, exit_long=True),  # pending
+        _bar(3, 1.03, 1.04, 1.02, 1.03),  # open beyond target
+    ]
+    trades = te.simulate(_plan(take_profit_pct=0.02), bars)
+    t = trades[0]
+    assert t.exit_reason == "take_profit"  # NOT indicator_exit
+    assert t.exit_price == pytest.approx(1.02)  # limit fill, not open
+
+
+def test_exit_long_does_not_close_short():
+    """Adversarial P9: exit signals are direction-specific. An exit_long
+    signal must NOT close a short position (nova reads exit_{direction}).
+
+    Short entry bar 1. Bar 2: exit_long=True (ignored). Bar 3: exit_short=True
+    → pending. Bar 4: indicator_exit fill.
+    """
+    bars = [
+        _bar(0, 1.00, 1.01, 0.99, 1.00, entry_short=True),
+        _bar(1, 1.00, 1.01, 0.99, 1.00),
+        _bar(2, 1.00, 1.01, 0.99, 1.00, exit_long=True),  # ignored for short
+        _bar(3, 1.00, 1.01, 0.99, 1.00, exit_short=True),  # the real signal
+        _bar(4, 1.00, 1.01, 0.99, 1.00),  # fill at open
+    ]
+    trades = te.simulate(_plan(), bars)
+    t = trades[0]
+    assert t.direction == -1
+    assert t.exit_reason == "indicator_exit"
+    assert t.exit_time == T0 + 4 * H1  # closed at bar 4, not bar 2/3
+
+
 def test_empty_bars_no_trades():
     """No bars → no trades (no crash)."""
     assert te.simulate(_plan(), []) == []

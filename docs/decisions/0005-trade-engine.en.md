@@ -124,7 +124,7 @@ again to `costs`.
 | `signal_time` | signal bar's `bar_close_time` | signal bar's `time` (= open) | Data-model difference: nova bars carry both `bar_open_time`/`bar_close_time`; lyra bars have a single `time` (= open, per `aggregate.py`'s `time_bucket`). **Does not change any fill/P&L semantics** — only the signal timestamp differs by one bar period. |
 | **financing day count** | natural days (`total_seconds()/86400`) | natural days (**same as nova**) | ⚠️ **OPEN / conflicts with R4+O15**: O15 (user decision, closed 2026-11-06) + R4 require counting by **trading days** (weekends + market holidays excluded). The current implementation is a faithful nova port (natural days), so it **does not satisfy lyra's own R4/O15 convention**. See "Open item" below. |
 
-**Field-for-field cross-check**: same synthetic OHLC+signals drive both nova `trades.simulate` and lyra `trade_engine.simulate` (slippage/spread/commission/financing/mhb all enabled). 2 trades match on `instrument, direction, entry_price, exit_price, exit_reason, bars_held, gross_return, cost_return, net_return, stop_price, take_profit_price` **with diff=0**; the only differences are the three rows above (first two documented deviations; third is the open item).
+**Field-for-field cross-check**: same synthetic OHLC+signals drive both nova `trades.simulate` and lyra `trade_engine.simulate` (slippage/spread/commission/financing/mhb all enabled). **Fuzz 300 cases / 381 trades**: `instrument, direction, entry_price, exit_price, exit_reason, bars_held, gross_return, cost_return, net_return, stop_price, take_profit_price` show **0 real mismatches**; 119 trades differ on `cost_return`/`net_return` — **all** explained by O-0005-1 (financing natural-days vs trading-days). A second fuzz with `financing_bps_per_day=0` over the same 300 cases / 381 trades shows **0 mismatches on any field**, confirming O-0005-1 is the sole cause of the cost diffs. The two data-model deviations above (exit_time_precision dropped / signal_time uses bar open) are not part of the field comparison.
 
 ### ⚠️ Open item (needs user decision; does not block the rest of 0005)
 
@@ -144,7 +144,7 @@ again to `costs`.
 |---|---|---|
 | `stop_gap` | open already beyond stop (gap) | `open` (gap loss) |
 | `stop_loss` | intra-bar low/high beyond stop | `stop` (exactly 2%) |
-| `take_profit` | open or intra-bar beyond target | `open` or `target` |
+| `take_profit` | open or intra-bar beyond target | always `target` (limit semantics: open beyond target still fills at target, per nova reference) |
 | `indicator_exit` | exit signal fired, next bar open | `open` |
 | `time_exit` | `bars >= max_holding_bars`, next bar open | `open` |
 | `end_of_data` | data exhausted while in position | `close` |
@@ -157,7 +157,7 @@ again to `costs`.
 | `test_stop_gap_at_open` | open beyond stop → fill at open, loss > 2% | I3, T3 |
 | `test_stop_inside_bar` | low beyond stop → fill at stop (exactly 2%) | I3, T4 |
 | `test_stop_wins_over_target_same_bar` | same bar both hit → stop first | I4, T6 |
-| `test_take_profit_at_open` | open beyond target → fill at open | T5 |
+| `test_take_profit_at_open` | open beyond target → **fill at target** (limit semantics, unlike stop_gap; nova `trades.py` reference) | T5 |
 | `test_indicator_exit_next_open` | exit signal bar T → fill at T+1 open | I2, T7 |
 | `test_time_exit_next_open` | bars == mhb → next bar open fill | T7 |
 | `test_one_trade_per_instrument` | entry signals ignored while in position | I5 |
@@ -166,7 +166,11 @@ again to `costs`.
 | `test_cost_financing_proportional` | financing by days | cost model |
 | `test_long_short_symmetry` | same OHLC long/short symmetric | I2, T1-T2 |
 | `test_deterministic` | same input, same output (multiple runs) | determinism |
-| `test_golden_trades_vs_nova` | field-for-field diff=0 on a nova real-trades subset | all |
+| ~~`test_golden_trades_vs_nova`~~ | ~~field-for-field diff=0 on a nova real-trades subset~~ **downgraded**: nova runs carry no market-bar input; replaced by the §5 dual-implementation cross-check (stronger) | all |
+| `test_pending_exit_beats_inside_stop_same_bar` | pending exit (open layer) beats inside-stop (nova order) | priority |
+| `test_pending_exit_loses_to_stop_gap` | stop-gap (open layer) beats pending exit | priority |
+| `test_pending_exit_loses_to_target_at_open` | target_at_open (open layer) beats pending exit | priority |
+| `test_exit_long_does_not_close_short` | exit signals are direction-specific (exit_long does not affect a short) | direction isolation |
 
 **Golden test** is the **hard gate** for 0005: pick 3-5 real trades from
 nova `runs/*/trades.csv` covering different exit reasons, diff field-for-field
@@ -185,31 +189,38 @@ output — must be exactly 0.
 
 ### Self-check
 
-- [x] entry fill at T+1 open, not T close (I2).
-- [x] stop is 2% (I3), not relaxable (0004 guarantees; 0005 only executes).
-- [x] stop before target (I4).
-- [x] one trade per instrument (I5).
-- [x] cost formula field-for-field identical to nova `trades.py` (commission flat + financing by days + slippage in price). *Note: "days" = natural days (nova-consistent); conflicts with O15/R4 trading-day convention → see §5 open item O-0005-1.*
-- [x] pure function, deterministic, no global state.
-- [x] direct field-for-field cross-check vs nova `trades.simulate` diff=0 (see §5 deviations).
+- [x] entry fill at T+1 open, not T close (I2). *Probe: `test_entry_fill_at_next_open` + fuzz.*
+- [x] stop is 2% (I3), not relaxable (0004 guarantees; 0005 only executes). *Probe: `test_stop_inside_bar` + P2 (low==stop boundary).*
+- [x] stop before target (I4). *Probe: `test_stop_wins_over_target_same_bar` + P5b + P6.*
+- [x] one trade per instrument (I5). *Probe: `test_one_trade_per_instrument` + P8 (re-entry sequence).*
+- [x] cost formula field-for-field identical to nova `trades.py` (commission flat + financing by days + slippage in price). *Note: "days" = natural days (nova-consistent); conflicts with O15/R4 trading-day convention → see §5 open item O-0005-1. Probes: `test_cost_commission_flat` + `test_cost_financing_proportional` + `test_slippage_in_entry_price` + fuzz 300 cases.*
+- [x] pure function, deterministic, no global state. *Probe: `test_deterministic` + fuzz 300 cases (no global-state side effects).*
+- [x] direct field-for-field cross-check vs nova `trades.simulate` diff=0 (see §5 deviations). *Fuzz 300 cases / 381 trades, 0 real mismatches; second fuzz with financing=0 shows 0 mismatches.*
+- [x] direction-specific exit signals (`exit_long` does not affect a short position). *Probe P9.*
+- [x] exit priority: `stop_at_open` → `target_at_open` → `pending_exit` (open layer) → `stop_inside` / `target_inside` (intra-bar). *Probes P5/P5b/P6/P7.*
 
 **Golden test disposition**: §6 originally planned a golden test using nova `runs/*/trades.csv` as the oracle. Since nova runs do not carry market bars (only signals/trades artifacts), the input bars cannot be replayed offline; the golden test is therefore **upgraded to a direct field-for-field cross-check against nova `simulate`** (stronger: same input, two implementations, diff=0). A real-data golden test will be added when the 0006 runner wires bronze→bars.
 
-### Adversarial self-check (planned)
+### Adversarial self-check (executed 2026-11-08)
 
 | Attack | Finding | Disposition |
 |---|---|---|
-| Same bar open beyond both stop and target | if target checked first, author loses 2%+ less / gains more — semantic inversion | stop first (I4); golden test covers |
-| gap beyond 2%: fill at stop or open | fill at stop would misreport P&L (actual gap fill) | fill at open (T3), gap loss is real |
-| slippage double-counted (once in price + once in costs) | costs inflated 2x | slippage only in T1/T2 price; costs only commission+financing |
-| financing by bar count, not days | cost wrong across weekends/holidays | by days (`total_seconds()/86400`), matches nova |
-| max_holding_bars boundary (== vs >) | hold one bar too many/few | nova uses `>=`; lyra same (T7) |
+| Same bar open beyond both stop and target | if target checked first, author loses 2%+ less / gains more — semantic inversion | stop first (I4); fuzz covers |
+| gap beyond 2%: fill at stop or open | fill at stop would misreport P&L (actual gap fill) | fill at open (T3), gap loss is real; probe P7 verified |
+| open beyond target: fill at target or open | fill at open would misreport profit (limit semantics: never get a better price than the limit) | **fill at target** (nova reference, limit semantics); probes P3/P6 verified |
+| slippage double-counted (once in price + once in costs) | costs inflated 2x | slippage only in T1/T2 price; costs only commission+financing; fuzz covers |
+| financing by bar count, not days | cost wrong across weekends/holidays | by natural days (`total_seconds()/86400`), matches nova; **O-0005-1 OPEN** (R4/O15 require trading days) |
+| max_holding_bars boundary (== vs >) | hold one bar too many/few | nova uses `>=`; lyra same (T7); probe P4 verified |
 | cross-instrument signal leak | single-thread per instrument → no leak | 0005 takes single-instrument bars; 0006 runner isolates |
-| entry_long and entry_short both TRUE | ambiguity | nova enters only on `bool(long) != bool(short)`; lyra same |
+| entry_long and entry_short both TRUE | ambiguity | nova enters only on `bool(long) != bool(short)`; lyra same; probe P8 verified |
+| **Can `exit_long` close a short position** | direction leak | nova/lyra both read `f"exit_{direction}"` for the position's direction only; **probe P9 verified exit_long does NOT affect a short** |
+| **pending_exit (open fill) vs inside-bar stop on the same bar** | if inside-stop checked first, the pending signal is lost; nova's actual order is **open-layer first** (stop_at_open → target_at_open → pending_exit → inside) | matches nova (open chronology priority); **probe P5 verified pending_exit beats inside-stop** |
+| **stop_at_open and target_at_open both true** | double-gap extreme: open beyond both | nova is `if/elif`: stop_gap first (loss side priority); **fuzz covers** |
 
 ## Revision history
 
 | Date | Version | Change |
 |---|---|---|
 | 2026-11-08 | 0.1 | Initial draft: trade engine boundary, API, invariants (T1-T8), test matrix, golden-test hard gate, 7 adversarial self-check items. Awaits user review before implementation. |
-| 2026-11-08 | 0.2 | Implementation complete: `lyra/trade_engine.py` + `tests/test_trade_engine.py` (23 tests all green). All 7 self-check items pass; all 7 adversarial items pass (incl. gap>2% fill at open, slippage not double-counted, `bool(long)!=bool(short)`). Field-for-field cross-check vs nova `trades.simulate` diff=0. Golden test downgraded to cross-check (nova runs lack market bars); §6/§8 annotated. Two deviations documented (exit_time_precision dropped; signal_time uses bar open). |
+| 2026-11-08 | 0.2 | Implementation complete: `lyra/trade_engine.py` + `tests/test_trade_engine.py` (23 tests all green). All 7 self-check items pass; all 7 adversarial items pass (incl. gap>2% fill at open, slippage not double-counted, `bool(long)!=bool(short)`). Field-for-field cross-check vs nova `trades.simulate` diff=0. Golden test downgraded to cross-check (nova runs lack market bars); §6/§8 annotated. Two deviations documented (exit_time_precision dropped; signal_time uses bar open). **New open item O-0005-1 discovered**: financing day count (nova=natural days vs R4/O15=trading days), currently natural days, marked OPEN awaiting user ruling. |
+| 2026-11-08 | 0.3 | **Self-check + detailed adversarial self-check executed**: ① probes P1–P9 (boundaries open==stop / low==stop / high==target; priority stop_at_open > target_at_open > pending_exit > stop_inside/target_inside; direction-specific exit_long does not affect a short position; re-entry sequence) all pass; ② **fuzz 300 cases / 381 trades** vs nova `trades.simulate`: 0 real mismatches, 119 cost/net-only diffs all explained by O-0005-1; second fuzz with `financing=0` over the same 300 cases / 381 trades shows **0 mismatches on any field**, confirming O-0005-1 is the sole cause of the cost diffs; ③ 4 new adversarial regression tests added: `test_pending_exit_beats_inside_stop_same_bar` / `test_pending_exit_loses_to_stop_gap` / `test_pending_exit_loses_to_target_at_open` / `test_exit_long_does_not_close_short`; tests **23→27**, repository **180→184** green; ④ §5 deviation table / §6 test matrix / §8 self-check / §8 adversarial self-check all synced; adversarial self-check header changed from "planned" to "executed 2026-11-08", 3 new attack rows added (open-beyond-target fill semantics / exit_long direction isolation / pending_exit vs inside-stop order). |

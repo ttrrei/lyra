@@ -268,7 +268,7 @@ lyra/
 │   │   ├── 0002-ohlcv-data-sync.md       (已完成)
 │   │   ├── 0003-feature-builder.md       (v1.4 已实现)
 │   │   ├── 0004-yaml-compiler.md         (已实施 2026-11-08：validate/compile + 28 测试)
-│   │   ├── 0005-trade-engine.md          (已实施 v0.2，O-0005-1 OPEN)
+│   │   ├── 0005-trade-engine.md          (已实施 v0.3，O-0005-1 OPEN)
 │   │   ├── 0006-metrics-and-runner.md    (待写)
 │   │   ├── 0007-oci-push-and-backup.md   (待写)
 │   │   ├── 0008-migration-and-regression.md (待写)
@@ -332,7 +332,7 @@ lyra/
 | 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ 已完成（2026-11-07，真实数据端到端 + 批次1(2026-11-07) 对抗性审查 D1–D6 全修复，v1.1） |
 | 3 | Feature builder（标准 + alpha 扩展点） | `0003-feature-builder.md` | ✅ 核心已实现（v1.4：134 特征/6 指标族 + pandas-ta-classic 对照组 + 107 测试；alpha 扩展点 `load_from` 已实现） |
 | 4 | YAML compiler（含 feature-vs-feature） | `0004-yaml-compiler.md` | ✅ **已签收（#76，2026-11-08）**：批次2处置后 0004 专项 50/50、全仓 157/157，全 169 个现存策略 YAML 新校验零回归；O16 的 332 语料兼容仍归 0008。 |
-| 5 | Trade engine（2% stop / next-open / 成本） | `0005-trade-engine.md` | 🟢 **已实施（v0.2）**：`lyra/trade_engine.py` + 23 测试全绿；与 nova `trades.simulate` field-for-field cross-check diff=0；自检/对抗性自检 14 条全通过。**OPEN O-0005-1**：financing 天数口径——当前按 nova 自然日（cross-check 需要），与 R4/O15 交易日口径冲突，待用户拍板方案（见 0005 §5 未决项）。 |
+| 5 | Trade engine（2% stop / next-open / 成本） | `0005-trade-engine.md` | 🟢 **已实施（v0.3）**：`lyra/trade_engine.py` + 27 测试全绿；与 nova `trades.simulate` field-for-field cross-check（fuzz 300 例 / 381 笔）0 真实不一致；自检 9 条 + 对抗性自检 10 条全通过（探针 P1–P9 已执行）。**OPEN O-0005-1**：financing 天数口径——当前按 nova 自然日（cross-check 需要），与 R4/O15 交易日口径冲突，待用户拍板方案（见 0005 §5 未决项）。 |
 | 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ 待写 |
 | 7 | OCI push + backup | `0007-oci-push-and-backup.md` | ⬜ 待写 |
 | 8 | 332 策略迁移 + 回归 | `0008-migration-and-regression.md` | ⬜ 待写 |
@@ -350,6 +350,7 @@ lyra/
 | 2026-11-08 | 0.8 | **0004 已实施（2026-11-08）**：`lyra/strategy_schema.py` + `lyra/compiler.py` + `lyra/cli.py`（`validate`/`compile`）+ `tests/test_compiler.py`（28 测试全绿，含 live DuckDB 时序断言 N−1/N/N+1 / NULL gate / after_event exact-age / param 不变式）。对抗自检修复 DuckDB 2.0 inline-window、temporal 参数错位、exit.stop_loss_pct 放宽 3 处。§8 0004 状态改"已实施"；332 语料回归归 0008（见 open-questions O16，20 个缺失 feature 待用户裁决）。 |
 | 2026-11-08 | 0.9 | 按 ACTION_LOG #77 同步 §8 当前阶段：0004 状态更新为 #76 处置后的 50 项专项 / 157 项全仓验证；0005 标为开发中（工作区可见决策稿、代码与测试草稿，尚未签收），并记录 financing 自然日与 R4 交易日口径冲突及 golden test 门槛待满足。 |
 | 2026-11-08 | 0.10 | **0005 已实施（v0.2）**：`lyra/trade_engine.py` + `tests/test_trade_engine.py`（23 测试全绿）；与 nova `trades.simulate` field-for-field cross-check diff=0（§5 记录 3 行偏差：exit_time_precision 精简 / signal_time 用 bar open / **financing 自然日 vs R4·O15 交易日**）；自检 + 对抗性自检 14 条全通过；§8 0005 状态改"已实施"，登记 **OPEN O-0005-1**（financing 口径，待用户拍板方案 1/2/3，默认方案 2 保持 nova 自然日）。 |
+| 2026-11-08 | 0.11 | **0005 自检 + 对抗性自检 详细执行（v0.3）**：探针 P1–P9（边界 / 优先级 / 方向特定 exit / re-entry）全通过；fuzz 300 例 / 381 笔与 nova 0 真实不一致（119 笔 cost/net-only 差异全由 O-0005-1 解释，`financing=0` 二次 fuzz 0 不一致）；新增 4 个对抗性回归测试（pending_exit vs inside-stop 顺序 ×3 + exit_long 方向隔离），测试 23→27、全仓 180→184 绿；§8 0005 状态同步（v0.3、27 测试、自检 9 条 + 对抗性 10 条已执行）。 |
 | 2026-11-08 | 0.7 | **用户裁决同步（#73）**：0004 状态改"已定稿（2026-11-08 裁决），待排期开发"；R12 AI tracks + 每 track 8 cap + VectorBT 抛弃见 requirements v0.16 / oci-alpha-layout §2.3 / 综合稿 §9（本文件不展开）。 |
 | 2026-11-08 | 0.6 | 同步 **0003 v1.4 / 107 tests** 当前状态；0004 状态改为"提案已写、待用户审阅、未实现"；§7 proposals 目录列出 VectorBT / 多 AI 策略搜索评估（中英成对）。 |
 | 2026-11-08 | 0.7 | §7 proposals 目录登记 v2 来源稿与本轮综合稿（中英成对）；来源提案保留，综合稿待用户裁决。 |

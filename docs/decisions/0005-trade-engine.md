@@ -121,7 +121,7 @@ Slippage 已在 entry/exit price 里体现（T1/T2），**不**再加到 `costs`
 | `signal_time` | 信号 bar 的 `bar_close_time` | 信号 bar 的 `time`（= open） | 数据模型差异：nova bar 同时携带 `bar_open_time`/`bar_close_time` 两列；lyra bar 只有单列 `time`（= open，见 `aggregate.py` 的 `time_bucket`）。**不改变任何成交/P&L 语义**，仅信号时间戳相差 1 个 bar 周期。 |
 | **financing 天数口径** | 自然日（`total_seconds()/86400`） | 自然日（**同 nova**） | ⚠️ **OPEN / 与 R4+O15 冲突**：O15（用户 2026-11-06 拍板）+ R4 要求按**交易日**计（周末+市场节假日不计）。当前实现逐字段对齐 nova（自然日），是**忠实移植**，但**不满足 lyra 自身 R4/O15 口径**。见下方"未决项"。 |
 
-**field-for-field cross-check**：用同一组合成 OHLC+信号同时驱动 nova `trades.simulate` 与 lyra `trade_engine.simulate`（slippage/spread/commission/financing/mhb 全开），2 笔交易在 `instrument, direction, entry_price, exit_price, exit_reason, bars_held, gross_return, cost_return, net_return, stop_price, take_profit_price` **全部 diff=0**；唯一差异为上表三行（前两行为已记录偏差，第三行为未决项）。
+**field-for-field cross-check**：用同一组合成 OHLC+信号同时驱动 nova `trades.simulate` 与 lyra `trade_engine.simulate`（slippage/spread/commission/financing/mhb 全开）。**fuzz 300 例 / 381 笔交易**：`instrument, direction, entry_price, exit_price, exit_reason, bars_held, gross_return, cost_return, net_return, stop_price, take_profit_price` **0 个真实不一致**；119 笔在 `cost_return`/`net_return` 上有差异——**全部**由 O-0005-1（financing 自然日 vs 交易日）解释。二次 fuzz（`financing_bps_per_day=0`）300 例 / 381 笔**全字段 0 不一致**，反证该唯一差异即 O-0005-1。上表前两行（exit_time_precision 精简 / signal_time 用 bar open）为数据模型已记录偏差，不进入字段比对。
 
 ### ⚠️ 未决项（需用户拍板，不阻塞 0005 其余部分）
 
@@ -141,7 +141,7 @@ Slippage 已在 entry/exit price 里体现（T1/T2），**不**再加到 `costs`
 |---|---|---|
 | `stop_gap` | open 已越 stop（gap） | `open`（gap loss） |
 | `stop_loss` | intra-bar low/high 越 stop | `stop`（exactly 2%） |
-| `take_profit` | open 或 intra-bar 越 target | `open` 或 `target` |
+| `take_profit` | open 或 intra-bar 越 target | 恒为 `target`（limit 语义：open 越过 target 时仍按 target 成交，nova 参考实现） |
 | `indicator_exit` | exit signal 触发，下一 bar open | `open` |
 | `time_exit` | `bars >= max_holding_bars`，下一 bar open | `open` |
 | `end_of_data` | 数据耗尽时仍持仓 | `close` |
@@ -154,7 +154,7 @@ Slippage 已在 entry/exit price 里体现（T1/T2），**不**再加到 `costs`
 | `test_stop_gap_at_open` | open 已越 stop → fill at open，loss > 2% | I3, T3 |
 | `test_stop_inside_bar` | low 越 stop → fill at stop（exactly 2%） | I3, T4 |
 | `test_stop_wins_over_target_same_bar` | 同 bar 同触 → stop 优先 | I4, T6 |
-| `test_take_profit_at_open` | open 已越 target → fill at open | T5 |
+| `test_take_profit_at_open` | open 已越 target → **fill at target**（limit 语义，与 stop_gap 不同；nova `trades.py` 参考实现） | T5 |
 | `test_indicator_exit_next_open` | exit signal bar T → fill at T+1 open | I2, T7 |
 | `test_time_exit_next_open` | bars == mhb → next bar open fill | T7 |
 | `test_one_trade_per_instrument` | 持仓期间 entry 信号忽略 | I5 |
@@ -163,7 +163,11 @@ Slippage 已在 entry/exit price 里体现（T1/T2），**不**再加到 `costs`
 | `test_cost_financing_proportional` | financing 按天计 | cost model |
 | `test_long_short_symmetry` | 同 OHLC long/short 对称 | I2, T1-T2 |
 | `test_deterministic` | 同输入同输出（多次） | 确定性 |
-| `test_golden_trades_vs_nova` | 对 nova 真实 trades.csv 子集逐字段 diff=0 | 全部 |
+| ~~`test_golden_trades_vs_nova`~~ | ~~对 nova 真实 trades.csv 子集逐字段 diff=0~~ **已降级**：nova runs 无 market bars 输入，改为 §5 的双实现 cross-check（更强） | 全部 |
+| `test_pending_exit_beats_inside_stop_same_bar` | pending exit（open 层）优先于 inside-stop（nova 顺序） | 优先级 |
+| `test_pending_exit_loses_to_stop_gap` | stop-gap（open 层）优先于 pending exit | 优先级 |
+| `test_pending_exit_loses_to_target_at_open` | target_at_open（open 层）优先于 pending exit | 优先级 |
+| `test_exit_long_does_not_close_short` | exit 信号方向特定（exit_long 不影响 short 仓） | 方向隔离 |
 
 **golden test** 是 0005 的**硬门槛**：nova `runs/*/trades.csv` 选 3-5 个
 不同 exit reason 的交易，逐字段（entry_price, exit_price, gross, net,
@@ -180,27 +184,33 @@ bars_held, exit_reason）与 lyra 输出 diff=0。
 
 ### 自检
 
-- [x] entry fill 在 T+1 open，不在 T close（I2）。
-- [x] stop 是 2%（I3），不可放宽（0004 已保证，0005 只执行）。
-- [x] stop 优先于 target（I4）。
-- [x] 一标的一笔（I5）。
-- [x] 成本公式与 nova `trades.py` 逐字段一致（commission flat + financing 按天 + slippage 在 price 里）。*注：financing 的"天"=自然日（与 nova 一致），与 O15/R4 交易日口径冲突 → 见 §5 未决项 O-0005-1。*
-- [x] 纯函数、确定性、无全局状态。
-- [x] 与 nova `trades.simulate` 直接逐字段 diff=0（field-for-field cross-check，见 §5 偏差说明）。
+- [x] entry fill 在 T+1 open，不在 T close（I2）。*探针：`test_entry_fill_at_next_open` + fuzz。*
+- [x] stop 是 2%（I3），不可放宽（0004 已保证，0005 只执行）。*探针：`test_stop_inside_bar` + P2（low==stop 边界）。*
+- [x] stop 优先于 target（I4）。*探针：`test_stop_wins_over_target_same_bar` + P5b + P6。*
+- [x] 一标的一笔（I5）。*探针：`test_one_trade_per_instrument` + P8（re-entry 序列）。*
+- [x] 成本公式与 nova `trades.py` 逐字段一致（commission flat + financing 按天 + slippage 在 price 里）。*注：financing 的"天"=自然日（与 nova 一致），与 O15/R4 交易日口径冲突 → 见 §5 未决项 O-0005-1。探针：`test_cost_commission_flat` + `test_cost_financing_proportional` + `test_slippage_in_entry_price` + fuzz 300 例。*
+- [x] 纯函数、确定性、无全局状态。*探针：`test_deterministic` + fuzz 300 例（无全局状态副作用）。*
+- [x] 与 nova `trades.simulate` 直接逐字段 diff=0（field-for-field cross-check，见 §5 偏差说明）。*fuzz 300 例 / 381 笔，0 真实不一致；financing=0 二次 fuzz 0 不一致。*
+- [x] 方向特定 exit 信号（`exit_long` 不影响 short 仓）。*探针 P9。*
+- [x] exit 优先级：`stop_at_open` → `target_at_open` → `pending_exit`（open 层） → `stop_inside` / `target_inside`（bar 内）。*探针 P5/P5b/P6/P7。*
 
 **golden test 处置**：§6 原计划以 nova `runs/*/trades.csv` 为 oracle 的 golden test，因 nova runs 不携带 market bars（只有 signals/trades 产物），无法离线重放输入 bars，故降级为**与 nova `simulate` 直接逐字段 cross-check**（更强：同输入双实现 diff=0）。待 0006 runner 接入真实 bronze→bars 后，再补真实数据 golden test。
 
-### 对抗性自检（计划）
+### 对抗性自检（已执行 2026-11-08）
 
 | 攻击点 | 发现 | 处置 |
 |---|---|---|
-| 同 bar open 同时越 stop 和 target | 如果 target 先判，作者会少亏 2%+ 多赚 tp%，语义翻转 | stop 先判（I4），golden test 覆盖 |
-| gap 超过 2% 时 fill 在 stop 还是 open | fill 在 stop 会虚报 P&L（实际 gap 价成交） | fill 在 open（T3），gap loss 真实 |
-| slippage 加两次（price 里一次 + costs 里一次） | 成本虚高一倍 | slippage 只在 T1/T2 price 里，costs 只有 commission+financing |
-| financing 按 bar 数而非天 | 跨周末/假日时成本失真 | 按天（`total_seconds()/86400`），与 nova 一致 |
-| max_holding_bars 边界（== 还是 >） | 多/少 hold 1 bar | nova 是 `>=`，lyra 同（T7） |
+| 同 bar open 同时越 stop 和 target | 如果 target 先判，作者会少亏 2%+ 多赚 tp%，语义翻转 | stop 先判（I4），fuzz 覆盖 |
+| gap 超过 2% 时 fill 在 stop 还是 open | fill 在 stop 会虚报 P&L（实际 gap 价成交） | fill 在 open（T3），gap loss 真实；探针 P7 验证 |
+| open 越 target 时 fill 在 target 还是 open | fill 在 open 会虚报盈利（limit 语义：不会拿到比 target 更好的价） | **fill 在 target**（nova 参考实现，limit 语义）；探针 P3/P6 验证 |
+| slippage 加两次（price 里一次 + costs 里一次） | 成本虚高一倍 | slippage 只在 T1/T2 price 里，costs 只有 commission+financing；fuzz 覆盖 |
+| financing 按 bar 数而非天 | 跨周末/假日时成本失真 | 按自然日（`total_seconds()/86400`），与 nova 一致；**O-0005-1 未决**（R4/O15 要求交易日） |
+| max_holding_bars 边界（== 还是 >） | 多/少 hold 1 bar | nova 是 `>=`，lyra 同（T7）；探针 P4 验证 |
 | 跨 instrument 信号泄漏 | per-instrument 单线程，无并行 → 无泄漏 | 0005 只接 single-instrument bars，0006 runner 负责隔离 |
-| entry_long 和 entry_short 同时 TRUE | 歧义 | nova 是 `bool(long) != bool(short)` 才入场，lyra 同 |
+| entry_long 和 entry_short 同时 TRUE | 歧义 | nova 是 `bool(long) != bool(short)` 才入场，lyra 同；探针 P8 验证 |
+| **exit_long 信号能否关掉 short 仓** | 方向泄漏 | nova/lyra 都是 `f"exit_{direction}"` 只读对应方向；**探针 P9 验证 exit_long 不影响 short 持仓** |
+| **pending_exit（open fill）与 inside-stop 同 bar** | 若 inside-stop 先判，pending 信号失效；nova 的实际顺序是 **open 层优先**（stop_at_open → target_at_open → pending_exit → inside） | 与 nova 一致（open 时序优先）；**探针 P5 验证 pending_exit 赢过 inside-stop** |
+| **stop_at_open 与 target_at_open 同时成立** | 双 gap 极端：open 同时越 stop 和 target | nova 是 `if/elif`：stop_gap 先判（loss 侧优先）；**探针 P6 变体已 fuzz 覆盖** |
 
 ## 修订记录
 
@@ -208,3 +218,4 @@ bars_held, exit_reason）与 lyra 输出 diff=0。
 |---|---|---|
 | 2026-11-08 | 0.1 | 初稿：确定 trade engine 边界、API、不变量（T1-T8）、测试矩阵、golden test 硬门槛、对抗性自检 7 条。待用户审阅后实施。 |
 | 2026-11-08 | 0.2 | 实施完成：`lyra/trade_engine.py` + `tests/test_trade_engine.py`（23 测试全绿）。自检 7 条全通过；对抗性自检 7 条全通过（含 gap>2% fill 在 open、slippage 不双计、bool(long)!=bool(short) 等）。与 nova `trades.simulate` field-for-field cross-check diff=0。golden test 降级为 cross-check（nova runs 无 market bars），§6/§8 已标注。记录两行偏差（exit_time_precision 精简、signal_time 用 bar open）。**新发现未决项 O-0005-1**：financing 天数口径（nova=自然日 vs R4/O15=交易日），当前按 nova 自然日，标记 OPEN 待用户拍板。 |
+| 2026-11-08 | 0.3 | **自检 + 对抗性自检 详细执行**：① 逐条探针 P1–P9（边界 open==stop / low==stop / high==target；优先级 stop_at_open > target_at_open > pending_exit > stop_inside/target_inside；方向特定 exit_long 不影响 short 仓；re-entry 序列）全部通过；② **fuzz 300 例 / 381 笔**：与 nova `trades.simulate` 0 真实不一致，119 笔 cost/net-only 差异全部由 O-0005-1 解释；`financing=0` 二次 fuzz 300 例 / 381 笔**全字段 0 不一致**，反证该唯一差异即 O-0005-1；③ 新增 4 个对抗性回归测试：`test_pending_exit_beats_inside_stop_same_bar` / `test_pending_exit_loses_to_stop_gap` / `test_pending_exit_loses_to_target_at_open` / `test_exit_long_does_not_close_short`；测试数 **23→27**，全仓 **180→184** 绿；④ §5 偏差表 / §6 测试矩阵 / §8 自检 / §8 对抗性自检 全同步；对抗性自检表由"计划"改为"已执行 2026-11-08"，新增 3 行攻击点（open 越 target fill 语义 / exit_long 方向隔离 / pending_exit vs inside-stop 顺序）。 |
