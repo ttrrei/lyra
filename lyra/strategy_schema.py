@@ -385,22 +385,27 @@ def _collect_features(node: ExprNode, acc: set[str]) -> None:
 # ---------------------------------------------------------------------------
 
 def _parse_value_rhs(value: Any, registry: Registry, *, file: str | None,
-                     yaml_path: str) -> tuple[bool, Any, str | None]:
+                     yaml_path: str) -> tuple[bool, Any, str | None,
+                                             "FeatureKind | None"]:
     """Resolve the RHS ``value`` to either a bound constant or a column.
 
-    Returns ``(is_const, const_value, col_name)`` — exactly one of
+    Returns ``(is_const, const_value, col_name, col_kind)`` — exactly one of
     ``const_value`` / ``col_name`` is set, selected by ``is_const``.
+    ``col_kind`` is the resolved column's ``FeatureKind`` (``None`` for a
+    constant or an OHLC alias) so the caller can gate feature-vs-feature
+    comparisons by value domain (0004 M1, batch-4 review) without a second
+    resolve pass.
     """
     if isinstance(value, bool):
-        return True, value, None
+        return True, value, None, None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if math.isnan(value) or math.isinf(value):
             raise SchemaError("NaN/Infinity not allowed as a comparison value",
                               file=file, yaml_path=f"{yaml_path}.value")
-        return True, value, None
+        return True, value, None, None
     if isinstance(value, str):
-        col, _kind = _resolve_column(value, registry, file=file, yaml_path=yaml_path)
-        return False, None, col
+        col, kind = _resolve_column(value, registry, file=file, yaml_path=yaml_path)
+        return False, None, col, kind
     raise SchemaError(
         f"comparison value must be a number, boolean, or known column name, "
         f"got {type(value).__name__}",
@@ -424,7 +429,7 @@ def _parse_expr(node: Any, registry: Registry, *, file: str | None,
                 raise SchemaError(
                     f"boolean/event column {left_col!r} only supports eq/ne, got {op!r}",
                     file=file, yaml_path=f"{yaml_path}.op")
-            is_const, const_value, right_col = _parse_value_rhs(
+            is_const, const_value, right_col, right_kind = _parse_value_rhs(
                 node["value"], registry, file=file, yaml_path=yaml_path)
 
             # H1 (batch-2 adversarial review): gate the constant type against
@@ -458,6 +463,42 @@ def _parse_expr(node: Any, registry: Registry, *, file: str | None,
                         f"event {left_col!r} compares only to true/false, "
                         f"got {const_value!r}",
                         file=file, yaml_path=f"{yaml_path}.value")
+            elif not is_const and right_col is not None:
+                # M1 (batch-4 review): gate *feature-vs-feature* comparisons by
+                # value domain.  Without this, ``close > psar_bullish``
+                # (VALUE vs boolean STATE) raises a DuckDB BinderException at
+                # run time, and ``sma_alignment_6_24 == psar_bullish`` (ordinal
+                # STATE vs boolean STATE) silently compiles to ``0 = FALSE →
+                # TRUE``.  The left side's domain is already validated above;
+                # here we check the column RHS against it.
+                def _bool_domain(col: str, kind: FeatureKind | None) -> bool:
+                    if kind is None:
+                        return False  # VALUE / OHLC alias → numeric
+                    if kind is FeatureKind.STATE:
+                        return not _state_is_ordinal(col, registry)
+                    return kind is FeatureKind.EVENT  # boolean
+                right_bool = _bool_domain(right_col, right_kind)
+                left_bool = (
+                    left_kind is FeatureKind.STATE
+                    and not _state_is_ordinal(left_col, registry)
+                ) or (left_kind is FeatureKind.EVENT)
+                if right_bool != left_bool:
+                    raise SchemaError(
+                        f"incompatible value domains in comparison "
+                        f"{left_col!r} vs {right_col!r}: one is boolean "
+                        f"(state/event) and the other is numeric — an explicit "
+                        f"cast is required (0004 M1, batch-4 review)",
+                        file=file, yaml_path=f"{yaml_path}.value")
+            elif (is_const and isinstance(const_value, bool)
+                    and left_kind in (FeatureKind.VALUE, None)):
+                # VALUE features (and OHLC aliases) are numeric; comparing them
+                # to a boolean constant is a type error (close eq true), not
+                # a valid filter.  (0004 M1, batch-4 review)
+                raise SchemaError(
+                    f"{left_col!r} is a numeric value feature and cannot be "
+                    f"compared to a boolean constant {const_value!r}; use a "
+                    f"numeric comparison",
+                    file=file, yaml_path=f"{yaml_path}.value")
             return _LeafNode(cmp=ComparisonLeaf(
                 left_col=left_col, op=op, right_is_const=is_const,
                 right_const=const_value, right_col=right_col, left_kind=left_kind),
@@ -704,10 +745,23 @@ def _normalize_exit_and_execution(data: dict, registry: Registry, *,
                              file=file, yaml_path="exit")
 
         # Legacy README form: exit.feature.when → shared for both directions.
+        # 0004 M3 (batch-4 review): the block must be a *dict* with only the
+        # documented key ``when``.  A typo'd key (``whenn``) or a non-dict
+        # value used to be silently ignored, so a strategy could run with
+        # the default exit while the author believed a custom exit applied.
+        # Fail closed instead.
         legacy_when = None
         feature_block = exit_raw.get("feature")
-        if isinstance(feature_block, dict) and "when" in feature_block:
-            legacy_when = feature_block["when"]
+        if feature_block is not None:
+            if not isinstance(feature_block, dict):
+                raise SchemaError(
+                    f"exit.feature must be a mapping with a 'when' clause, "
+                    f"got {type(feature_block).__name__}",
+                    file=file, yaml_path="exit.feature")
+            _reject_unknown_keys(
+                feature_block, frozenset({"when"}),
+                file=file, yaml_path="exit.feature")
+            legacy_when = feature_block.get("when")
 
         for side in ("long", "short"):
             expr = exit_raw.get(side)

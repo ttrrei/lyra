@@ -108,13 +108,20 @@ def test_run_single_instrument_matches_engine(env):
     plan = compiler.compile_strategy(spec, reg, feature_catalog_snapshot="x")
     con = duckdb.connect(str(catalog.Catalog(data_root / "catalog.duckdb").path),
                          read_only=True)
+    # C1 (batch-4): plan.sql now carries OHLC + signals (10 cols).
     signals = con.execute(plan.sql, list(plan.params)).fetchall()
-    sig_by_inst: dict = {}
-    for (inst, t, el, es, xl, xs) in signals:
-        sig_by_inst.setdefault(inst, {})[t] = (bool(el), bool(es), bool(xl), bool(xs))
-    bars = runner._bars_for_instrument(con, plan.view, "EURUSD", sig_by_inst["EURUSD"])
+    bars = [
+        {
+            "instrument": inst, "time": t,
+            "mid_o": o, "mid_h": h, "mid_l": l, "mid_c": c,
+            "entry_long": bool(el), "entry_short": bool(es),
+            "exit_long": bool(xl), "exit_short": bool(xs),
+        }
+        for (inst, t, o, h, l, c, el, es, xl, xs) in signals
+        if inst == "EURUSD"
+    ]
     con.close()
-    direct = te.simulate(plan, bars, trading_days=None)
+    direct = te.simulate(plan, bars, trading_days_for=None)
     run_trades = res.trades["EURUSD"]
     assert len(run_trades) == len(direct)
     for a, b in zip(run_trades, direct):
@@ -164,10 +171,12 @@ def test_run_reproducible_identical_manifest(env):
 def test_run_reproducible_perturbation_fails(env):
     base = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
                                out_dir=env["strat"].parent / "base")
-    # parameter perturbation -> different run_id
+    # parameter perturbation -> different run_id.  A per-trade trading-day
+    # counter (C2) switches the financing basis to "trading", which is part
+    # of the run identity → a different run_id than the calendar default.
     pert = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
                                out_dir=env["strat"].parent / "pert",
-                               financing_days=3.0)
+                               trading_days_for=lambda e, x: 1.0)
     assert pert.run_id != base.run_id
 
 
@@ -229,16 +238,20 @@ def test_run_report_fields(env):
 
 
 def test_run_financing_wired(env):
-    """O17: default per-trade calendar days; --financing-days override is honored."""
+    """O17/C2: default financing is per-trade natural days; a per-trade
+    trading-day counter (``trading_days_for``) is honored and changes the
+    run identity (D6).  The old flat ``--financing-days`` scalar was removed
+    (0004 C2) because it mischarged every trade the same day count."""
     base = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
                                out_dir=env["strat"].parent / "base")
     # A trade held multiple days with financing_bps_per_day=10 must carry a
     # non-zero cost_return (financing), not just zero.
     has_financing = any(t.cost_return > 0 for t in base.trades["EURUSD"])
     assert has_financing
-    # override changes the run_id (D6)
+    # a per-trade trading-day counter is honored and changes the run_id (D6)
     ov = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
-                             out_dir=env["strat"].parent / "ov", financing_days=2.0)
+                             out_dir=env["strat"].parent / "ov",
+                             trading_days_for=lambda e, x: 2.0)
     assert ov.run_id != base.run_id
 
 
@@ -251,10 +264,10 @@ def test_run_instrument_failure_isolated(env, monkeypatch):
     """
     real_simulate = runner.simulate
 
-    def _boom(plan, bars, *, trading_days=None):
+    def _boom(plan, bars, *, trading_days_for=None):
         if bars and bars[0]["instrument"] == "GBPUSD":
             raise RuntimeError("simulated per-instrument failure")
-        return real_simulate(plan, bars, trading_days=trading_days)
+        return real_simulate(plan, bars, trading_days_for=trading_days_for)
 
     monkeypatch.setattr(runner, "simulate", _boom)
     res = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],

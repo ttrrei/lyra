@@ -328,7 +328,6 @@ def run(
     name: str | None = typer.Option(None, "--name", help="Run display name (default = strategy id)"),
     out: str | None = typer.Option(None, "--out", help="Artifact root (default ~/.lyra/runs; B13 out-of-repo)"),
     strict: bool = typer.Option(False, "--strict", help="Fail if any instrument failed (I16)"),
-    financing_days: float | None = typer.Option(None, "--financing-days", help="Flat trading-day override for every trade (O17); default = per-trade calendar days"),
 ) -> None:
     """Run a strategy end-to-end (0006): signals -> trade engine -> metrics.
 
@@ -341,9 +340,13 @@ def run(
 
     reg = _registry_for(alpha_dir, config)
     try:
+        # C2 (batch-4 review): the flat ``--financing-days`` scalar was
+        # removed from the engine (it mischarged every trade the same day
+        # count). The default is per-trade natural days; a real trading-day
+        # calendar is a future enhancement (O17).
         result = runner_mod.run_strategy(
             strategy, data_dir, registry=reg, name=name, out_dir=out,
-            strict=strict, financing_days=financing_days,
+            strict=strict,
         )
     except schema_mod.SchemaError as exc:
         typer.secho(f"INVALID: {exc}", fg=typer.colors.RED, err=True)

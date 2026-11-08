@@ -309,9 +309,59 @@ def test_cost_financing_trading_days_override():
     # natural-day default (nova-compatible basis) = 7 * 1% = 0.07
     natural = te.simulate(plan, bars)[0]
     assert natural.cost_return == pytest.approx(0.07)
-    # R4/O15 trading-day basis via override = 5 * 1% = 0.05
-    trading = te.simulate(plan, bars, trading_days=5)[0]
+    # R4/O15 trading-day basis via a per-trade counter = 5 * 1% = 0.05
+    trading = te.simulate(plan, bars,
+                          trading_days_for=lambda e, x: 5.0)[0]
     assert trading.cost_return == pytest.approx(0.05)
+
+
+def test_cost_financing_trading_days_per_trade():
+    """C2 (batch-4 review): the trading-day count must be applied **per
+    trade**, not as one flat scalar shared by every trade in a
+    ``simulate()`` call.
+
+    Two trades in the same series: A held 1 day, B held 10 days.  A
+    flat scalar (the old design) would charge both the same day count.  A
+    per-trade counter charges A→1, B→10 — verified here with a counter that
+    derives days from each trade's own interval.
+    """
+    base = dt.datetime(2026, 10, 1, tzinfo=dt.timezone.utc)
+    D = dt.timedelta(days=1)
+    # A signal at bar 0 → fills at bar 1's open (t1); A exit signal at bar 1
+    # → fills at bar 2's open (t2).  Held t1→t2 = 1 day.
+    # B signal at bar 3 → fills at bar 4's open (t4); B exit signal at bar 13
+    # → fills at bar 14's open (t14).  Held t4→t14 = 10 days.
+    # (bar 2 is A's exit-fill bar — no re-entry allowed on that bar.)
+    def _mk(i, o=1.0):
+        return {"instrument": "X", "time": base + i * D, "mid_o": o,
+                "mid_h": o + .01, "mid_l": o - .01, "mid_c": o,
+                "entry_long": False, "entry_short": False,
+                "exit_long": False, "exit_short": False}
+    bars = []
+    for i in range(15):
+        b = _mk(i)
+        if i == 0:
+            b["entry_long"] = True          # A signal → enters at bar 1 (t1)
+        if i == 1:
+            b["exit_long"] = True           # A exit → fills bar 2 (t2); 1 day
+        if i == 3:
+            b["entry_long"] = True          # B signal → enters at bar 4 (t4)
+        if i == 13:
+            b["exit_long"] = True           # B exit → fills bar 14 (t14); 10 days
+        bars.append(b)
+    # A per-trade counter: count the natural days of each trade's interval.
+    def days(e, x):
+        return (x - e).total_seconds() / 86400
+    trades = te.simulate(_plan(financing_bps_per_day=100), bars,
+                         trading_days_for=days)
+    assert len(trades) == 2
+    a, b = trades[0], trades[1]
+    # A held 1 day → 1% = 0.01; B held 10 days → 10% = 0.10.
+    assert a.cost_return == pytest.approx(0.01)
+    assert b.cost_return == pytest.approx(0.10)
+    # Sanity: the two trades carry *different* financing — impossible with a
+    # single flat scalar, the whole point of the C2 fix.
+    assert a.cost_return != b.cost_return
 
 
 def test_cost_financing_fail_closed_mixed_tz():
@@ -342,9 +392,9 @@ def test_cost_financing_fail_closed_mixed_tz():
 
 
 def test_cost_financing_rejects_bad_override():
-    """M2 (review 批次3): the trading_days override must be a usable
-    non-negative finite number — NaN / inf / negative / non-numeric all
-    raise, never silently drop financing."""
+    """M2 (review 批次3) / C2 (批次4): the per-trade trading-day counter must
+    return a usable non-negative finite number — NaN / inf / negative /
+    non-numeric all raise, never silently drop financing."""
     entry = T0
     bars = [
         {"instrument": "X", "time": entry, "mid_o": 1.0, "mid_h": 1.0,
@@ -358,9 +408,14 @@ def test_cost_financing_rejects_bad_override():
          "exit_long": False, "exit_short": False},
     ]
     plan = _plan(financing_bps_per_day=100)
+    # C2: the per-trade counter must return a usable finite number >= 0.
+    # NaN / inf / negative / non-numeric (raises on float()) all raise —
+    # never silently drop financing.
     for bad in (float("nan"), float("inf"), -1, "three"):
+        def _counter(e, x, _bad=bad):
+            return _bad
         with pytest.raises(ValueError):
-            te.simulate(plan, bars, trading_days=bad)
+            te.simulate(plan, bars, trading_days_for=_counter)
 
 
 def test_long_short_symmetry():
@@ -443,6 +498,86 @@ def test_spread_in_entry_price():
     # long entry: quote(bar, -1, "mid_o", 10) = 1.00 * (1 - (-1)*10/20000)
     # = 1.00 * 1.0005 = 1.0005
     assert t.entry_price == pytest.approx(1.0005)
+
+
+def test_b4_m2_real_bid_ask_columns_used():
+    """M2 (batch-4 review): ``_quote`` must read the *real* bronze/silver
+    columns ``bid_o``/``ask_o`` (``clean.py``/``oanda.py``), not the ghost
+    ``bid_mid_o``/``ask_mid_o`` the old string-concatenation produced.
+
+    A bar carrying both ``mid_o`` and a true bid/ask quote must fill at the
+    real quote — not at ``mid`` with a synthetic spread on top.
+    """
+    bar = {"mid_o": 1.0, "bid_o": 0.9990, "ask_o": 1.0010}
+    # long wants the bid; short wants the ask.  Both must now be found.
+    assert te._quote(bar, 1, "mid_o", 0.0) == pytest.approx(0.9990)
+    assert te._quote(bar, -1, "mid_o", 0.0) == pytest.approx(1.0010)
+    # Without a real quote the mid fallback still applies the spread.
+    mid_only = {"mid_o": 1.0}
+    assert te._quote(mid_only, 1, "mid_o", 10.0) == pytest.approx(
+        1.0 * (1 - 10.0 / 20000))
+
+
+def test_b4_m2_real_bid_ask_drives_fill_price():
+    """M2 (batch-4 review): a bar with a real bid/ask must change the entry
+    fill price to the real quote, proving the ghost-column path is gone."""
+    bars = [
+        _bar(0, 1.00, 1.01, 0.99, 1.00, entry_long=True),
+        _bar(1, 1.00, 1.01, 0.99, 1.00),
+        _bar(2, 1.00, 1.01, 0.99, 1.00, exit_long=True),
+        _bar(3, 1.01, 1.02, 1.00, 1.01),
+    ]
+    # Inject a real bid_o/ask_o into the entry-fill bar (bar 1's open).
+    bars[1]["bid_o"] = 0.9990
+    bars[1]["ask_o"] = 1.0010
+    trades = te.simulate(_plan(spread_bps=0.0), bars)
+    # Long *entry* is a BUY → fills at the real ask_o (1.0010), not mid (1.0).
+    # (The ghost-column bug forced the mid fallback, giving exactly 1.0.)
+    assert trades[0].entry_price == pytest.approx(1.0010)
+
+
+def test_b4_m1_end_of_data_exit_timestamp_is_bar_close():
+    """m1 (batch-4 review): an end-of-data force close fills at the last
+    bar's *close* price, so its exit timestamp must be the bar *close* time
+    (bar open + one bar interval), not the bar open.  Otherwise a trade
+    entered at the last bar's open and closed at its close accrues 0 days of
+    financing despite holding a full bar.
+    """
+    base = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    H = dt.timedelta(hours=1)
+    b0 = {"instrument": "X", "time": base, "mid_o": 1.0, "mid_h": 1.0,
+          "mid_l": 0.99, "mid_c": 1.0, "entry_long": True,
+          "entry_short": False, "exit_long": False, "exit_short": False}
+    b1 = {"instrument": "X", "time": base + H, "mid_o": 1.0, "mid_h": 1.0,
+          "mid_l": 0.99, "mid_c": 1.0, "entry_long": False,
+          "entry_short": False, "exit_long": False, "exit_short": False}
+    # Signal at bar 0 → entry at bar 1's open (base+1h).  Bar 1 is the last
+    # bar, so the position is force-closed by end-of-data at bar 1's close
+    # (base+2h, given timeframe_minutes=60).
+    trades = te.simulate(_plan(timeframe_minutes=60,
+                               financing_bps_per_day=100), [b0, b1])
+    assert len(trades) == 1
+    t = trades[0]
+    # entry at base+1h; exit at bar 1's close = base+2h → 1h = 1/24 day.
+    # financing = 100bps (0.01/day) * (1/24 day) = 0.01 * 1/24.
+    assert t.exit_reason == "end_of_data"
+    assert t.exit_time == base + 2 * H
+    assert t.cost_return == pytest.approx(0.01 * (1 / 24))
+
+
+def test_b4_m2_simulate_rejects_mixed_instruments():
+    """m2 (batch-4 review): ``simulate`` must simulate ONE instrument at a
+    time (0005 I1, one trade per instrument).  A mixed-instrument sequence
+    would silently interleave two instruments' signals into one position;
+    the engine must fail closed instead."""
+    bars = [
+        _bar(0, 1.00, 1.01, 0.99, 1.00, entry_long=True),
+        _bar(1, 1.00, 1.01, 0.99, 1.00),
+        _bar(2, 1.00, 1.01, 0.99, 1.00),
+    ]
+    bars[2]["instrument"] = "OTHER_INST"  # mixed instrument
+    with pytest.raises(ValueError, match="single instrument"):
+        te.simulate(_plan(), bars)
 
 
 def test_bars_held_counting():

@@ -12,8 +12,9 @@ Data model (0006 D3, verified against the real 0004/0005 contracts):
   ``SELECT instrument, time, entry_long, entry_short, exit_long, exit_short
   FROM <view> ORDER BY instrument, time`` (one row per bar; booleans).
 - The same ``<view>`` carries OHLC: ``mid_o/mid_h/mid_l/mid_c``.
-- ``simulate(plan, bars, *, trading_days=None)`` takes **bars as a list of
-  dicts** (``instrument/time/mid_*/entry_*/exit_*``) and returns ``Trade[]``
+- ``simulate(plan, bars, *, trading_days_for=None)`` takes **bars as a list
+  of dicts** (``instrument/time/mid_*/entry_*/exit_*``) and returns
+  ``Trade[]``
   whose net field is ``Trade.net_return``.
 """
 
@@ -35,7 +36,7 @@ from . import features as features_mod
 from . import metrics as metrics_mod
 from . import strategy_schema as schema_mod
 from .catalog import Catalog
-from .trade_engine import Trade, simulate
+from .trade_engine import Trade, TradingDaysCounter, simulate
 
 _ENGINE_VERSION = "0006-v0.1"  # 0006 run-pipeline implementation version (manifest).
 
@@ -129,35 +130,6 @@ class RunResult:
 # Per-instrument bar assembly
 # ---------------------------------------------------------------------------
 
-def _bars_for_instrument(
-    con: duckdb.DuckDBPyConnection,
-    view: str,
-    instrument: str,
-    signal_rows: Mapping[Any, tuple[bool, bool, bool, bool]],
-) -> list[dict[str, Any]]:
-    """Fetch an instrument's OHLC bars and attach the 0004 boolean signals.
-
-    ``signal_rows`` maps ``time -> (entry_long, entry_short, exit_long,
-    exit_short)``; the 0004 signal SQL emits one row per bar, so every bar
-    resolves (missing -> all-FALSE, i.e. no entry/exit that bar).
-    """
-    rows = con.execute(
-        f"SELECT time, mid_o, mid_h, mid_l, mid_c FROM {_q(view)} "
-        f"WHERE instrument = ? ORDER BY time", [instrument],
-    ).fetchall()
-    bars: list[dict[str, Any]] = []
-    for t, o, h_, l, c in rows:
-        sig = signal_rows.get(t, (False, False, False, False))
-        bars.append({
-            "instrument": instrument,
-            "time": t,
-            "mid_o": o, "mid_h": h_, "mid_l": l, "mid_c": c,
-            "entry_long": bool(sig[0]), "entry_short": bool(sig[1]),
-            "exit_long": bool(sig[2]), "exit_short": bool(sig[3]),
-        })
-    return bars
-
-
 # ---------------------------------------------------------------------------
 # Artifact writers (deterministic row order; created-at excluded from run_id)
 # ---------------------------------------------------------------------------
@@ -212,7 +184,7 @@ def run_strategy(
     name: str | None = None,
     out_dir: str | Path | None = None,
     strict: bool = False,
-    financing_days: float | None = None,
+    trading_days_for: TradingDaysCounter | None = None,
 ) -> RunResult:
     """Run one strategy end-to-end and write the 0006 run artifacts.
 
@@ -223,8 +195,13 @@ def run_strategy(
     - ``name``: run display name (defaults to the strategy id).
     - ``out_dir``: artifact root (defaults to ``~/.lyra/runs``; B13 out-of-repo).
     - ``strict``: raise if any instrument failed (I16); else record failures.
-    - ``financing_days``: optional flat trading-day override for every trade
-      (D6/O17; ``None`` = per-trade calendar days from bar timestamps).
+    - ``trading_days_for``: optional **per-trade** trading-day counter
+      ``counter(entry_time, exit_time) -> float`` (D6/O17; ``None`` =
+      per-trade natural/calendar days derived from bar timestamps, which is
+      the default and the nova cross-check basis). The flat
+      ``--financing-days`` scalar was removed (0004 C2, batch-4 review) — it
+      mischarged every trade the same day count, so a real trading calendar
+      must count each trade's held interval individually.
     """
     strategy_path = Path(strategy_path)
     data_dir = Path(data_dir)
@@ -247,23 +224,27 @@ def run_strategy(
     # 2) signal SQL + per-instrument OHLC (I16 isolation) --------------------
     con = duckdb.connect(str(cat.path), read_only=True)
     try:
+        # C1 (batch-4): plan.sql now projects OHLC + signals, so the signal
+        # rows carry everything simulate() needs — no second OHLC query.
         signals = con.execute(plan.sql, list(plan.params)).fetchall()
-        sig_by_inst: dict[str, dict[Any, tuple[bool, bool, bool, bool]]] = {}
-        for (inst, t, el, es, xl, xs) in signals:
-            sig_by_inst.setdefault(inst, {})[t] = (
-                bool(el), bool(es), bool(xl), bool(xs),
-            )
-        instruments = sorted(sig_by_inst)
+        bars_by_inst: dict[str, list[dict[str, Any]]] = {}
+        for (inst, t, o, h, l, c, el, es, xl, xs) in signals:
+            bars_by_inst.setdefault(inst, []).append({
+                "instrument": inst, "time": t,
+                "mid_o": o, "mid_h": h, "mid_l": l, "mid_c": c,
+                "entry_long": bool(el), "entry_short": bool(es),
+                "exit_long": bool(xl), "exit_short": bool(xs),
+            })
+        instruments = sorted(bars_by_inst)
 
         # 3) per-instrument simulate + metrics (I7: never aggregate across) --
         result = RunResult(run_id="", out_dir=Path(out_dir) if out_dir
                            else _default_out(), instrument_failures=[])
         for inst in instruments:
             try:
-                bars = _bars_for_instrument(con, plan.view, inst,
-                                            sig_by_inst[inst])
+                bars = bars_by_inst[inst]
                 result.bars_by_instrument[inst] = bars
-                trades = simulate(plan, bars, trading_days=financing_days)
+                trades = simulate(plan, bars, trading_days_for=trading_days_for)
                 result.trades[inst] = trades
                 if bars:
                     start_t, end_t = bars[0]["time"], bars[-1]["time"]
@@ -291,7 +272,7 @@ def run_strategy(
         engine_version=_ENGINE_VERSION,
         duckdb_version=duckdb.__version__,
         params=_params_dict(plan),
-        trading_days_override=financing_days,
+        trading_days_basis="trading" if trading_days_for else "calendar",
         data_digest=data_digest,
         schema_version=spec.version,
         spec_id=spec.id,
@@ -304,7 +285,7 @@ def run_strategy(
     run_date = datetime.now(timezone.utc).strftime("%Y%m%d")
     run_dir = Path(result.out_dir) / run_name / run_date
     run_dir.mkdir(parents=True, exist_ok=True)
-    _write_artifacts(run_dir, plan, spec, result, run_id, financing_days,
+    _write_artifacts(run_dir, plan, spec, result, run_id, trading_days_for,
                      feature_catalog_snapshot)
     result.out_dir = run_dir
 
@@ -341,7 +322,7 @@ def _compute_run_id(
     engine_version: str,
     duckdb_version: str,
     params: dict[str, Any],
-    trading_days_override: float | None,
+    trading_days_basis: str,
     data_digest: str,
     schema_version: int,
     spec_id: str,
@@ -357,7 +338,7 @@ def _compute_run_id(
         "schema_version": schema_version,
         "plan_hash": plan_hash,
         "params": params,
-        "trading_days_override": trading_days_override,
+        "trading_days_basis": trading_days_basis,
         "feature_version": feature_version,
         "compiler_version": compiler_version,
         "engine_version": engine_version,
@@ -452,9 +433,8 @@ def _write_report(path: Path, metrics_payload: dict[str, Any]) -> None:
     # R5 "日期" = the data window (deterministic); wall-clock is in manifest.
     lines.append(f"- date: {win.get('start', '—')} → {win.get('end', '—')} "
                  "(data window; generation time in manifest.json)")
-    td = metrics_payload.get("trading_days_override")
-    lines.append("- financing days: "
-                 + ("per-trade calendar days" if td is None else f"flat {td}"))
+    basis = metrics_payload.get("trading_days_basis") or "calendar"
+    lines.append("- financing day basis: " + ("trading days" if basis == "trading" else "calendar/natural days (default; R4/O15 trading-day basis is a future enhancement)"))
     if metrics_payload.get("instrument_failures"):
         lines.append("- **instrument failures:**")
         for f in metrics_payload["instrument_failures"]:
@@ -523,7 +503,7 @@ def _write_artifacts(
     spec: Any,
     result: RunResult,
     run_id: str,
-    financing_days: float | None,
+    trading_days_for: TradingDaysCounter | None,
     feature_snapshot_id: str | None,
 ) -> None:
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -564,7 +544,7 @@ def _write_artifacts(
         "direction": spec.direction,
         "view": plan.view,
         "timeframe_minutes": plan.timeframe_minutes,
-        "trading_days_override": financing_days,
+        "trading_days_basis": "trading" if trading_days_for else "calendar",
         "instruments": sorted(result.metrics),
         "window": window,
         "feature_snapshot_id": feature_snapshot_id,
@@ -593,7 +573,7 @@ def _write_artifacts(
         "view": plan.view,
         "timeframe_minutes": plan.timeframe_minutes,
         "params": _params_dict(plan),
-        "trading_days_override": financing_days,
+        "trading_days_basis": "trading" if trading_days_for else "calendar",
         "plan_hash": plan.plan_hash,
         "features_used": sorted(plan.features_used),
         "feature_snapshot_id": feature_snapshot_id,

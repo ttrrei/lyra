@@ -119,7 +119,7 @@ Slippage 已在 entry/exit price 里体现（T1/T2），**不**再加到 `costs`
 |---|---|---|---|
 | `exit_time_precision` | 有（bar_open/bar_interval/bar_close） | **无**（Trade 不含该字段） | lyra Trade 契约精简；exit_time 本身已隐含精度（open fill vs close fill）。如 0008 golden test 需要，可按 `exit_time == entry bar open/close` 反推。 |
 | `signal_time` | 信号 bar 的 `bar_close_time` | 信号 bar 的 `time`（= open） | 数据模型差异：nova bar 同时携带 `bar_open_time`/`bar_close_time` 两列；lyra bar 只有单列 `time`（= open，见 `aggregate.py` 的 `time_bucket`）。**不改变任何成交/P&L 语义**，仅信号时间戳相差 1 个 bar 周期。 |
-| **financing 天数口径** | 自然日（`total_seconds()/86400`） | 默认同 nova（自然日）；**R4/O15 交易日口径经 `trading_days` 参数由 0006 传入** | ✅ **批次3 review 处置（接受 H1，按既定工作流已落地引擎侧支持）**：引擎默认保留 nova 自然日以维持 cross-check；R4/O15（周末+市场假日不计）由 caller 提供交易日数落地（0006 拥有 bar 序列+日历，最终成本口径仍在 0006 锁定）。见下方"O-0005-1 / O17 处置"。 |
+| **financing 天数口径** | 自然日（`total_seconds()/86400`） | 默认同 nova（自然日）；**R4/O15 交易日口径经每笔交易的 `trading_days_for` 计数器由 0006 传入** | ✅ **批次3（H1）+ 批次4（C2）review 处置（均接受，按既定工作流已落地引擎侧支持）**：引擎默认保留 nova 自然日以维持 cross-check；R4/O15（周末+市场假日不计）由 caller 以**每笔交易**的交易日计数器 `trading_days_for(entry_time, exit_time) -> float` 提供（0006 拥有 bar 序列+日历，最终成本口径仍在 0006 锁定）。见下方"O-0005-1 / O17 处置"。 |
 
 **field-for-field cross-check**：用同一组合成 OHLC+信号同时驱动 nova `trades.simulate` 与 lyra `trade_engine.simulate`（slippage/spread/commission/financing/mhb 全开）。**fuzz 300 例 / 381 笔交易**：`instrument, direction, entry_price, exit_price, exit_reason, bars_held, gross_return, cost_return, net_return, stop_price, take_profit_price` **0 个真实不一致**；119 笔在 `cost_return`/`net_return` 上有差异——**全部**由 financing 天数口径（自然日 vs 交易日）解释。二次 fuzz（`financing_bps_per_day=0`）300 例 / 381 笔**全字段 0 不一致**，反证该唯一差异即 financing 天数口径。O-0005-1 裁决后（见下）：**nova cross-check 以"引擎自然日默认"为 oracle，该口径差异属"已知分歧（已裁决保留）"**，不再阻塞。上表前两行（exit_time_precision 精简 / signal_time 用 bar open）为数据模型已记录偏差，不进入字段比对。
 
@@ -127,13 +127,13 @@ Slippage 已在 entry/exit price 里体现（T1/T2），**不**再加到 `costs`
 
 **O-0005-1 / O17 financing 天数口径（自然日 vs 交易日）**：
 - **背景冲突**：O15（用户 2026-11-06 拍板，closed）+ R4 明确要求按**交易日**计（周末+市场节假日不计）；而 nova `trades.py` 用**自然日**（`total_seconds()/86400`），故 nova cross-check 与 O15 不可兼得。
-- **处置（接受 review H1/M1/M2，按既定工作流"接受即落地"）**：
-  * **引擎（0005）默认保留 nova 自然日**：`simulate(plan, bars)` 不传 `trading_days` 时按自然日计，与 nova 逐字段一致 → cross-check 以自然日为 oracle（该口径差异列为**已知分歧**）。
-  * **R4/O15 交易日口径由 caller 落地**：`simulate(plan, bars, trading_days=<n>)` 接受 caller 提供的交易日数（review H1 建议的"可审计的上游计算交易日数"）；**0006 runner 拥有 bar 序列 + 市场日历，负责按 R4/O15（排除周末/市场假日）计算并传入**，最终报告融资口径在 **0006 锁定**（与 O17 / ACTION_LOG #83 一致）。
+- **处置（接受 review H1/M1/M2 + 批次4 C2，按既定工作流"接受即落地"）**：
+  * **引擎（0005）默认保留 nova 自然日**：`simulate(plan, bars)` 不传 `trading_days_for` 时按自然日计，与 nova 逐字段一致 → cross-check 以自然日为 oracle（该口径差异列为**已知分歧**）。
+  * **R4/O15 交易日口径由 caller 落地（每笔交易）**：`simulate(plan, bars, trading_days_for=counter)` 接受 caller 提供的**每笔交易**交易日计数器 `counter(entry_time, exit_time) -> float`（批次4 C2 修正：取代旧的单一标量 `trading_days=<n>`——它对**所有**交易无差别地扣同一天数，使 R4/O15 在多交易回测中不可用）；**0006 runner 拥有 bar 序列 + 市场日历，负责按 R4/O15（排除周末/市场假日）逐笔计算并传入**，最终报告融资口径在 **0006 锁定**（与 O17 / ACTION_LOG #83 一致）。
   * **引擎不臆断交易日的原因**：引擎是纯函数、无日历、且无法从稀疏 bar 区分"周五→周五（跨周末）"与"隔夜"（日线数据下二者的时间戳间隔相同），故交易日历是 caller/数据关注点，不在引擎臆造。
   * **`bars_held` 不是天数**（review M1）：它是 bar 数，跨 timeframe 不等价于天数，0006 **不得**拿它当融资天数。
-  * **fail-closed**（review M2）：`trading_days` 非有限非负数、或 `time` 缺失/不可减（如 naive/aware 混用）时，引擎**抛错而非静默 0 融资**（旧代码静默吞 `days=0.0`，已修）。
-- **O15 / O17 状态**：O15 维持关闭（用户 2026-11-06 已定交易日）；O17（=O-0005-1）为中央开放项，**引擎侧支持已就位（`trading_days`），最终融资口径在 0006 锁定**——本条不推翻 O15，是把 R4/O15 落地到 0005/0006 的契约。
+  * **fail-closed**（review M2 / C2）：计数器返回值非有限非负数、或无计数器时 `time` 缺失/不可减（如 naive/aware 混用），引擎**抛错而非静默 0 融资**（旧代码静默吞 `days=0.0`，已修）。
+- **O15 / O17 状态**：O15 维持关闭（用户 2026-11-06 已定交易日）；O17（=O-0005-1）为中央开放项，**引擎侧支持已就位（每笔交易 `trading_days_for`），最终融资口径在 0006 锁定**——本条不推翻 O15，是把 R4/O15 落地到 0005/0006 的契约。0006 的扁平 `--financing-days` CLI 开关已移除（C2），默认按每笔自然日计。
 
 ### Exit reason enum
 
@@ -142,6 +142,8 @@ Slippage 已在 entry/exit price 里体现（T1/T2），**不**再加到 `costs`
 | `stop_gap` | open 已越 stop（gap） | `open`（gap loss） |
 | `stop_loss` | intra-bar low/high 越 stop | `stop`（exactly 2%） |
 | `take_profit` | open 或 intra-bar 越 target | 恒为 `target`（limit 语义：open 越过 target 时仍按 target 成交，nova 参考实现） |
+
+> **m3（批次4 review，已挂起）— 极其保守的单边惩罚假设**：开盘跳空越过止盈线时（多头进场 100、止盈 102、次日高开 105），引擎按 `target=102` 结算，放弃开盘集合竞价的 300 bps 有利溢价；而跳空跌破止损时却按 `open` 全额吃下恶性跳空亏损。这一**不对称**忠实继承 Nova 的限价单保守设计（"不会拿到比 target 更好的价"），但在真实撮合中位于价内的止盈单通常按开盘价成交（获得正向价格改善）。因此对**跳空型策略**，当前模型系统性低估其有利跳空收益（单边惩罚）。此假设已刻意保留以与 Nova cross-check 保持逐字段一致（见 §6 裁决），**不做代码修改**，仅在此显式标注；若未来需要更贴近真实撮合的跳空收益，需作为增强项单独评估并同步更新 cross-check 口径。
 | `indicator_exit` | exit signal 触发，下一 bar open | `open` |
 | `time_exit` | `bars >= max_holding_bars`，下一 bar open | `open` |
 | `end_of_data` | 数据耗尽时仍持仓 | `close` |
@@ -168,7 +170,8 @@ Slippage 已在 entry/exit price 里体现（T1/T2），**不**再加到 `costs`
 | `test_pending_exit_loses_to_stop_gap` | stop-gap（open 层）优先于 pending exit | 优先级 |
 | `test_pending_exit_loses_to_target_at_open` | target_at_open（open 层）优先于 pending exit | 优先级 |
 | `test_exit_long_does_not_close_short` | exit 信号方向特定（exit_long 不影响 short 仓） | 方向隔离 |
-| `test_cost_financing_trading_days_override` | 跨周末 Fri→Fri：自然日 0.07 vs `trading_days=5` 交易日 0.05（O-0005-1 H1） | R4/O15 口径 |
+| `test_cost_financing_trading_days_override` | 跨周末 Fri→Fri：自然日 0.07 vs `trading_days_for=5` 交易日 0.05（O-0005-1 H1） | R4/O15 口径 |
+| `test_cost_financing_trading_days_per_trade` | 同序列两笔交易（A 持 1 天 / B 持 10 天）逐笔计融资，扁平标量无法做到（C2） | R4/O15 口径（每笔） |
 | `test_cost_financing_fail_closed_mixed_tz` | naive/aware 混合 time → 引擎抛错（非静默 0 融资）（O-0005-1 M2） | fail-closed |
 | `test_cost_financing_rejects_bad_override` | `trading_days` NaN/inf/负/非数 → 抛错（O-0005-1 M2） | fail-closed |
 
@@ -227,3 +230,4 @@ bars_held, exit_reason）与 lyra 输出 diff=0。
 | 2026-11-08 | 0.2 | 实施完成：`lyra/trade_engine.py` + `tests/test_trade_engine.py`（23 测试全绿）。自检 7 条全通过；对抗性自检 7 条全通过（含 gap>2% fill 在 open、slippage 不双计、bool(long)!=bool(short) 等）。与 nova `trades.simulate` field-for-field cross-check diff=0。golden test 降级为 cross-check（nova runs 无 market bars），§6/§8 已标注。记录两行偏差（exit_time_precision 精简、signal_time 用 bar open）。**新发现未决项 O-0005-1**：financing 天数口径（nova=自然日 vs R4/O15=交易日），当前按 nova 自然日，标记 OPEN 待用户拍板。 |
 | 2026-11-08 | 0.3 | **自检 + 对抗性自检 详细执行**：① 逐条探针 P1–P9（边界 open==stop / low==stop / high==target；优先级 stop_at_open > target_at_open > pending_exit > stop_inside/target_inside；方向特定 exit_long 不影响 short 仓；re-entry 序列）全部通过；② **fuzz 300 例 / 381 笔**：与 nova `trades.simulate` 0 真实不一致，119 笔 cost/net-only 差异全部由 O-0005-1 解释；`financing=0` 二次 fuzz 300 例 / 381 笔**全字段 0 不一致**，反证该唯一差异即 O-0005-1；③ 新增 4 个对抗性回归测试：`test_pending_exit_beats_inside_stop_same_bar` / `test_pending_exit_loses_to_stop_gap` / `test_pending_exit_loses_to_target_at_open` / `test_exit_long_does_not_close_short`；测试数 **23→27**，全仓 **180→184** 绿；④ §5 偏差表 / §6 测试矩阵 / §8 自检 / §8 对抗性自检 全同步；对抗性自检表由"计划"改为"已执行 2026-11-08"，新增 3 行攻击点（open 越 target fill 语义 / exit_long 方向隔离 / pending_exit vs inside-stop 顺序）。 |
 | 2026-11-08 | 0.4 | **对抗性 review 批次3 处置（接受 H1/M1/M2，按既定工作流"接受即落地"引擎侧支持）**：① **H1（接受+实现）** O-0005-1/O17 融资口径——引擎默认保留 nova 自然日以维持 cross-check（列为已知分歧），R4/O15 交易日口径新增 `trading_days` 参数由 0006 runner 传入（review 建议的"上游计算交易日数"），最终口径在 0006 锁定（与 O17 / #83 一致）；② **M1（接受）** doc 明确 `bars_held` 非天数、0006 不得拿它当融资天数；③ **M2（接受+实现）** `_day_count` fail-closed——naive/aware 混合 time 或非法 `trading_days`（NaN/inf/负/非数）抛 ValueError，不再静默 0 融资（旧 `except → days=0.0` 已删）。新增 3 回归测试 `test_cost_financing_trading_days_override` / `test_cost_financing_fail_closed_mixed_tz` / `test_cost_financing_rejects_bad_override`；测试 **27→30**。O15 维持关闭；O17 引擎侧支持就位、最终口径待 0006 锁定。 |
+| 2026-11-08 | 0.5 | **对抗性 review 批次4 处置（C2/M2/m1/m2 接受+实现；m3 挂起仅标注）**。⚠ 本条取代 0.4 中所有 `trading_days` 标量表述。① **C2（接受+实现）** 融资天数契约重构：`trading_days: float` 单标量 → **每笔交易**计数器 `trading_days_for(entry_time, exit_time) -> float`（默认 `None`=自然日，保持 nova cross-check 逐字段一致）。旧标量对多笔交易无差别扣同一天数，R4/O15 在真实回测中死锁；新契约逐笔计，调用方无需预知进出场 bar。0006 扁平 `--financing-days` CLI 开关随之移除（误导性的扁平旋钮）。新增 `test_cost_financing_trading_days_per_trade`（A 持 1 天/B 持 10 天逐笔计）。② **M2（接受+实现）** `_quote` 幽灵列修复：真实列 `bid_o`/`ask_o`（`mid_` 前缀剥离后拼接），不再生成 `bid_mid_o` 导致真实点差被静默弃用。新增 `test_b4_m2_real_bid_ask_columns_used` + `test_b4_m2_real_bid_ask_drives_fill_price`。③ **m1（接受+实现）** end_of_data 强平时间戳改为 bar 收盘（`last["time"] + timeframe_minutes`）而非 bar 开盘，避免"整根 bar 持仓计 0 融资"。新增 `test_b4_m1_end_of_data_exit_timestamp_is_bar_close`。④ **m2（接受+实现）** `simulate()` 入口单标的守卫，混合标的 fail-closed。新增 `test_b4_m2_simulate_rejects_mixed_instruments`。⑤ **m3（挂起，仅标注）** 开盘跳空越过止盈按 `target` 结算 vs 跌破止损按 `open` 结算的**不对称单边惩罚**（继承 nova 限价保守设计）——刻意保留以维持 cross-check 逐字段一致，§5 已显式标注"极其保守的单边惩罚假设"，不改代码。全仓测试 **30→36** 绿（trade_engine 文件内）。 |

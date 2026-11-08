@@ -18,9 +18,18 @@ from __future__ import annotations
 import datetime as dt
 import math
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .compiler import CompiledPlan
+
+#: A **trading-day counter** (0005 R4/O15; 0004 C2, batch-4 review).
+#: Maps one trade's held interval ``(entry_time, exit_time)`` → the number of
+#: trading days held.  The caller (0006 runner) owns the market calendar and
+#: the bar series, so it can count trading days per trade — something the
+#: engine cannot derive on its own (a Fri→Fri gap is indistinguishable from
+#: an overnight gap when bars are sparse).  ``None`` (the default) falls back
+#: to *natural* elapsed days, the nova-compatible basis.
+TradingDaysCounter = Callable[[Any, Any], float]
 
 
 @dataclass(frozen=True)
@@ -43,33 +52,44 @@ class Trade:
     take_profit_price: float | None  # entry * (1 + side * tp_pct), None if unset
 
 
-def _day_count(entry_time: Any, exit_time: Any, override: float | None) -> float:
+def _day_count(entry_time: Any, exit_time: Any,
+               counter: TradingDaysCounter | None) -> float:
     """Financing day count for the held interval (R4/O15; 0005 O-0005-1).
 
-    If ``override`` is provided it is the caller-supplied trading-day count
-    and is used directly. Otherwise derive *natural* days from the bar
-    ``time`` stamps (the nova-compatible basis).
+    0004 C2 (batch-4 review): the caller supplies a **per-trade** trading-day
+    counter (``counter(entry_time, exit_time) -> float``) instead of a single
+    flat scalar shared by every trade.  A flat scalar (the old
+    ``trading_days: float``) mischarged every trade — a 1-day hold and a
+    3-week hold were both charged the same day count, which is why R4/O15
+    trading-day financing was unusable in any multi-trade backtest.  The
+    counter is evaluated lazily per trade, exactly when the engine knows the
+    held interval, so the caller no longer has to predict entry/exit bars in
+    advance.
 
-    Fail-closed (review M2): if the override is not a usable finite number,
-    or the timestamps are missing / not subtractable datetimes, raise rather
-    than silently charging zero financing.
+    * ``counter`` provided — its result is validated (finite, >= 0) and used
+      as this trade's trading-day count.
+    * ``counter is None`` (default) — derive *natural* days from the bar
+      ``time`` stamps (the nova-compatible basis; kept so the
+      field-for-field cross-check against ``nova.trades.simulate`` stays exact).
+
+    Fail-closed: if the counter returns a non-finite / negative number, or
+    the timestamps are missing / not subtractable datetimes (and no counter
+    was supplied), raise rather than silently charging zero financing.
     """
-    if override is not None:
-        try:
-            days = float(override)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "trading_days must be a finite number; got "
-                f"{override!r}"
-            ) from exc
+    if counter is not None:
+        days = float(counter(entry_time, exit_time))
         if not math.isfinite(days) or days < 0:
-            raise ValueError(f"trading_days must be >= 0 and finite; got {override!r}")
+            raise ValueError(
+                f"trading-days counter returned a bad value for "
+                f"({entry_time!r} → {exit_time!r}): {days!r} "
+                "(must be a finite number >= 0)"
+            )
         return days
     if not isinstance(entry_time, dt.datetime) or not isinstance(exit_time, dt.datetime):
         raise ValueError(
             f"cannot compute financing days: entry_time={entry_time!r}, "
-            f"exit_time={exit_time!r} are not datetimes (and no trading_days "
-            "override was supplied)"
+            f"exit_time={exit_time!r} are not datetimes (and no trading-days "
+            "counter was supplied)"
         )
     try:
         return (exit_time - entry_time).total_seconds() / 86400
@@ -93,8 +113,16 @@ def _quote(
     if present, returns it (already spread-inclusive).  If absent (the
     lyra/moneta case — mid prices, no bid/ask split), falls back to
     ``mid * (1 - direction * spread_bps / 20000)``.
+
+    0004 M2 (batch-4 review): the real bronze/silver columns are
+    ``bid_o``/``ask_o`` (``clean.py``/``oanda.py``), not ``bid_mid_o``.  The
+    point passed in here carries the ``mid_`` prefix (``mid_o`` …), so we
+    strip it before building the side-specific column name — otherwise the
+    real bid/ask quote is never found and the synthetic spread is silently
+    applied even when true quotes are present.
     """
-    name = ("bid_" if direction == 1 else "ask_") + point
+    suffix = point[4:] if point.startswith("mid_") else point
+    name = ("bid_" if direction == 1 else "ask_") + suffix
     if bar.get(name) is not None:
         return float(bar[name])
     base = float(bar[point])
@@ -107,7 +135,7 @@ def simulate(
     plan: CompiledPlan,
     bars: Sequence[Mapping[str, Any]],
     *,
-    trading_days: float | None = None,
+    trading_days_for: TradingDaysCounter | None = None,
 ) -> list[Trade]:
     """Simulate one instrument, one trade at a time (0005 §4 I2-I5, T1-T8).
 
@@ -117,21 +145,26 @@ def simulate(
     ``entry_long``, ``entry_short``, ``exit_long``, ``exit_short``
     (booleans).
 
-    ``trading_days`` (0005 O-0005-1 / R4 / O15) is the **financing day
-    count** for the held interval, supplied per call by the caller:
-    * ``None`` (default) — the engine derives it from the ``time`` stamps
-      as *natural* elapsed days (``(exit - entry).total_seconds() / 86400``),
-      the nova-compatible basis, kept so the field-for-field cross-check
-      against ``nova.trades.simulate`` stays exact.
-    * a **number** — an explicit trading-day count for every trade in this
-      call (e.g. from the 0006 runner's calendar). Use this to apply the
-      R4/O15 rule — *trading* days, excluding weekends and market holidays —
-      which the engine cannot derive on its own: a Fri→Fri bar gap is
-      indistinguishable from an overnight gap when the data is sparse (daily
-      bars, or 24/7 data with weekend gaps), so the *correct* trading-day
-      count is a data/caller concern, not something derivable from the bars.
-    The day count must be a finite number; it must not be ``bars_held``
-    (that is a bar count, not a day count — 0005 O-0005-1 / review M1).
+    ``trading_days_for`` (0005 O-0005-1 / R4 / O15; 0004 C2, batch-4 review)
+    is a **per-trade trading-day counter** ``counter(entry_time, exit_time)
+    -> float``, supplied by the caller (the 0006 runner owns the market
+    calendar + bar series):
+
+    * ``None`` (default) — the engine derives each trade's financing day
+      count from the ``time`` stamps as *natural* elapsed days (``(exit -
+      entry).total_seconds() / 86400``), the nova-compatible basis, kept so
+      the field-for-field cross-check against ``nova.trades.simulate`` stays
+      exact.
+    * a **callable** — applies the R4/O15 rule (count *trading* days,
+      excluding weekends/holidays) **per trade**, evaluated lazily once the
+      engine knows each trade's held interval. This replaces the old flat
+      ``trading_days: float`` scalar, which mischarged every trade the same
+      day count (a 1-day hold and a 3-week hold both charged identically)
+      and therefore made R4/O15 financing unusable in multi-trade backtests.
+
+    The per-trade day count must be a finite number; it must not be
+    ``bars_held`` (that is a bar count, not a day count — 0005 O-0005-1 /
+    review M1).
 
     Cost model (nova ``trades.py`` field-for-field):
     * slippage is folded into entry/exit *price* (T1/T2), NOT into costs
@@ -148,6 +181,24 @@ def simulate(
     spread = plan.spread_bps
     comm = plan.commission_bps_round_trip or 0.0
     financ = plan.financing_bps_per_day or 0.0
+
+    # 0004 m2 (batch-4 review): the engine simulates ONE instrument at a time
+    # (0005 I1 "one trade per instrument").  Guard against a caller passing a
+    # mixed-instrument sequence, which would silently interleave two
+    # instruments' signals into a single position — fail closed instead.
+    first_inst = None
+    for _b in bars:
+        _inst = _b.get("instrument")
+        if _inst is None:
+            continue
+        if first_inst is None:
+            first_inst = _inst
+        elif _inst != first_inst:
+            raise ValueError(
+                f"simulate() must be called with a single instrument's bars; "
+                f"got instruments {first_inst!r} and {_inst!r}. Simulate each "
+                "instrument separately (0005 I1, one trade per instrument)."
+            )
 
     position: dict | None = None
     pending_entry: tuple[int, Any] | None = None
@@ -167,8 +218,8 @@ def simulate(
         entry_px = position["price"]
         gross = side * (price - entry_px) / entry_px
         # financing by days (nova trades.py:finish; R4/O15 trading-day basis
-        # via the trading_days override, see simulate())
-        days = _day_count(position["time"], timestamp, trading_days)
+        # via the per-trade trading_days_for counter, see simulate())
+        days = _day_count(position["time"], timestamp, trading_days_for)
         costs = comm / 10000 + financ / 10000 * max(days, 0)
         result.append(Trade(
             instrument=bar["instrument"],
@@ -264,6 +315,18 @@ def simulate(
     if position is not None and bars:
         last = bars[-1]
         raw_close = _quote(last, position["direction"], "mid_c", spread)
-        _finish(last, raw_close, "end_of_data", last["time"], "bar_close")
+        # 0004 m1 (batch-4 review): the fill is at the bar *close* price
+        # (mid_c), so the exit timestamp must be the bar *close* time, not
+        # its open (last["time"]).  A trade entered at the last bar's open and
+        # force-closed at its close otherwise has entry_time == exit_time and
+        # accrues 0 days of financing despite holding a full bar.
+        exit_ts = last["time"]
+        if getattr(plan, "timeframe_minutes", None):
+            try:
+                exit_ts = (last["time"]
+                           + dt.timedelta(minutes=plan.timeframe_minutes))
+            except TypeError:
+                exit_ts = last["time"]  # non-subtractable time → keep open
+        _finish(last, raw_close, "end_of_data", exit_ts, "bar_close")
 
     return result

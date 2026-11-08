@@ -324,20 +324,22 @@ def test_compiler_held_for_executed_against_duckdb(tmp_path):
     ]
     con = duckdb.connect(str(tmp_path / "t.duckdb"))
     con.execute(
-        "CREATE TABLE features_1h (time INT, instrument VARCHAR, sma_6 DOUBLE, sma_24 DOUBLE)"
+        "CREATE TABLE features_1h (time INT, instrument VARCHAR, "
+        "mid_o DOUBLE, mid_h DOUBLE, mid_l DOUBLE, mid_c DOUBLE, "
+        "sma_6 DOUBLE, sma_24 DOUBLE)"
     )
     con.executemany(
-        "INSERT INTO features_1h VALUES (?, 'XAU_USD', ?, ?)",
+        "INSERT INTO features_1h VALUES (?, 'XAU_USD', 100.0, 110.0, 95.0, 105.0, ?, ?)",
         [(t, a, b) for (t, a, b) in rows],
     )
 
     spec = _parse(VALID_HELD_FOR)
     plan = cc.compile_strategy(spec, REGISTRY)
     # The plan's SQL selects a boolean signal column; run it and collect per-bar.
-    # Take the long signal column (index 2: after instrument, time).
+    # C1: OHLC at indices 2-5; entry_long at index 6.
     out = con.execute(plan.sql, list(plan.params)).fetchall()
     con.close()
-    sig = [bool(r[2]) for r in out]
+    sig = [bool(r[6]) for r in out]
     # bars 1,2: false (NULL gate / insufficient)
     assert sig[0] is False
     assert sig[1] is False
@@ -365,18 +367,20 @@ def test_compiler_within_executed_against_duckdb(tmp_path):
     con = duckdb.connect(str(tmp_path / "w.duckdb"))
     con.execute(
         "CREATE TABLE features_5m (time INT, instrument VARCHAR, "
+        "mid_o DOUBLE, mid_h DOUBLE, mid_l DOUBLE, mid_c DOUBLE, "
         "rsi_divergence_up BOOLEAN, rsi_divergence_down BOOLEAN, rsi_6 DOUBLE)"
     )
     # only entry_long (rsi_divergence_up) matters; rsi_divergence_down stays FALSE.
     con.executemany(
-        "INSERT INTO features_5m VALUES (?, 'XAU_USD', ?, FALSE, 50.0)", rows,
+        "INSERT INTO features_5m VALUES (?, 'XAU_USD', 100.0, 110.0, 95.0, 105.0, ?, FALSE, 50.0)", rows,
     )
 
     spec = _parse(VALID_WITHIN)
     plan = cc.compile_strategy(spec, REGISTRY)
     out = con.execute(plan.sql, list(plan.params)).fetchall()
     con.close()
-    sig = [bool(r[2]) for r in out]  # entry_long = index 2 (instrument, time, entry_long)
+    # C1: OHLC at indices 2-5; entry_long at index 6.
+    sig = [bool(r[6]) for r in out]
     # within(bars=2) = 2 observed rows (1 PRECEDING + CURRENT).
     # bar 1: no event in window -> false
     assert sig[0] is False
@@ -406,20 +410,21 @@ def test_compiler_after_event_executed_against_duckdb(tmp_path):
     con = duckdb.connect(str(tmp_path / "ae.duckdb"))
     con.execute(
         "CREATE TABLE features_1h (time INT, instrument VARCHAR, "
+        "mid_o DOUBLE, mid_h DOUBLE, mid_l DOUBLE, "
         "sma_cross_up_6_24 BOOLEAN, sma_cross_down_6_24 BOOLEAN, "
         "mid_c DOUBLE, sma_24 DOUBLE, sma_6 DOUBLE)"
     )
     # only entry_long (sma_cross_up) matters; set sma_cross_down to FALSE so the
     # short direction is inert.  exit_long/exit_short use sma_6 vs sma_24 (inert).
     con.executemany(
-        "INSERT INTO features_1h VALUES (?, 'XAU_USD', ?, FALSE, ?, ?, 110.0)", rows,
+        "INSERT INTO features_1h VALUES (?, 'XAU_USD', 100.0, 110.0, 95.0, ?, FALSE, ?, ?, 110.0)", rows,
     )
 
     spec = _parse(VALID_AFTER_EVENT)
     plan = cc.compile_strategy(spec, REGISTRY)
     out = con.execute(plan.sql, list(plan.params)).fetchall()
     con.close()
-    sig = [bool(r[2]) for r in out]  # entry_long = index 2
+    sig = [bool(r[6]) for r in out]  # C1: entry_long at index 6 (after OHLC)
     # bars 1-4: not yet 4 bars since event -> false
     assert sig[0] is False
     assert sig[1] is False
@@ -524,6 +529,52 @@ def test_h1_ordinal_state_accepts_in_domain_integers():
         assert plan.sql
 
 
+# --- M1 (batch-4 review): feature-vs-feature + VALUE-vs-bool-const domain gate ---
+
+def test_b4_m1_value_vs_boolean_state_feature_rejected():
+    # Case A: ``close > psar_bullish`` (numeric VALUE/OHLC vs boolean STATE)
+    # used to compile to ``"mid_c" > "psar_bullish"`` and raise a DuckDB
+    # BinderException at run time.  Must now fail at validate time.
+    d = _base(entry={"long": {"feature": "close", "op": "gt",
+                              "value": "psar_bullish"}})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_b4_m1_value_feature_vs_boolean_constant_rejected():
+    # Case B: ``close eq true`` (numeric VALUE vs boolean constant).  DuckDB
+    # used to coerce ``true → 1.0`` and silently compare price == 1.0.
+    d = _base(entry={"long": {"feature": "close", "op": "eq", "value": True}})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_b4_m1_ordinal_state_vs_boolean_state_rejected():
+    # Case C: ``sma_alignment_6_24 == psar_bullish`` (ordinal STATE {-1,0,1}
+    # vs boolean STATE).  In DuckDB ``0 = FALSE`` evaluated TRUE, so a
+    # neutral alignment + non-bullish PSAR wrongly opened a position.
+    d = _base(entry={"long": {"feature": "sma_alignment_6_24", "op": "eq",
+                              "value": "psar_bullish"}})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_b4_m1_numeric_vs_numeric_feature_accepted():
+    # Two numeric sides (OHLC alias vs VALUE) is a legitimate comparison.
+    d = _base(entry={"long": {"feature": "close", "op": "gt",
+                              "value": "rsi_6"}})
+    plan = cc.compile_strategy(_parse(d), REGISTRY)
+    assert plan.sql
+
+
+def test_b4_m1_boolean_state_vs_boolean_state_accepted():
+    # Two boolean states (STATE vs STATE) is a legitimate comparison.
+    d = _base(entry={"long": {"feature": "psar_bullish", "op": "eq",
+                              "value": "supertrend_bullish"}})
+    plan = cc.compile_strategy(_parse(d), REGISTRY)
+    assert plan.sql
+
+
 # --- H2: exit.take_profit_pct must reach the CompiledPlan -------------------
 
 def test_h2_exit_take_profit_pct_folded_into_plan():
@@ -593,6 +644,35 @@ def test_h4_entry_unknown_key_rejected():
                      "entry_typo": 1})
     with pytest.raises(ss.SchemaError):
         _parse(d)
+
+
+# --- M3 (batch-4 review): exit.feature strict whitelist ---------------------
+
+def test_b4_m3_exit_feature_unknown_key_rejected():
+    # A typo'd key in exit.feature (``whenn``) used to be silently ignored,
+    # so the strategy ran with the *default* exit while the author believed a
+    # custom exit applied.  Must now fail closed.
+    d = _base(exit={"feature": {"whenn": {"feature": "rsi_6", "op": "gt",
+                                          "value": 50}}})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_b4_m3_exit_feature_non_mapping_rejected():
+    # A non-dict ``exit.feature`` value (e.g. a bare string) used to be
+    # silently dropped.  Must now fail closed.
+    d = _base(exit={"feature": "rsi_6 > 50"})
+    with pytest.raises(ss.SchemaError):
+        _parse(d)
+
+
+def test_b4_m3_exit_feature_when_accepted():
+    # The documented ``exit.feature.when`` form is legitimate and must still
+    # parse (shared exit condition for both directions).
+    d = _base(exit={"feature": {"when": {"feature": "rsi_6", "op": "gt",
+                                         "value": 50}}})
+    plan = cc.compile_strategy(_parse(d), REGISTRY)
+    assert plan.sql
 
 
 # --- M1: cyclic alias rejected; legitimate cross-branch alias reuse works ---

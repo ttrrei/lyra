@@ -287,9 +287,12 @@ def _build_select(spec: StrategySpec) -> tuple[str, list[Any]]:
     exit_long = _direction_sql(spec.exit_long, ctx)
     exit_short = _direction_sql(spec.exit_short, ctx)
 
+    # C1 (batch-4 review): include OHLC so plan.sql drives simulate() directly.
+    ohlc = ", ".join(f"{_q(c)}" for c in ("mid_o", "mid_h", "mid_l", "mid_c"))
     sql = (
         f"SELECT {_INSTR} AS instrument, "
         f"{_TIME} AS time, "
+        f"{ohlc}, "
         f"{entry_long} AS entry_long, "
         f"{entry_short} AS entry_short, "
         f"{exit_long} AS exit_long, "
