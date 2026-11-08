@@ -320,6 +320,74 @@ def _registry_for(alpha_dir: str | None, config: str):
 
 
 @app.command()
+def run(
+    strategy: str = typer.Argument(..., help="Path to a strategy YAML (0004)"),
+    data_dir: str = typer.Option(..., "--data-dir", help="Data root with catalog.duckdb + feature Parquet (R6)"),
+    alpha_dir: str | None = typer.Option(None, "--alpha-dir", help="Alpha feature directory (R3.2); default = config local.alpha"),
+    config: str = typer.Option("config/config.yml", "--config"),
+    name: str | None = typer.Option(None, "--name", help="Run display name (default = strategy id)"),
+    out: str | None = typer.Option(None, "--out", help="Artifact root (default ~/.lyra/runs; B13 out-of-repo)"),
+    strict: bool = typer.Option(False, "--strict", help="Fail if any instrument failed (I16)"),
+    financing_days: float | None = typer.Option(None, "--financing-days", help="Flat trading-day override for every trade (O17); default = per-trade calendar days"),
+) -> None:
+    """Run a strategy end-to-end (0006): signals -> trade engine -> metrics.
+
+    Per-instrument evaluation (I7, no cross-instrument synthesis), R5 metrics,
+    a reproducibility manifest (I5), and a report.  Trade-level research only
+    (I9: no sizing / $ PnL / account equity).
+    """
+    from . import runner as runner_mod
+    from . import strategy_schema as schema_mod
+
+    reg = _registry_for(alpha_dir, config)
+    try:
+        result = runner_mod.run_strategy(
+            strategy, data_dir, registry=reg, name=name, out_dir=out,
+            strict=strict, financing_days=financing_days,
+        )
+    except schema_mod.SchemaError as exc:
+        typer.secho(f"INVALID: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    except (FileNotFoundError, RuntimeError) as exc:
+        typer.secho(f"RUN FAILED: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    typer.secho(f"OK: run {result.run_id[:12]} -> {result.out_dir}",
+                fg=typer.colors.GREEN)
+    for inst in sorted(result.metrics):
+        m = result.metrics[inst]
+        typer.echo(f"  {inst}: {m['trade_count']} trades, "
+                   f"annualized={m['annualized']}, win={m['win_rate']:.4f}")
+    for f in result.instrument_failures:
+        typer.secho(f"  {f['instrument']}: FAILED — {f['error']}",
+                    fg=typer.colors.YELLOW)
+
+
+@app.command()
+def report(
+    run_dir: str = typer.Argument(..., help="Path to a run artifact dir (…/<name>/<date>)"),
+) -> None:
+    """Re-render an existing run's report.md from its artifacts (0006 D7).
+
+    Read-only over the artifacts (metrics.json + manifest.json); does not
+    re-run the engine or modify the data.
+    """
+    import json as _json
+    d = Path(run_dir)
+    mpath = d / "metrics.json"
+    if not mpath.exists():
+        typer.secho(f"no metrics.json in {d}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    payload = _json.loads(mpath.read_text(encoding="utf-8"))
+    typer.echo(f"# {payload['spec_id']}  (run {payload['run_id'][:12]})")
+    for inst in sorted(payload.get("per_instrument", {})):
+        m = payload["per_instrument"][inst]
+        typer.echo(f"  {inst}: {m['trade_count']} trades, "
+                   f"annualized={m['annualized']}, win={m['win_rate']:.4f}, "
+                   f"net={m['net_return']:.6f}, bars={m['avg_bars_held']}")
+    typer.echo(f"(see {d / 'report.md'} for the full report)")
+
+
+@app.command()
 def version() -> None:
     """Print the installed Lyra version."""
     typer.echo(__version__)
