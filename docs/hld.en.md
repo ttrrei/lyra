@@ -290,7 +290,7 @@ lyra/
 │   │   ├── 0002-ohlcv-data-sync.md    (+ .en.md)  (complete)
 │   │   ├── 0003-feature-builder.md    (+ .en.md)  (v1.4 implemented)
 │   │   ├── 0004-yaml-compiler.md      (+ .en.md)  (implemented 2026-11-08: validate/compile + 28 tests)
-│   │   ├── 0005-trade-engine.md       (+ .en.md)  (pending)
+│   │   ├── 0005-trade-engine.md       (+ .en.md)  (implemented v0.2, O-0005-1 OPEN)
 │   │   ├── 0006-metrics-and-runner.md (+ .en.md)  (pending)
 │   │   ├── 0007-oci-push-and-backup.md(+ .en.md)  (pending)
 │   │   ├── 0008-migration-and-regression.md (+ .en.md) (pending)
@@ -356,8 +356,8 @@ blocked by this ordering.
 | 1 | repo + OCI split | `0001-repo-and-oci-split.md` | ✅ written |
 | 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ complete (2026-11-07, real data end-to-end + Batch-01 (2026-11-07) adversarial review D1–D6 all fixed, v1.1) |
 | 3 | Feature builder (standard + alpha extension point) | `0003-feature-builder.md` | ✅ core implemented (v1.4: 134 features/6 indicator families + pandas-ta-classic control + 107 tests; alpha extension point `load_from` implemented) |
-| 4 | YAML compiler (incl. feature-vs-feature) | `0004-yaml-compiler.md` | ✅ **Implemented (2026-11-08)**: `validate`/`compile` + 28 tests green (incl. live DuckDB temporal assertions). 332-corpus regression is in 0008 (O16 gap awaits user decision) |
-| 5 | Trade engine (2% stop / next-open / costs) | `0005-trade-engine.md` | ⬜ pending |
+| 4 | YAML compiler (incl. feature-vs-feature) | `0004-yaml-compiler.md` | ✅ **Signed off (#76, 2026-11-08)**: after Batch 2 disposition, 50/50 focused and 157/157 repository tests pass; the new validation causes zero regressions across 169 existing strategy YAMLs. O16 corpus compatibility remains in 0008. |
+| 5 | Trade engine (2% stop / next-open / costs) | `0005-trade-engine.md` | 🟢 **Implemented (v0.2)**: `lyra/trade_engine.py` + 23 tests green; field-for-field cross-check vs nova `trades.simulate` diff=0; self-check + adversarial 14/14 pass. **OPEN O-0005-1**: financing day count — currently nova's natural days (needed for cross-check), conflicts with R4/O15 trading-day basis; awaiting user option (see 0005 §5 open item). |
 | 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ pending |
 | 7 | OCI push + backup | `0007-oci-push-and-backup.md` | ⬜ pending |
 | 8 | 332-strategy migration + regression | `0008-migration-and-regression.md` | ⬜ pending |
@@ -376,3 +376,5 @@ blocked by this ordering.
 | 2026-11-08 | 0.6 | Synced current **0003 v1.4 / 107 tests**; changed 0004 status to "proposal drafted, awaiting user review, not implemented"; listed the VectorBT / multi-AI strategy-search evaluation in the §7 proposal tree (bilingual pair). |
 | 2026-11-08 | 0.7 | Added the v2 source draft and this synthesis to the §7 proposal tree as bilingual pairs; source proposals are preserved and the synthesis awaits the user's ruling. |
 | 2026-11-08 | 0.8 | **0004 implemented (2026-11-08)**: `lyra/strategy_schema.py` + `lyra/compiler.py` + `lyra/cli.py` (`validate`/`compile`) + `tests/test_compiler.py` (28 tests green, incl. live DuckDB temporal assertions N−1/N/N+1 / NULL gate / after_event exact-age / param invariant). Adversarial self-check fixed DuckDB 2.0 inline-window, temporal param-desync, and exit.stop_loss_pct widen (3 spots). §8 0004 status → "implemented"; the 332 corpus regression is in 0008 (see open-questions O16 — 20 missing features await user decision). |
+| 2026-11-08 | 0.9 | Synced §8 stage status per ACTION_LOG #77: updated 0004 to the 50-focused / 157-repository-test verification after #76; marked 0005 in progress (decision, code, and test drafts visible in the worktree, not signed off) and recorded the calendar-day financing conflict with R4 and the outstanding golden-test gate. |
+| 2026-11-08 | 0.10 | **0005 implemented (v0.2)**: `lyra/trade_engine.py` + `tests/test_trade_engine.py` (23 tests green); field-for-field cross-check vs nova `trades.simulate` diff=0 (§5 documents 3 deviation rows: exit_time_precision dropped / signal_time uses bar open / **financing natural days vs R4·O15 trading days**); self-check + adversarial 14/14 pass; §8 0005 status → "implemented"; registered **OPEN O-0005-1** (financing day count, awaiting user option 1/2/3, default option 2 keeps nova natural days). |
