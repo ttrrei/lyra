@@ -301,8 +301,29 @@ AI 可读取并自由组合。审计靠 AI 在 `inherited` / `driven_by_lesson` 
 **分支生命周期**：`active`（在演进）→ `pruned`（剪枝，文件保留、
 `lyra run` 不再默认选中）→ 或作为 parent 被交叉继承。
 剪枝**不删除文件**（B6/B12 延伸）；同一代数可有多个活跃分支并行。
-**Active Branch Cap（O13，已定 8）**：每方向**同时 active 的分支数 ≤ 8**，
-防止 AI 靠无限 fork 拖延 kill 判定；超额必须显式 prune。
+**Active Branch Cap（O13，2026-11-08 用户修订：每 track 8）**：每条
+**track** 同时 active 的分支数 ≤ 8，tracks 之间名额互不挤占（多 AI
+互不影响；单 track 防无限 fork 的原意仍满足）；超额必须显式 prune。
+（2026-11-06 原定为每方向全局 8，被 2026-11-08 裁决取代。）
+
+**AI tracks（用户裁决 2026-11-08）**：方向内可含多条 track，布局：
+
+```
+strategies/<direction>/
+  hypothesis.md            方向假设（各 track 固定一个只读快照版本）
+  tracks/<track_id>/
+    lessons.md             本 track append-only 演进日志
+    v01.yaml, v02a.yaml, … 本 track 候选版本（每 track ≤ 8 active）
+  reviews/<review_id>.md   用户暂停后生成的跨 track 只读综合报告
+runs/<direction>/<track_id>/<run_id>/   run 按 track 归属
+```
+
+- `track_id` ↔ 一个 AI 研究员（研究身份）；**不改变** validate /
+  compile / run / report 的任何机器行为与门禁。
+- 多 AI 可同/不同方向并行；基座（数据/特征/catalog/compiler/CLI）
+  共用一套；无调度器/文件锁/并发协调（R9 维持）。
+- 本布局与 `lyra context --track` 在 0005/0006 落地时实现；0004
+  compiler 保持 track 无关（只消费传入 YAML + catalog）。
 
 **迭代循环（Lyra 的核心工作流，支持分叉）**：
 

@@ -335,9 +335,36 @@ forced into "whole-parts only").
 selected by default `lyra run`) → or inherited as a parent in a
 crossover. Pruning **never deletes files** (extension of B6/B12);
 multiple active branches may evolve in parallel at the same generation.
-**Active Branch Cap (O13, set to 8)**: per direction, **at most 8
-simultaneously-active branches**, preventing the AI from evading the kill
-decision by forking infinitely; excess must be pruned explicitly.
+**Active Branch Cap (O13, amended 2026-11-08 by the user: 8 per
+track)**: per **track**, at most **8 simultaneously-active branches**;
+slots do not compete across tracks (multiple AIs are mutually
+non-interfering; the original intent of preventing infinite forking
+within one research flow still holds); excess must be pruned explicitly.
+(The 2026-11-06 global-per-direction-8 rule is superseded by the
+2026-11-08 ruling.)
+
+**AI tracks (user ruling 2026-11-08)**: a direction may hold multiple
+tracks, layout:
+
+```
+strategies/<direction>/
+  hypothesis.md            direction hypothesis (each track pins one read-only snapshot)
+  tracks/<track_id>/
+    lessons.md             this track's append-only evolution log
+    v01.yaml, v02a.yaml, … this track's candidates (≤ 8 active per track)
+  reviews/<review_id>.md   read-only cross-track synthesis reports, user-triggered
+runs/<direction>/<track_id>/<run_id>/   runs attributed per track
+```
+
+- `track_id` ↔ one AI researcher (research identity); it **does not
+  change** any machine behavior or gate of validate / compile / run /
+  report.
+- Multiple AIs may work on the same or different directions in parallel;
+  the base (data / features / catalog / compiler / CLI) is shared; no
+  scheduler / file locks / concurrency coordination (R9 preserved).
+- This layout and `lyra context --track` land with 0005/0006; the 0004
+  compiler stays track-agnostic (it only consumes the given YAML +
+  catalog).
 
 **Iteration loop (Lyra's core workflow, branching-capable)**:
 

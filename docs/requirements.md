@@ -281,6 +281,23 @@ YAML 文件。初始 12 个方向继承自 nova：`trend_continuation`、
   （hypothesis + 最近 N 段 lessons + 活跃分支 vNN + **兄弟分支 run
   摘要对比表** + feature 清单），AI 写循环 = 读 1 文件 → 写 1~N 个
   分支文件 → 各跑 1 次 → 记 1 段 + 1 段判断，不接触 repo 其他部分。
+- **AI tracks（用户裁决 2026-11-08）**：方向内可设**多条独立 track**，
+  一条 track 对应一个 AI 研究员（研究身份，可对应同一 AI 的多条思考线）。
+  每条 track **独立拥有** `hypothesis 快照引用 + lessons + 候选 vNN.yaml
+  + run 归属`；hypothesis 原文、行情、feature catalog、执行规则
+  （2% stop 等）作为**冻结只读快照**共享。多 AI 可在**不同甚至相同
+  方向**上并行推进，互不影响；基座（数据/特征/catalog/compiler/CLI）
+  共用一套。track 是**研究身份而非执行身份**：`track_id` 只用于隔离、
+  归属与综合，**不改变** validate / compile / run / report 的任何机器
+  行为与门禁。跨轨道综合仅在用户暂停方向并明确要求后生成**只读报告**
+  （`reviews/`），不自动回写 lessons 或候选；恢复与知识晋升由用户
+  明确触发。**不做**调度器、文件锁或多进程并发协调（R9 维持）。
+  目录布局（`tracks/<track_id>/`）与 `lyra context --track` 在
+  0005/0006 落地时实现（最小落地路径见综合稿 §9）。
+- **Active Branch Cap 修订（用户裁决 2026-11-08，取代 2026-11-06 O13 定案）**：
+  cap 语义取 **每 track 各自 8 个 active branches**，tracks 之间名额
+  互不挤占（"互不影响"优先于方向级全局有界）；单 track 内防无限 fork
+  的原意仍满足。
 - **方向是标签，不是独立的赚钱机制**（继承 nova DECISIONS 的共识）；
   允许"没有优势"的结论；触发 kill criteria 后方向标记 `killed`，
   文件夹保留（不删，见 B6 的延伸）。
@@ -307,4 +324,5 @@ YAML 文件。初始 12 个方向继承自 nova：`trend_continuation`、
 | 2026-11-07 | 0.12 | **R3.1 v0.9 补全 P0 缺口（8 项）**：DEMA(6/24/60)、TEMA(6/24/60)、HMA(24/60)、MOM(6/24/60)、Rolling StdDev(24/60)、Z-Score(24/60)、Efficiency Ratio @60、Donchian @60（prior24_* 基础上补 prior60_*）。**缓做新增**：Keltner（=EMA±2×ATR，BBANDS 已覆盖）、Choppiness（=ATR+Donchian 组合变换）、Relative Volume/VWMA（rel_quote_activity 已覆盖）、P1 全族（参数面过大或需自研，留第二批）。**触发 I13：FEATURE_VERSION +1**（v0.8 已 +1，本次再 +1 = 累计 +2）。同步 0003 v0.9（§3.4 + 测试 +6） |
 | 2026-11-07 | 0.13 | **R3.1 新增 Heikin Ashi（用户指令；0003 v1.1）**：`ha_o / ha_h / ha_l / ha_c` 4 列，K7 自研（TA-Lib 无此指标），递归变换无窗口参数（K8 N/A），warmup_bars=16（递归收敛安全下界）；K7 管理纪律全部适用（`self_implemented: True` 注册表标记 + 契约卡 + golden test + I13）。缓做清单的 Heikin Ashi 项移除（已落地）。**触发 I13：FEATURE_VERSION +1（2→3）**。同步 0003 v1.1（§3.4 + 测试 +2） |
 | 2026-11-08 | 0.14 | **R8 轻量条款例外（用户批准）**：`control` 可选依赖组（当前仅 `tulipy`）不计入核心 ≤ 15 包上限——test-only 跨库对照组，运行时不 import，`pip install "lyra[control]"` 显式启用（0003 v1.2 K1b：exact 9 族 <1e-6 一致 + definitional 9 族口径差异冻结 + 5 族无库跳过；tail-alignment 工程点）。requirements 本体指标集不变（120 features，FEATURE_VERSION=3）。 |
+| 2026-11-08 | 0.16 | **R12 AI tracks（用户裁决 2026-11-08）**：方向内每 AI 一条独立 track（独立 context/lessons/候选/run 归属；冻结只读快照共享；可同/不同方向并行、互不影响；基座共用）；track=研究身份非执行身份（不改任何机器门禁）；跨轨道综合=用户触发的只读报告；无调度/锁/并发协调（R9 维持）；tracks 布局与 CLI 随 0005/0006 落地。**O13 cap 语义修订为每 track 8**（取代 2026-11-06 方向级全局 8）。VectorBT 彻底抛弃（不进 runtime、不做 test-only control）。0004 按综合稿 §5 收口定稿，本轮不开发。落点：综合稿 §9、oci-alpha-layout §2.3、open-questions O13 修订行、0004 元信息。 |
 | 2026-11-08 | 0.15 | **R3.1 新增 6 族 + R8 对照组更新（0003 v1.3）**：R3.1 落地 TRIX(24/60) / TSI(24_12/60_24) / VHF(24/60) / Vortex(24/60) / Aroon(24/60 up/down) 共 **14 特征**（均 TA-Lib 有库实现、K8 网格、pandas-ta-classic 可机器验证）；缓做清单移除已落地项。**R8 例外扩为 2 个对照库**：`control = ["pandas-ta-classic","tulipy"]`——pandas-ta-classic 升**主**（PyPI 活跃 2026-10，276 指标，pandas 仅作测试对照依赖被用户接受）、tulipy 降**次**（2019-04 后未更新，保留 C 后端/免 pandas 的独立锚点价值）。**触发 I13：FEATURE_VERSION +1（3→4）**，标准特征 120→**134**。同步 0003 v1.3（§3.4 +6 行、§5 测试 +4 行）。 |

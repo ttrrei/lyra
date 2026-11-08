@@ -287,9 +287,9 @@ lyra/
 │   ├── decisions/
 │   │   ├── TEMPLATE.md         + TEMPLATE.en.md
 │   │   ├── 0001-repo-and-oci-split.md (+ .en.md)
-│   │   ├── 0002-ohlcv-data-sync.md    (+ .en.md)  (pending)
-│   │   ├── 0003-feature-builder.md    (+ .en.md)  (pending)
-│   │   ├── 0004-yaml-compiler.md      (+ .en.md)  (pending)
+│   │   ├── 0002-ohlcv-data-sync.md    (+ .en.md)  (complete)
+│   │   ├── 0003-feature-builder.md    (+ .en.md)  (v1.4 implemented)
+│   │   ├── 0004-yaml-compiler.md      (+ .en.md)  (finalized 2026-11-08; pending scheduling)
 │   │   ├── 0005-trade-engine.md       (+ .en.md)  (pending)
 │   │   ├── 0006-metrics-and-runner.md (+ .en.md)  (pending)
 │   │   ├── 0007-oci-push-and-backup.md(+ .en.md)  (pending)
@@ -297,6 +297,9 @@ lyra/
 │   │   └── 0009-polish.md               (+ .en.md)  (pending)
 │   └── proposals/
 │       ├── oci-alpha-layout.md  (+ .en.md)
+│       ├── vectorbt-and-multi-ai-strategy-search.md (+ .en.md)
+│       ├── 2026-11-08-vectorbt-eval-and-multi-ai-v2.md (+ .en.md) (source draft)
+│       ├── 2026-11-08-vectorbt-multi-ai-consolidated.md (+ .en.md) (synthesis, awaiting ruling)
 │       └── alpha-boundary.md    (+ .en.md)
 ├── src/lyra/
 │   ├── __init__.py
@@ -352,8 +355,8 @@ blocked by this ordering.
 |---|---|---|---|
 | 1 | repo + OCI split | `0001-repo-and-oci-split.md` | ✅ written |
 | 2 | OCI pull + clean + aggregate | `0002-ohlcv-data-sync.md` | ✅ complete (2026-11-07, real data end-to-end + Batch-01 (2026-11-07) adversarial review D1–D6 all fixed, v1.1) |
-| 3 | Feature builder (standard + alpha extension point) | `0003-feature-builder.md` | ✅ core implemented (v1.3: 134 features/6 indicator families + pandas-ta-classic control + 107 tests; alpha extension point `load_from` implemented) |
-| 4 | YAML compiler (incl. feature-vs-feature) | `0004-yaml-compiler.md` | ⬜ pending |
+| 3 | Feature builder (standard + alpha extension point) | `0003-feature-builder.md` | ✅ core implemented (v1.4: 134 features/6 indicator families + pandas-ta-classic control + 107 tests; alpha extension point `load_from` implemented) |
+| 4 | YAML compiler (incl. feature-vs-feature) | `0004-yaml-compiler.md` | 🟡 **Finalized (user ruling 2026-11-08, incl. consolidated §5 scope)**; pending scheduling |
 | 5 | Trade engine (2% stop / next-open / costs) | `0005-trade-engine.md` | ⬜ pending |
 | 6 | Metrics + runner | `0006-metrics-and-runner.md` | ⬜ pending |
 | 7 | OCI push + backup | `0007-oci-push-and-backup.md` | ⬜ pending |
@@ -369,3 +372,6 @@ blocked by this ordering.
 | 2026-11-05 | 0.3 | §2.3 removed the "No strategy generation (future campaign)" conflict row; added a "Strategy evolution" block (context / new-version / compare / merge / push-direction) aligned with R12 + version tree + AI-free crossover; §7 decision-tree now includes 0008 and 0009 in both languages (ZH was missing 0008, EN was missing 0009, and 0007 misused └──); **§4 invariant table completed with I15-I17** (previously only listed to I14, but AGENTS/0001 both cite I15-I17 — hld as the skeleton should be self-consistent). |
 | 2026-11-06 | 0.4 | Batch-2 adversarial review fixes: I17 made **two-tier** (Immutable/Append-only, L1); I11 adds `alpha/` (L5). |
 | 2026-11-07 | 0.5 | **0003 v0.7 alignment** (hld sync after accepting batch-02 red-team D1/D5/D6/D3): ① §2.1 market-layer cache path changed from the historical-draft `data/market/<m>/<snapshot_id>/` to 0002's actual single-file external tables `ohlcv_5m/ohlcv_5m.parquet` / `ohlcv_1h/ohlcv_1h.parquet` (0002 D4 deprecated directory-level snapshots; the hld early wording is a draft — marked "defer to 0002"); ② §2.2 features component: publish path → `data/features/<m>/<instrument>.parquet` single file, version into Parquet metadata, the "snapshot id monotonic integer" invariant → "derived string in metadata", Warm-up NULL tightened to 0003 F2; ③ §3 data-flow diagram synced (bronze → ohlcv_5m/1h single-file → features single-file). Note: §4 L148/155/179 **OCI push (0007) snapshot id** is 0007's still-undefined semantics — **not** changed here (0007 not yet written; avoids overstepping into 0007's scope), deferred to the 0007 decision |
+| 2026-11-08 | 0.7 | **User rulings synced (#73)**: 0004 status changed to "finalized (2026-11-08 ruling), pending scheduling"; R12 AI tracks + 8-per-track cap + VectorBT dropped — see requirements v0.16 / oci-alpha-layout §2.3 / consolidated §9 (not expanded here). |
+| 2026-11-08 | 0.6 | Synced current **0003 v1.4 / 107 tests**; changed 0004 status to "proposal drafted, awaiting user review, not implemented"; listed the VectorBT / multi-AI strategy-search evaluation in the §7 proposal tree (bilingual pair). |
+| 2026-11-08 | 0.7 | Added the v2 source draft and this synthesis to the §7 proposal tree as bilingual pairs; source proposals are preserved and the synthesis awaits the user's ruling. |

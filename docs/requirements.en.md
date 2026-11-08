@@ -336,6 +336,32 @@ directions are fully peer.
   comparison table** + feature list); the AI write loop = read 1 file →
   write 1..N branch files → run each once → log 1 section + 1 judgment,
   never touching the rest of the repo.
+- **AI tracks (user ruling 2026-11-08)**: a direction may hold
+  **multiple independent tracks**; one track corresponds to one AI
+  researcher (research identity; multiple thinking lines of the same AI
+  are allowed). Each track **owns its own** `hypothesis snapshot
+  reference + lessons + candidate vNN.yaml + run attribution`; the
+  hypothesis original, market data, feature catalog, and execution rules
+  (2% stop, etc.) are shared as a **frozen read-only snapshot**. Multiple
+  AIs may advance on **different or the same direction** in parallel
+  without affecting each other; the base (data / features / catalog /
+  compiler / CLI) is shared. A track is a **research identity, not an
+  execution identity**: `track_id` is only for isolation, attribution,
+  and synthesis — it **must not** change any machine behavior or gate of
+  validate / compile / run / report. Cross-track synthesis produces a
+  **read-only report** (`reviews/`) only when the user pauses the
+  direction and explicitly requests it; it never auto-writes back to
+  lessons or candidates; resumption and knowledge promotion are
+  user-triggered. **No** scheduler, file locks, or multi-process
+  concurrency coordination (R9 preserved). The directory layout
+  (`tracks/<track_id>/`) and `lyra context --track` land with 0005/0006
+  (minimal path per the consolidated proposal §9).
+- **Active Branch Cap amendment (user ruling 2026-11-08, supersedes the
+  2026-11-06 O13 decision)**: cap semantics = **8 active branches per
+  track**, with no slot competition across tracks ("mutual non-interference"
+  takes precedence over a direction-level global bound); the original
+  intent of preventing infinite forking within one research flow still
+  holds.
 - **Directions are labels, not independent sources of edge** (inherited
   consensus from the nova DECISIONS); "no edge" is an allowed conclusion;
   when kill criteria trigger, the direction is marked `killed` and the
@@ -366,4 +392,5 @@ directions are fully peer.
 | 2026-11-07 | 0.12 | **R3.1 v0.9 fills the P0 gap (8 items)**: DEMA (6/24/60), TEMA (6/24/60), HMA (24/60), MOM (6/24/60), Rolling StdDev (24/60), Z-Score (24/60), Efficiency Ratio @60, Donchian @60 (prior24_* extended to prior60_*). **Parked additions**: Keltner (=EMA±2×ATR, BBANDS covers it), Choppiness (=ATR+Donchian composite transform), Relative Volume/VWMA (rel_quote_activity covers it), all P1 families (parameter surface too large or need self-implementation, deferred to batch 2). **Triggers I13: FEATURE_VERSION +1** (v0.8 already +1, this +1 more = cumulative +2). Synced 0003 v0.9 (§3.4 + 6 new tests) |
 | 2026-11-07 | 0.13 | **R3.1 adds Heikin Ashi (user instruction; 0003 v1.1)**: `ha_o / ha_h / ha_l / ha_c` (4 columns), K7 self-implementation (TA-Lib has no HA), recursive transform with no window parameter (K8 N/A), warmup_bars=16 (safe lower bound for the recursive convergence); all K7 management discipline applies (registry `self_implemented: True` marker + contract card + golden test + I13). The parked-list "Heikin Ashi" entry is removed (shipped). **Triggers I13: FEATURE_VERSION +1 (2→3)**. Synced 0003 v1.1 (§3.4 + tests +2) |
 | 2026-11-08 | 0.14 | **R8 Light clause exception (user approved)**: the `control` optional dependency group (currently only `tulipy`) does not count toward the ≤ 15 core package limit — a test-only cross-library control, never imported at runtime, enabled explicitly via `pip install "lyra[control]"` (0003 v1.2 K1b: 9 exact families <1e-6 + 9 definitional families frozen with measured deltas + 5 no-lib skips; tail-alignment engineering point). The indicator set itself is unchanged (120 features, FEATURE_VERSION=3). |
+| 2026-11-08 | 0.16 | **R12 AI tracks (user ruling 2026-11-08)**: one independent track per AI inside a direction (isolated context/lessons/candidates/run attribution; frozen read-only snapshot shared; parallel across the same or different directions without interference; shared base); track = research identity, not execution identity (no machine gate changes); cross-track synthesis = user-triggered read-only report; no scheduler/locks/concurrency coordination (R9 preserved); tracks layout + CLI land with 0005/0006. **O13 cap semantics amended to 8 per track** (supersedes the 2026-11-06 direction-level global 8). VectorBT dropped entirely (no runtime, no test-only control). 0004 finalized per the consolidated proposal §5; no implementation this round. Landing points: consolidated §9, oci-alpha-layout §2.3, open-questions O13 amendment, 0004 meta. |
 | 2026-11-08 | 0.15 | **R3.1 +6 families, R8 control group updated (0003 v1.3)**: R3.1 ships TRIX(24/60) / TSI(24_12/60_24) / VHF(24/60) / Vortex(24/60) / Aroon(24/60 up/down) — **14 features** (all have TA-Lib implementations, on the K8 grid, machine-verifiable by pandas-ta-classic); parked-list entries now shipped are removed. **R8 exception extends to 2 control libs**: `control = ["pandas-ta-classic","tulipy"]` — pandas-ta-classic promoted to **primary** (PyPI-active 2026-10, 276 indicators, pandas accepted as a test-only control dependency by the user), tulipy demoted to **secondary** (last release 2019-04; its value as a C-backed, pandas-free independent anchor is retained). **Triggers I13: FEATURE_VERSION +1 (3→4)**, standard features 120→**134**. Synced 0003 v1.3 (§3.4 +6 rows, §5 tests +4). |
