@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0001` |
 | Title | Division of labor between the repo (git) and OCI (Object Storage); the physical landing of the alpha boundary |
-| Status | proposal |
+| Status | **Implemented (OCI pull/clean/aggregate via 0002 complete)** |
 | Owner | `ttrrei` |
 | Created | `2026-11-05` |
 | Related proposal | `docs/proposals/oci-alpha-layout.md` |

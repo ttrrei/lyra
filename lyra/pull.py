@@ -26,6 +26,15 @@ class ZipBombError(ValueError):
     """A zip member declares an extracted size beyond the safety ceiling."""
 
 
+class CorruptArchiveError(ValueError):
+    """An archive member failed its CRC/integrity check (R2).
+
+    Raised in strict mode so a corrupt download fails fast *before* the
+    pipeline clears any prior good data, instead of silently skipping the
+    archive and masquerading as a legitimate empty result.
+    """
+
+
 def iter_zip_csvs(zips_dir: Path):
     """Yield ``(zip_path, zipinfo)`` for every CSV member of every zip.
 
@@ -69,15 +78,36 @@ def extract_zips_to_csv(
     csv_dir: str | Path,
     *,
     clean_target: bool = True,
+    strict: bool = False,
 ) -> list[Path]:
     """Extract every CSV from every zip into a flat *csv_dir*.
 
-    Returns the sorted list of extracted file paths. Corrupt archives are
-    skipped (a per-archive ``testzip`` check) rather than aborting the run.
+    Returns the sorted list of extracted file paths.
+
+    ``strict`` (R2): when True, a per-member ``testzip`` CRC failure raises
+    ``CorruptArchiveError`` *before* any target CSVs are cleared, so a corrupt
+    download fails fast instead of silently skipping the archive and leaving
+    the pipeline to overwrite prior good data with an empty result. When False
+    (legacy/default), corrupt archives are skipped — for callers that want to
+    tolerate partial archives.
     """
     source_dir = Path(zips_dir)
     target_dir = Path(csv_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
+
+    # R2: in strict mode, validate integrity of every member BEFORE clearing
+    # the target, so a corrupt input can never masquerade as a legitimate
+    # empty extraction that wipes prior good data.
+    if strict and clean_target:
+        for zip_path, info in iter_zip_csvs(source_dir):
+            with zipfile.ZipFile(zip_path, "r") as archive:
+                bad = archive.testzip()
+                if bad is not None:
+                    raise CorruptArchiveError(
+                        f"{zip_path.name}: member {bad!r} failed CRC check — "
+                        f"refusing to clear target and extract a corrupt archive"
+                    )
+
     if clean_target:
         clear_top_level_csvs(target_dir)
 
@@ -86,7 +116,11 @@ def extract_zips_to_csv(
         with zipfile.ZipFile(zip_path, "r") as archive:
             bad = archive.testzip()
             if bad is not None:
-                continue  # corrupt archive — skip, don't abort
+                if strict:
+                    raise CorruptArchiveError(
+                        f"{zip_path.name}: member {bad!r} failed CRC check"
+                    )
+                continue  # corrupt archive — skip (legacy tolerant mode)
             preferred = Path(info.filename).name
             dest = unique_target(target_dir, preferred)
             # D9 (batch-7): refuse to expand a member whose declared extracted

@@ -58,8 +58,9 @@
 - Pull raw CSV / raw Parquet from OCI (`lyra pull`).
 - Clean: deduplication (unique `(instrument, time)`), mark missing
   minutes as gaps, UTC alignment, Bid/Ask field validation.
-- Aggregate: 1m → 5m / 60m (complete-bucket policy; partial buckets
-  dropped and counted).
+- Aggregate: 1m → 5m / 60m (`time_bucket` UTC boundary; aggregates the
+  existing 1m bars in the window, **`n_bars` faithfully marks partial bars**
+  — 0002 I21, partial gaps are legal, no synthetic fill).
 - Local cache: `data/raw_csv/`, `data/raw_parquet/`,
   `data/ohlcv_5m/ohlcv_5m.parquet`, `data/ohlcv_1h/ohlcv_1h.parquet`
   (**single-file external tables** — 0002 D4 already deprecated the

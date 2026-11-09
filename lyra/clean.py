@@ -205,6 +205,24 @@ def _assert_quality(con, inner_sql: str, present: set[str]) -> None:
 def _clean_sql(csv_dir: Path, payload_present: set[str]) -> str:
     score_cols = [f"({c} IS NOT NULL)::INT" for c in PAYLOAD if c in payload_present]
     score = " + ".join(score_cols) if score_cols else "0"
+    # R3: keys must be non-NULL and non-empty before dedup — otherwise a
+    # blank instrument/time survives into bronze and later stages (feature
+    # builder, strategy run) fail far from the data boundary.
+    key_valid = (
+        " AND instrument IS NOT NULL AND TRIM(instrument) <> ''"
+        " AND time IS NOT NULL"
+    )
+    # R13: a content hash of the payload columns is the final tie-breaker.
+    # Same file + same key + same payload score but different content is a
+    # total (read-order-independent) and run-stable order, so the survivor
+    # is deterministic (I18) even when no column distinguishes the rows.
+    hash_cols = [c for c in PAYLOAD if c in payload_present]
+    if hash_cols:
+        # `||` string-concatenation joins the per-row payload values into one
+        # deterministic content fingerprint (run-stable, total ordering).
+        row_hash = "md5(" + " || '' || ".join(hash_cols) + ")"
+    else:
+        row_hash = "''::VARCHAR"
     # Survivors only: filter → score → deterministic row number.
     return f"""
         WITH raw AS (
@@ -216,17 +234,22 @@ def _clean_sql(csv_dir: Path, payload_present: set[str]) -> str:
         scored AS (
             SELECT *, {score} AS _payload_score
             FROM raw
-            WHERE COALESCE(is_complete, FALSE) = TRUE
+            WHERE COALESCE(is_complete, FALSE) = TRUE{key_valid}
+        ),
+        hashable AS (
+            SELECT *, {row_hash} AS _row_hash FROM scored
         ),
         deduped AS (
             SELECT *,
                    ROW_NUMBER() OVER (
                        PARTITION BY instrument, time
-                       ORDER BY _payload_score DESC, _source_file ASC, time ASC
+                       ORDER BY _payload_score DESC, _source_file ASC,
+                                time ASC, _row_hash ASC
                    ) AS _rn
-            FROM scored
+            FROM hashable
         )
-        SELECT * EXCLUDE (_rn, _payload_score, _source_file, filename, is_complete)
+        SELECT * EXCLUDE (_rn, _payload_score, _row_hash, _source_file,
+                         filename, is_complete)
         FROM deduped
         WHERE _rn = 1
     """

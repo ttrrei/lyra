@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0001` |
 | 标题 | Repo（git）与 OCI（Object Storage）的分工，alpha 边界的物理落地 |
-| 状态 | 提案 |
+| 状态 | **已实施（OCI 拉取/清洗/聚合 0002 完成）** |
 | Owner | `ttrrei` |
 | 创建日期 | `2026-11-05` |
 | 相关提案 | `docs/proposals/oci-alpha-layout.md` |

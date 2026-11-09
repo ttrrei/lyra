@@ -169,3 +169,32 @@ HLD describes `requirements.lock` as pinning transitive dependencies, and `pypro
 ## Carry-forward from earlier reviews
 
 R10, R11, and R12 correspond to 0003 Batch-1 findings H1, H4, and H3. They were parked for 0004/0007 at the time; this review does not present them as new discoveries, but confirms they remain unresolved. The 0005 Batch-3 review added `trading_days` support and fail-closed timestamp validation, but this review found that one scalar still cannot represent multiple trade intervals within a call.
+
+---
+
+## Disposition (2026-11-10, ruled after item-by-item verification against current code)
+
+> This is a cross-AI independent review. The dispositions below are based on verifying each item against the current code (not copying the report's conclusions), and distinguish "already landed in batch-4" from "landed now".
+
+| Finding | Ruling | Rationale and action |
+|---|---|---|
+| R1 OCI size-fallback | **Accept (fixed)** | Size is not a content proof. `oci_client._is_local_up_to_date` drops the size-only skip: without a verifiable remote digest (md5) it always re-downloads (fail-closed). Added `test_oci_size_match_is_not_a_content_proof`. |
+| R2 corrupt ZIP silently skipped | **Accept (fixed)** | `pull.extract_zips_to_csv` adds a `strict` mode: validates each member via `testzip` **before** clearing the target; failure raises `CorruptArchiveError` (no more overwriting prior data with an empty result). Pipeline enables `strict=True`. Added `test_pull_strict_fails_on_corrupt_archive_before_clear`. |
+| R3 blank/NULL keys not rejected | **Accept (fixed)** | `clean._clean_sql` WHERE adds `instrument IS NOT NULL AND TRIM(instrument)<>'' AND time IS NOT NULL`. Added `test_clean_rejects_blank_instrument_and_null_time`. |
+| R4 `trading_days` scalar | **Accept (already landed in batch-4, C2)** | Superseded by the per-trade counter `trading_days_for(entry, exit)`; default `None` = natural days preserving the nova cross-check. Stale finding in this report. |
+| R5 partial-bar contract conflict | **Accept (doc fixed)** | 0002 I21 is authoritative (keep + `n_bars` marking). Two stale HLD "partial dropped" statements fixed (zh+en). Code already conforms to 0002. |
+| R6 signal query lacks OHLC | **Accept (already landed in batch-4, C1)** | compiler OHLC projection + runner bars alignment implemented. Stale finding in this report. |
+| R7 `_quote` column names | **Accept (already landed in batch-4, M2)** | `_quote` now strips the `mid_` prefix to use real `bid_o/ask_o`. Stale finding in this report. |
+| R8 `exit.feature` typo | **Accept (already landed in batch-4, M3)** | `exit.feature` now strictly allows only `when`; unknown keys fail-closed. Stale finding in this report. |
+| R9 feature-vs-feature value domain | **Accept (already landed in batch-4, M1)** | Value-domain gate (boolean/ordinal/numeric mismatch fail-closed) implemented, 5 `test_b4_m1_*` regressions. Stale finding in this report. |
+| R10 path traversal | **Hold (0007)** | Parked in 0003 batch-1; belongs to the 0004/0007 publication boundary. To be closed at 0007 decision. |
+| R11 non-atomic write | **Hold (0007)** | Parked in 0003 batch-1; belongs to the 0004/0007 publication boundary. To be closed at 0007 decision. |
+| R12 alpha version binding | **Hold (0007)** | Parked in 0003 batch-1; full provenance boundary is 0007's. To be closed at 0007 decision. |
+| R13 dedup tie-break | **Accept (fixed)** | Added a content-hash final tie-breaker (same file/key/score/different content still deterministically survives, I18). Added `test_clean_dedup_deterministic_on_conflicting_content`. |
+| R14 `simulate` mixed instruments | **Accept (already landed in batch-4, m2)** | `simulate` now rejects mixed instruments. Stale finding in this report. |
+| R15 command name sync/backup | **Hold (0007)** | 0007 not implemented; command name to be unified at the 0007 decision (lean to keep `lyra backup`, `sync` as alias). |
+| R16 0001/0002 metadata | **Accept (fixed)** | 0001/0002 decision docs "proposal" → "implemented" (zh+en), aligned with HLD/ACTION_LOG. |
+| R17 lock file missing | **Hold (0009)** | Locking mechanism to be finalized at 0009 doctor; not introduced now. |
+
+**Tally**: 11 accepted (R1/R2/R3/R5/R13/R16 landed now + R4/R6/R7/R8/R9/R14 already landed in batch-4), 6 held (R10/R11/R12→0007, R15→0007, R17→0009), 0 rejected.
+**Verification**: 223/223 tests green (+4: R1/R2/R3/R13), pyflakes clean.

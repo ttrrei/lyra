@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0002` |
 | Title | OHLCV data sync (OCI pull + landing + aggregation) |
-| Status | **Proposed** (awaiting user approval) |
+| Status | **Implemented (2026-11-07)** |
 | Owner | `ttrrei` |
 | Created | `2026-11-06` |
 | Related proposal | — |

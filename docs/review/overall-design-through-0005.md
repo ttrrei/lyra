@@ -169,3 +169,32 @@ HLD 描述 `requirements.lock` 并要求它固定传递依赖，`pyproject.toml`
 ## 历史发现承接
 
 R10、R11、R12 分别对应 0003 批次1 review 的 H1、H4、H3，已被当时挂起到 0004/0007；本报告不把它们伪装成新发现，而是确认当前代码仍未处置。0005 融资交易日问题在批次3增加了 `trading_days` 支持和 fail-closed 时间校验，但本报告发现该标量仍不能表示一次调用中的多笔交易区间。
+
+---
+
+## 处置记录（2026-11-10，lyra 开发侧逐项核实后裁定）
+
+> 本报告为跨 AI 独立检验。以下处置基于当前代码逐项核实（非照抄报告结论），并区分"批次4 已落地"与"本轮新落地"。
+
+| 发现 | 结论 | 理由与处置 |
+|---|---|---|
+| R1 OCI size-fallback | **接受（已改）** | size 非内容证明。`oci_client._is_local_up_to_date` 移除 size-only 跳过：无可验证远端摘要（md5）时一律重下（fail-closed）。新增 `test_oci_size_match_is_not_a_content_proof`。 |
+| R2 损坏 ZIP 静默跳过 | **接受（已改）** | `pull.extract_zips_to_csv` 新增 `strict` 模式：清空目标**前**先逐成员 `testzip`，失败抛 `CorruptArchiveError`（不再用空结果覆盖旧数据）；pipeline 启用 `strict=True`。新增 `test_pull_strict_fails_on_corrupt_archive_before_clear`。 |
+| R3 空/NULL 键未拒 | **接受（已改）** | `clean._clean_sql` WHERE 增 `instrument IS NOT NULL AND TRIM(instrument)<>'' AND time IS NOT NULL`。新增 `test_clean_rejects_blank_instrument_and_null_time`。 |
+| R4 `trading_days` 标量 | **接受（批次4 已落地，C2）** | 已由 `trading_days_for(entry, exit)` 每笔计数器取代；默认 None=自然日维持 nova cross-check。报告此项为过期发现。 |
+| R5 partial bar 契约冲突 | **接受（文档已改）** | 0002 I21 为权威（保留 + `n_bars` 标记）。HLD 两处"partial 丢弃"过时表述已修正（中英）。代码本就符合 0002。 |
+| R6 信号查询无 OHLC | **接受（批次4 已落地，C1）** | compiler OHLC 投影 + runner bars 对齐已实现。报告此项为过期发现。 |
+| R7 `_quote` 列名 | **接受（批次4 已落地，M2）** | `_quote` 已剥离 `mid_` 前缀用真实 `bid_o/ask_o`。报告此项为过期发现。 |
+| R8 `exit.feature` typo | **接受（批次4 已落地，M3）** | `exit.feature` 已严格仅允许 `when`，未知键 fail-closed。报告此项为过期发现。 |
+| R9 feature-vs-feature 值域 | **接受（批次4 已落地，M1）** | 值域门（boolean/ordinal/numeric 不匹配 fail-closed）已实现，5 个 `test_b4_m1_*` 回归。报告此项为过期发现。 |
+| R10 路径穿越 | **挂起（0007）** | 0003 批次1 已挂起，属 0004/0007 发布边界。待 0007 决策收口。 |
+| R11 非原子写 | **挂起（0007）** | 0003 批次1 已挂起，属 0004/0007 发布边界。待 0007 决策收口。 |
+| R12 alpha 版本绑定 | **挂起（0007）** | 0003 批次1 已挂起，provenance 完整边界归 0007。待 0007 决策收口。 |
+| R13 dedup tie-break | **接受（已改）** | 增内容哈希最终 tie-breaker（同文件/同键/同分/异内容仍确定性存活，I18）。新增 `test_clean_dedup_deterministic_on_conflicting_content`。 |
+| R14 `simulate` 混合标的 | **接受（批次4 已落地，m2）** | `simulate` 已拒绝混合标的。报告此项为过期发现。 |
+| R15 命令名 sync/backup | **挂起（0007）** | 0007 未实现，命令名待 0007 决策统一（倾向保留 `lyra backup`，`sync` 作别名）。 |
+| R16 0001/0002 元信息 | **接受（已改）** | 0001/0002 决策稿"提案"→"已实施"（中英），与 HLD/ACTION_LOG 对齐。 |
+| R17 锁文件缺失 | **挂起（0009）** | 锁机制待 0009 doctor 收口；本轮不引入。 |
+
+**统计**：接受 11（R1/R2/R3/R5/R13/R16 本轮落地 + R4/R6/R7/R8/R9/R14 批次4已落地）、挂起 6（R10/R11/R12→0007，R15→0007，R17→0009）、拒绝 0。
+**验证**：223/223 测试绿（+4：R1/R2/R3/R13），pyflakes 干净。

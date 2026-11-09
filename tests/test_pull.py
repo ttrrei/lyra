@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import zipfile
 
+import pytest
+
 from conftest import make_csv_bytes
 from lyra import pull
 
@@ -51,3 +53,44 @@ def test_pull_instrument_from_column_not_filename(tmp_path):
         with p.open() as fh:
             row = next(_csv.DictReader(fh))
         assert row["instrument"] == "XAU_USD"
+
+
+def _corrupt_zip(path, filename: str, payload: bytes) -> None:
+    """Write a zip whose stored data byte is corrupted, so ``testzip()``
+    deterministically reports a CRC mismatch (flip the first stored byte)."""
+    import io
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        z.writestr(filename, payload)
+    raw = bytearray(buf.getvalue())
+    # Local header (30 bytes) + filename = start of the stored payload; flip
+    # its first byte so the CRC no longer matches.
+    data_start = 30 + len(filename)
+    raw[data_start] ^= 0xFF
+    path.write_bytes(bytes(raw))
+
+
+def test_pull_strict_fails_on_corrupt_archive_before_clear(tmp_path):
+    """R2: strict mode must raise CorruptArchiveError *before* clearing the
+    target, so prior good data is not wiped into an empty result. Legacy
+    (non-strict) mode still skips the corrupt archive."""
+    csv_dir = tmp_path / "csv"
+    csv_dir.mkdir()
+    # Pre-existing good data that a naive extract would wipe.
+    good = csv_dir / "prior_good.csv"
+    good.write_bytes(make_csv_bytes("XAU_USD", 0, 1))
+    assert good.exists()
+
+    zips = tmp_path / "zips"
+    zips.mkdir()
+    _corrupt_zip(zips / "bad.zip", "bad.csv", make_csv_bytes("XAU_USD", 0, 1))
+
+    # strict: raises before clearing — prior good CSV survives untouched.
+    with pytest.raises(pull.CorruptArchiveError):
+        pull.extract_zips_to_csv(zips, csv_dir, clean_target=True, strict=True)
+    assert good.exists()
+
+    # legacy tolerant mode: skips the corrupt archive, clears target, yields [].
+    out = pull.extract_zips_to_csv(zips, csv_dir, clean_target=True, strict=False)
+    assert out == []

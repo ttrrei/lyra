@@ -80,6 +80,25 @@ def test_oci_unsafe_name_rejected(tmp_path):
     assert p.name == "EUR..USD.zip"
 
 
+def test_oci_size_match_is_not_a_content_proof(tmp_path):
+    """R1: when the remote lists no verifiable digest (md5 dropped), a size
+    match must NOT be treated as content identity — the object is re-downloaded
+    so a same-length new revision cannot keep serving stale local data."""
+    old = b"old-content-x"
+    new = b"new-content-y"  # different content, same length
+    client = FakePar(objects={"a.zip": new}, drop_md5=True)
+    target = tmp_path / "a.zip"
+    target.write_bytes(old)  # local file has the *same size* but stale content
+
+    result = oci_client.download_object(client, PAR_PREFIX, "a.zip", tmp_path,
+                                        {"name": "a.zip", "size": len(new)})
+    # Must have re-downloaded, so the local bytes now match the served content.
+    assert result == target
+    assert target.read_bytes() == new
+    # The re-download proves no size-based skip occurred.
+    assert any("a.zip" in r for r in client.requests)
+
+
 def test_par_expiry_diagnostic(tmp_path):
     """401/403/404 must raise ParExpiredError with the redacted O5 message."""
     client = FakePar(objects={"a.zip": _zip_bytes()}, list_status=403)

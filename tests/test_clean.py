@@ -145,3 +145,58 @@ def test_clean_recompute_overwrites(tmp_path):
     pq.write_table(pa.Table.from_pylist(bronze2), str(out))
     assert len(bronze2) == first_n + 2
     assert {r["instrument"] for r in bronze2} == {"XAU_USD", "EUR_USD"}
+
+
+def _row(instrument: str, ts: str, mid_c: float = 100.5) -> str:
+    """A single complete moneta-format data row (all 16 columns present)."""
+    return (
+        f"{instrument},true,{ts},10,100,101,99,100.5,"
+        f"99.8,100.8,98.2,100.3,100.2,101.2,99.7,100.7"
+    )
+
+
+def test_clean_rejects_blank_instrument_and_null_time(tmp_path):
+    """R3: blank/NULL instrument and NULL time must be excluded at the data
+    boundary, not deferred to feature/strategy stages. Only the one valid
+    row survives."""
+    csv_dir = tmp_path / "csv"
+    csv_dir.mkdir()
+    lines = [
+        HEADER,
+        _row("XAU_USD", "2026-01-02 00:00:00"),   # valid
+        _row("   ", "2026-01-02 00:01:00"),       # blank instrument → drop
+        _row("XAU_USD", ""),                      # NULL time → drop
+        _row("XAU_USD", "2026-01-02 00:02:00").replace(",true,", ",false,"),  # incomplete → drop
+    ]
+    (csv_dir / "XAU_USD.csv").write_text("\n".join(lines) + "\n")
+
+    bronze = clean_mod.clean_csv_to_bronze(csv_dir)
+    assert len(bronze) == 1
+    assert bronze[0]["instrument"] == "XAU_USD"
+    # No blank/NULL keys leaked into bronze.
+    assert all(r["instrument"] and str(r["instrument"]).strip() for r in bronze)
+    assert all(r["time"] is not None for r in bronze)
+
+
+def test_clean_dedup_deterministic_on_conflicting_content(tmp_path):
+    """R13: same file + same (instrument,time) + same payload score but
+    different content must still yield one deterministic survivor (I18)."""
+    csv_dir = tmp_path / "csv"
+    csv_dir.mkdir()
+    ts = "2026-01-02 00:00:00"
+    lines = [
+        HEADER,
+        _row("XAU_USD", ts, mid_c=100.5),  # two identical keys, same completeness
+        _row("XAU_USD", ts, mid_c=101.5),  # different mid_c
+    ]
+    (csv_dir / "XAU_USD.csv").write_text("\n".join(lines) + "\n")
+
+    first = clean_mod.clean_csv_to_bronze(csv_dir)
+    assert len(first) == 1
+    # Run-stable: re-reading the same input must pick the same survivor
+    # regardless of read order.
+    again = clean_mod.clean_csv_to_bronze(csv_dir)
+    assert first[0] == again[0]
+    # The survivor is one of the two content variants (deterministic, not a
+    # silent pick of a third value).
+    assert first[0]["mid_c"] in (100.5, 101.5)

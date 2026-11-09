@@ -54,7 +54,7 @@
 - 从 OCI 拉取 raw CSV / raw Parquet（`lyra pull`）。
 - 清洗：去重（`(instrument, time)` 唯一）、缺失分钟标 gap、
   UTC 对齐、Bid/Ask 字段校验。
-- 聚合：1m → 5m / 60m（完整桶策略，partial 桶丢弃并计数）。
+- 聚合：1m → 5m / 60m（`time_bucket` UTC 边界，窗口内已有 1m bar 聚合，**`n_bars` 如实标记部分 bar**——0002 I21，partial 缺口合法、不合成填充）。
 - 本地缓存：`data/raw_csv/`、`data/raw_parquet/`、
   `data/ohlcv_5m/ohlcv_5m.parquet`、`data/ohlcv_1h/ohlcv_1h.parquet`
   （**单文件外部表**——0002 D4 已废弃目录级 `<snapshot_id>` 层级，

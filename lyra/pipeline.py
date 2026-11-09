@@ -116,7 +116,11 @@ def run_pull(
     raw_zips = oci_client.sync_par(transport, oci.data_par_url, zips_dir)
 
     # 2) flatten archives → CSVs (clears stale top-level CSVs first).
-    raw_csvs = pull.extract_zips_to_csv(zips_dir, csv_dir, clean_target=True)
+    #    R2: strict=True fails fast on a corrupt archive *before* clearing, so
+    #    a corrupt download cannot overwrite prior good data with an empty set.
+    raw_csvs = pull.extract_zips_to_csv(
+        zips_dir, csv_dir, clean_target=True, strict=True
+    )
 
     # 3) clean — ALWAYS recompute (A1). Deterministic (I18).
     #    Streamed via DuckDB COPY (no full in-memory materialization) so real

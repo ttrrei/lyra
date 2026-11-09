@@ -200,16 +200,23 @@ def _object_url(base: str, name: str) -> str:
 
 
 def _is_local_up_to_date(local: Path, obj: Mapping[str, Any]) -> bool:
-    """I20 idempotency: md5-first, size-fallback."""
+    """I20 idempotency: trust only a verifiable remote content digest.
+
+    R1 (overall-design review): a remote *size* is NOT a content proof — the
+    same object name can be re-served with same-length but different bytes
+    (a new revision), and a size match would wrongly skip the download and
+    keep serving stale data (R6/I20). So we only reuse a local file when the
+    remote lists a content digest (``md5``) that the local file matches.
+    Without a verifiable digest we re-download (fail-closed) rather than
+    trusting size equality.
+    """
     if not local.exists():
         return False
     remote_md5 = obj.get("md5")
     if remote_md5:
         return _md5_matches(local, str(remote_md5))
-    remote_size = obj.get("size")
-    if remote_size is not None:
-        return local.stat().st_size == int(remote_size)
-    # Nothing to compare on: re-download to be safe.
+    # No verifiable content digest listed → cannot prove the local bytes are
+    # the served ones; a size match is insufficient, so re-download.
     return False
 
 
