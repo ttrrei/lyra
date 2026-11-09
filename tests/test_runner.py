@@ -255,6 +255,152 @@ def test_run_financing_wired(env):
     assert ov.run_id != base.run_id
 
 
+def test_run_id_covers_consumed_feature_values(env):
+    """批次1-H2: a perturbation of a feature column the strategy SQL actually
+    reads must change the run identity (I5); a perturbation of a column the
+    strategy does NOT read must not (digest is scoped to features_used)."""
+    import duckdb as _duckdb
+    import pandas as _pd
+
+    feat = env["data_root"] / "features" / "ohlcv_1h" / "EURUSD.parquet"
+    original = _pd.read_parquet(feat)
+
+    def _perturb(col: str, value: float) -> None:
+        df = original.copy()
+        df[col] = value
+        _duckdb.connect().execute(
+            f"COPY (SELECT * FROM df) TO '{feat}' (FORMAT PARQUET)"
+        )
+
+    def _restore() -> None:
+        _pd.DataFrame(original.to_dict(orient="list")).to_parquet(feat)
+
+    r_a = runner.run_strategy(env["strat"], env["data_root"],
+                              registry=env["registry"],
+                              out_dir=env["strat"].parent / "h2a")
+    # consumed feature (mid_c, used by the strategy): run_id MUST change
+    _perturb("mid_c", 2.5)
+    r_b = runner.run_strategy(env["strat"], env["data_root"],
+                              registry=env["registry"],
+                              out_dir=env["strat"].parent / "h2b")
+    assert r_b.run_id != r_a.run_id
+    # unconsumed column (volume, not in the strategy digest scope): a file
+    # differing from the original ONLY in volume must map back to the
+    # original run identity.
+    _perturb("volume", 99999.0)
+    r_c = runner.run_strategy(env["strat"], env["data_root"],
+                              registry=env["registry"],
+                              out_dir=env["strat"].parent / "h2c")
+    assert r_c.run_id == r_a.run_id
+    _restore()
+
+
+def test_run_id_covers_trading_counter_behavior(env):
+    """批次1-H2: two per-trade trading-day counters with different behavior
+    (charging different financing) must not share a run identity."""
+    base = runner.run_strategy(env["strat"], env["data_root"],
+                               registry=env["registry"],
+                               out_dir=env["strat"].parent / "cf0")
+    two = runner.run_strategy(env["strat"], env["data_root"],
+                              registry=env["registry"],
+                              out_dir=env["strat"].parent / "cf2",
+                              trading_days_for=lambda e, x: 2.0)
+    three = runner.run_strategy(env["strat"], env["data_root"],
+                                registry=env["registry"],
+                                out_dir=env["strat"].parent / "cf3",
+                                trading_days_for=lambda e, x: 3.0)
+    assert base.run_id != two.run_id
+    assert two.run_id != three.run_id
+
+
+def test_run_dir_scoped_by_run_id_no_stale_trades(env):
+    """批次1-H3: a zero-trade run must not inherit (or re-hash) a previous
+    run's trades.parquet from the same (name, date) path, and its manifest's
+    artifact set must belong to its own run_id directory only."""
+    out = env["strat"].parent / "h3"
+    # First run: the env strategy produces trades.
+    r1 = runner.run_strategy(env["strat"], env["data_root"],
+                             registry=env["registry"], out_dir=out)
+    assert any(len(t) for t in r1.trades.values())
+    assert (r1.out_dir / "trades.parquet").exists()
+    # Second run: a data root where the instrument never fires (close ==
+    # open on every bar), same run name + out_dir as the first.
+    data2 = out / "data_flat"
+    feat2 = data2 / "features" / "ohlcv_1h"
+    feat2.mkdir(parents=True)
+    rows = []
+    base_dt = dt.datetime(2024, 1, 1, tzinfo=TZ)
+    for i in range(6):
+        t = base_dt + dt.timedelta(days=i)
+        rows.append((t, 1.0, 1.0, 1.0, 1.0))
+    _write_feature(feat2, "EURUSD", rows)
+    catalog.Catalog(data2 / "catalog.duckdb").upsert_feature_views(data2)
+    flat = (env["strat"].parent / "flat.yaml")
+    flat.write_text(_STRAT)
+    r2 = runner.run_strategy(flat, data2, registry=_registry(),
+                             name="run_smoke", out_dir=out)
+    assert r2.metrics["EURUSD"]["trade_count"] == 0
+    # the second run lives in its OWN run_id directory
+    assert r2.out_dir != r1.out_dir
+    # its trades.parquet is a zero-row file, not the first run's trades
+    import pyarrow.parquet as _pq
+    zero = _pq.read_table(str(r2.out_dir / "trades.parquet"))
+    assert zero.num_rows == 0
+    one = _pq.read_table(str(r1.out_dir / "trades.parquet"))
+    assert one.num_rows > 0
+    # manifest artifact hashes belong to files inside r2's own directory
+    man = json.loads((r2.out_dir / "manifest.json").read_text())
+    assert man["run_id"] == r2.run_id
+    for fname, digest in man["artifacts"].items():
+        assert (r2.out_dir / fname).exists()
+        assert hashlib.sha256((r2.out_dir / fname).read_bytes()).hexdigest() \
+            == digest
+    # the first run's stale trades.parquet was NOT re-hashed into this manifest
+    stale = hashlib.sha256(
+        (r1.out_dir / "trades.parquet").read_bytes()).hexdigest()
+    assert man["artifacts"]["trades.parquet"] != stale
+
+
+def test_run_manifest_hashes_metrics_json(env):
+    """批次1-M2: metrics.json is a D8 artifact and must appear in the
+    manifest's artifact checksums (previously omitted)."""
+    res = runner.run_strategy(env["strat"], env["data_root"],
+                              registry=env["registry"],
+                              out_dir=env["strat"].parent / "m2")
+    man = json.loads((res.out_dir / "manifest.json").read_text())
+    assert "metrics.json" in man["artifacts"]
+    actual = hashlib.sha256((res.out_dir / "metrics.json").read_bytes()).hexdigest()
+    assert man["artifacts"]["metrics.json"] == actual
+
+
+def test_metrics_zero_open_month_in_middle():
+    """批次1-M5: a zero-open month BETWEEN two trading months must appear as
+    a retained all-zero row (I8)."""
+    import lyra.metrics as M
+
+    class T:
+        """Duck-typed trade exposing the fields the metrics read."""
+
+        def __init__(self, entry, net):
+            self.entry_time = entry
+            self.net_return = net
+            self.bars_held = 2
+
+    jan = dt.datetime(2024, 1, 10, tzinfo=dt.timezone.utc)
+    mar = dt.datetime(2024, 3, 5, tzinfo=dt.timezone.utc)
+    start = dt.datetime(2024, 1, 1, tzinfo=dt.timezone.utc)
+    end = dt.datetime(2024, 3, 31, tzinfo=dt.timezone.utc)
+    out = M.compute_metrics([T(jan, 0.02), T(mar, -0.01)], start, end)
+    months = {r["month"]: r for r in out["monthly"]}
+    assert set(months) == {"2024-01", "2024-02", "2024-03"}
+    feb = months["2024-02"]
+    assert feb["actual_entries"] == 0
+    assert feb["net_return_sum"] == 0.0
+    assert feb["avg_bars_held"] == 0.0
+    assert months["2024-01"]["actual_entries"] == 1
+    assert months["2024-03"]["actual_entries"] == 1
+
+
 def test_run_instrument_failure_isolated(env, monkeypatch):
     """I16: one instrument's per-bar stage failing must not skew the others.
 

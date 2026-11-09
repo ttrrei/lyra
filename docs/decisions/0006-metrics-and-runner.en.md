@@ -1,11 +1,12 @@
-# 0006 — Metrics + Run Pipeline (R5 + reproducible runs + O17 financing closure)
+# 0006 — Metrics + Run Pipeline (R5 + reproducible runs + O17 financing interface closure)
 
 > **Chinese**: [0006-metrics-and-runner.md](./0006-metrics-and-runner.md)
 >
 > Scope of this decision doc: **R5 metrics** (formulas frozen) + **run pipeline**
 > (`lyra run`, assembling 0004-compiled signals + 0005 per-bar trade engine into a
 > reproducible per-instrument evaluation) + **report & run artifacts** +
-> **reproducibility (I5)** + **O17 financing day-basis closure**. This feature does
+> **reproducibility (I5)** + **O17 per-trade financing counter interface closure**
+> (R4 trading-day compliance NOT closed, see D6 / Batch 1 H1). This feature does
 > **not** do the R12 interactive workflow (track/context/compare/merge) — it builds
 > on 0006's run artifacts and gets its own doc (see D1).
 
@@ -22,7 +23,7 @@
 | Related requirements | `docs/requirements.md` §R5 (metrics), §R6/R7 (data + run artifacts) |
 | Related HLD | `docs/hld.md` §1, §6, §8 |
 | Related decisions | 0002 (data contract / snapshot), 0003 (features + snapshot identity / FEATURE_VERSION), 0004 (YAML compiler → signal SQL), 0005 (per-bar trade engine, `trade()`/`simulate()`) |
-| Open items | O17 (financing day-basis) **closed here**; O-0005-1 (financing day-basis open item) **closed** |
+| Open items | O17 (financing day-basis): the **per-trade counter interface is closed here** (each trade countable individually); **R4/O15 trading-day compliance is NOT closed** — the natural-day default is a **documented known deviation** (H1 held, see D6 / Open item); O-0005-1 accordingly **partially closed** |
 
 ## 1. Problem
 
@@ -56,8 +57,10 @@ can be judged, and the R12 workflow has no footing. 0006 fills this gap: **`lyra
     `Trade.net_return` is the net field; supports `trading_days` override (O15/O17).
 - **R5 metric definitions (frozen; see requirements §R5)**: see Appendix A, D4.
 - **O17 financing day-basis**: 0003 D10 set "per session_day + calendar days", 0005
-  engine already supports the `trading_days` override; 0006 lets the runner compute
-  `trading_days` per trade's entry/exit bar time and pass it in, **closing O17** (D6).
+  engine already supports the `trading_days` override; 0006 lets the runner count days
+  per trade's entry/exit bar time (natural-day default) — **closes the per-trade counter
+  interface capability, but R4 trading-day compliance is NOT closed** (D6, Batch 1 H1
+  correction).
 - **User stance** (consistent): lightweight, no over-engineering (B6); 0005 established
   "one reusable engine + parallel direction research", 0006 continues that shape.
 
@@ -75,10 +78,11 @@ can be judged, and the R12 workflow has no footing. 0006 fills this gap: **`lyra
   1. Parse strategy YAML → `StrategySpec` (reuse 0004 `strategy_schema` + `compiler`).
   2. `sql = compile_sql(spec)`; DuckDB-query `spec.view` for per-bar
      `instrument/time/OHLC/entry_long/entry_short`.
-  3. **Per-instrument streaming** (D3): each instrument in an isolated DuckDB scope,
-     fetch bars (OHLC dicts) + attach the 4 boolean signal keys, then
-     `simulate(plan, bars, trading_days=<None per-trade calendar-days |
-     --financing-days flat override>)` → `Trade[]`.
+  3. **Per-instrument processing** (D3, Batch 1 M1: not true streaming, only I16
+     isolation): each instrument in an isolated DuckDB scope, fetch bars (OHLC dicts) +
+     attach the 4 boolean signal keys, then
+     `simulate(plan, bars, trading_days_for=<None per-trade natural-days | a user-injected
+     trading-day counter>)` → `Trade[]` (flat `--financing-days` removed, 0004 C2).
   4. Per-instrument `compute_metrics` (D4); **never aggregate across instruments** (I7).
   5. Write run artifacts (D8) + report (D7) + reproducibility manifest (D5).
 - `lyra/cli.py` — add `lyra run` (+ `lyra report` to re-render artifacts) subcommands.
@@ -91,11 +95,11 @@ can be judged, and the R12 workflow has no footing. 0006 fills this gap: **`lyra
 **Run artifact layout** (D8, local mirror, `~/.lyra/<workspace>/runs/` or repo `runs/`,
 both gitignored per repo policy):
 ```
-runs/<name>/<YYYYMMDD>/
-  manifest.json      # D5 reproducibility manifest + per-file SHA256
-  signals.parquet    # per-bar signals (instrument,time,side,...)
-  trades.parquet     # Trade[] (0005 output)
-  metrics.json       # per-instrument + summary (D4)
+runs/<name>/<YYYYMMDD>/<run_id>/      # Batch 1 H3: scoped by run_id, never shared
+  manifest.json      # D5 reproducibility manifest + all four artifacts' SHA256
+  signals.parquet    # per-bar signals (instrument,time,side,...); written even if zero rows
+  trades.parquet     # Trade[] (0005 output); written even if zero rows
+  metrics.json       # per-instrument + summary (D4); hashed in manifest (Batch 1 M2)
   report.md          # D7 human-readable report
 ```
 
@@ -128,7 +132,7 @@ runs/<name>/<YYYYMMDD>/
 | # | Invariant | Source |
 |---|---|---|
 | I1 | Causality: signal determined by past-only windows (0004 guarantees, 0006 does not break) | I1 (HLD §4) / 0004 |
-| I5 | **bit-for-bit reproducible**: same manifest (strategy+data+versions+params) → same `run_id`, same artifacts; any input change → different manifest (see D5) | I5 (HLD §4) / reinforced here |
+| I5 | **Reproducible**: same manifest (strategy+data+versions+params+financing counter identity) → same `run_id`, **deterministic data artifacts** byte-identical (`signals/trades/report/metrics`); any input change → different `run_id` (see D5). **Scope**: `manifest.json`'s `generated_at` (wall clock) is the **only excluded field** — the contract is "deterministic artifacts identical, generation timestamp may vary", not every artifact including manifest byte-identical (Batch 1 M4 explicit) | I5 (HLD §4) / reinforced here |
 | I7 | **Per-instrument**: each instrument reported separately; **never** synthesize cross-instrument returns/equity/portfolio score | I7 (HLD §4) |
 | I8 | Monthly opportunities = actual open count (zero-open months included as 0, not dropped) | I8 (HLD §4) |
 | I9 | Trade-level research: no sizing/leverage/margin/account equity/account CAGR | I9 (HLD §4) |
@@ -160,10 +164,15 @@ runs/<name>/<YYYYMMDD>/
 | `test_run_multi_instrument_isolated` | 3 instruments, no cross-talk; one `metrics.json` entry each; no portfolio score |
 | `test_run_reproducible_identical_manifest` | same input run twice → `manifest.json` + `metrics.json` + `trades.parquet` byte/field identical |
 | `test_run_reproducible_perturbation_fails` | change strategy param/data/version → `run_id` changes (I5 fail-fast) |
+| `test_run_id_covers_consumed_feature_values` | consumed feature value (`mid_c`) changes → `run_id` changes; only unconsumed column (`volume`) changes → `run_id` unchanged (Batch 1 H2) |
+| `test_run_id_covers_trading_counter_behavior` | two financing counters with different behavior → different `run_id` (Batch 1 H2) |
+| `test_run_dir_scoped_by_run_id_no_stale_trades` | zero-trade rerun → its own `run_id` dir, zero-row `trades.parquet`, manifest does not hash another dir's stale trades (Batch 1 H3/M2) |
+| `test_run_manifest_hashes_metrics_json` | `metrics.json` is hashed in `manifest` and matches (Batch 1 M2) |
+| `test_metrics_zero_open_month_in_middle` | trade at start/end, zero-open month in middle → that month's all-zero row is kept, end rows normal (Batch 1 M5) |
 | `test_run_monthly_zero_openings_counted` | data with zero-open month → monthly series includes 0, not dropped (I8) |
 | `test_run_empty_produces_zero_trades` | no signals → empty trades, safe metrics, run still emits manifest (no crash) |
 | `test_run_manifest_sha256s` | `manifest.json` SHA256 per artifact matches actual file hash |
-| `test_run_financing_wired` | long held across days → financing by `trading_days` (O17 closed); short hold → 0 |
+| `test_run_financing_wired` | long held across days → financing by per-trade entry/exit (`simulate` default `trading_days=None` → **natural days**, H1 known deviation); short hold → 0; the interface accepts a `trading_days_for` counter (flat `--financing-days` removed, 0004 C2) |
 | `test_run_report_fields` | `report.md`/`metrics.json` include all R5 metric fields + run metadata (no sizing/$ PnL) |
 | `test_run_instrument_failure_isolated` | one instrument data error → recorded in manifest, visible; others' aggregation unaffected (I16) |
 
@@ -190,6 +199,7 @@ runs/<name>/<YYYYMMDD>/
 | Date | Version | Change |
 |---|---|---|
 | 2026-11-08 | 0.1 | Draft: R5 metrics + `lyra run` pipeline + report + run artifacts + reproducibility manifest + O17 financing closure; R12 workflow explicitly moved out (→0007). |
+| 2026-11-10 | 0.2 | **Batch 1 adversarial review disposition** (H2/H3/M1/M2/M3/M4/M5 accepted and landed, H1 held): `run_id` data identity now covers all feature columns consumed by the strategy SQL + counter behavior fingerprint (H2); run dir scoped by `run_id`, zero-trade results still write a zero-row Parquet, manifest hashes all four D8 artifacts (H3/M2); D3 clarified as not true streaming (M1); D6/H1 wording corrected to "interface capability closed, R4 trading-day compliance NOT closed, natural-day default is a documented known deviation"; I5 states `generated_at` is the sole excluded field (M4); test matrix gains 5 Batch 1 regressions. |
 | 2026-11-08 | 0.2 | **Align to R5**: code-phase adversarial self-check found the first-draft D4/I15/B3/H5/§5 test table introduced Sharpe / profit factor (R5 forbids, nova lacks them). Rewrote D4/I15/B3/H5/§5 to the R5 frozen set (`avg_bars_held` + per-month rows + report metadata), added `test_metrics_forbidden_fields_absent`; code was already R5-correct, doc-only correction. |
 
 ---
@@ -206,12 +216,17 @@ avoid turning 0006 into "transition engineering" (user #73's critique of codex).
 compiled SQL target). OHLC bars and signals share the same view (0003 wide table has OHLCV).
 **No new data pipeline**.
 
-**D3 (per-instrument streaming)**: each instrument in an isolated DuckDB scope, JOIN
+**D3 (per-instrument processing)**: each instrument in an isolated DuckDB scope, JOIN
 `plan.sql` (`SELECT instrument,time,entry_long,entry_short,exit_long,exit_short FROM <view>`)
 with the same view's OHLC (`mid_o/mid_h/mid_l/mid_c`) on `(instrument,time)` to produce
 per-bar **dicts** (`instrument/time/mid_* /entry_*/exit_*`, boolean signals), fed directly
 to 0005 `simulate(plan, bars, trading_days=...)` (**bars are a dict sequence, not
 separate o/h/l/c + signals arrays**). **Never synthesize cross-instrument** (I7).
+> **Batch 1 M1 (clarified)**: "streaming" here is a **misnomer** — per-instrument only means
+> I16 isolation (one instrument's failure/isolation does not affect others); the runner reads
+> the full OHLC for that instrument via `fetchall()` in one pass, which is **not true
+> streaming** (no incremental per-bar processing). True streaming is a **follow-up
+> enhancement**, out of 0006 scope.
 
 **D4 (metric definitions, I15, R5 frozen)**:
 - `annualized = Σnet / (span_days/365.25)`; span 0 → `None`. `score` (annualized score)
@@ -235,28 +250,54 @@ duckdb_version, data_snapshot_ids, params{stop_loss_pct,direction,max_holding_ba
 slippage/commission/financing_bps}, git_commit, generated_at}`;
 `run_id = sha256(all above except generated_at)`. Same manifest → same `run_id`; any change → changes.
 (Extends 0003 snapshot identity; aligns with nova `runner.py`'s `run_id` mechanism.)
+> **Batch 1 H2 (landed)**: `run_id`'s data identity now covers **every input the strategy SQL
+> actually consumes** — `_data_digest` hashes the OHLC columns **plus all columns in
+> `plan.features_used`** (perturbing a consumed feature value → `run_id` must change); the
+> financing counter's **behavior fingerprint** `counter_fingerprint` (evaluated on a fixed
+> probe interval) is part of `run_id` (two counters that bill differently → `run_id` must
+> differ).
 
-**D6 (O17 closure)**: 0005 engine's `simulate(..., trading_days=None)` **already computes
-per-trade** calendar days from each trade's entry/exit **bar time** (`_day_count`:
-`trading_days=None` → per-trade from timestamps; a float → global flat override). 0006's
-runner **defaults to passing `None`** → per-trade calendar-day financing (O15/O17 day basis
-already active); and exposes an optional `--financing-days` for a global flat override
-(research convenience, not the default). **O17 is closed here**: the explicit definition is
-"financing counted on each trade's entry/exit calendar days" — implemented by the 0005
-engine, enabled by default by the 0006 runner.
+**D6 (O17 interface closure)**: 0005 engine's `simulate(..., trading_days=None)` **already
+computes per-trade** days from each trade's entry/exit **bar time** (`_day_count`:
+`trading_days=None` → per-trade from timestamps; a `trading_days_for` counter → per-trade
+counter). 0006's runner **defaults to passing `None`** → per-trade **natural-day** financing;
+a `trading_days_for` counter can be injected for per-trade trading-day counting (the flat
+`--financing-days` override was **removed**, 0004 C2).
+> **Batch 1 H1 (wording corrected, IMPORTANT)**: the earlier phrasing "O17 closed here / R4
+> compliant" was **inaccurate** — O17 closes the **per-trade counter interface capability**,
+> but **R4/O15 require financing counted on trading days** (weekends and market holidays
+> excluded), which the natural-day default does **not** satisfy (holding across a weekend
+> over-counts financing). Correct statement: **the interface capability is closed** (each trade
+> counted individually, `trading_days_for` in place), but **trading-day compliance is not
+> closed**; the natural-day default is a **documented known deviation** pending a real trading
+> calendar or a user decision (H1 held).
 
 **D7 (report)**: `report.md` + `metrics.json`: per-instrument metric table + cross-instrument
 summary (min/median/max of each metric, **not synthesis**) + run metadata (manifest
 summary). **Excludes** sizing / $ PnL / account CAGR (I9/R9).
 
-**D8 (run artifacts)**: see §3.1 layout. Every artifact in `manifest.json` SHA256.
+**D8 (run artifacts)**: see §3.1 layout. **All four D8 artifacts** (`signals.parquet`,
+`trades.parquet`, `metrics.json`, `report.md`) are written unconditionally and **all** enter
+`manifest.json` SHA256 (Batch 1 M2: a zero-row result still emits a zero-row Parquet with the
+fixed schema; `metrics.json` was previously omitted from the checksums, is now included, and
+a missing artifact fails closed).
 Local mirror in `~/.lyra/<workspace>/runs/` (B13: out of repo) or repo `runs/` (gitignored).
+> **Batch 1 H3 (landed)**: each run directory is **scoped by `run_id`**
+> (`runs/<name>/<YYYYMMDD>/<run_id>/`); different `run_id`s never share a directory — a
+> zero-trade rerun can no longer inherit or re-hash a previous run's `trades.parquet`. The
+> checksum only proves a file is uncorrupted; directory isolation proves the file **belongs**
+> to that `run_id`'s manifest.
 
-**Open item**: `trading_days` currently uses **calendar days** (`exit_time - entry_time`).
-If a **trading calendar** is introduced later (count actual trading days), register it in
-catalog and change `_days()` — this is an **O17 follow-up enhancement**, not a defect;
-0006 uses calendar days as the closed definition, keeping the `trading_days` override
-entry for a non-invasive switch.
+**Open item (H1)**: the financing day-basis is currently **natural days** (0005
+`_day_count`, with `trading_days_for=None` counting per-trade entry/exit timestamps) —
+**the interface capability is closed, but R4 trading-day compliance is not** (see D6 Batch 1
+H1 correction). Wiring a **versioned real trading calendar** (count actual trading days,
+exclude weekends/holidays) requires fail-closed behavior when financing rate is non-zero, or
+an explicit user ruling to adopt natural days and revise R4/O15 accordingly — this is a
+**follow-up enhancement / user decision item**, not a defect; 0006 uses per-trade **natural
+days** as the current default definition (documented known deviation, see D6 H1). The
+`simulate(trading_days_for=...)` counter entry is already in place in 0005, allowing a
+non-invasive switch to a real trading calendar.
 
 ## Appendix B: Self-check
 

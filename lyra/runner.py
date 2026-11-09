@@ -91,24 +91,65 @@ def _q(ident: str) -> str:
 
 
 def _data_digest(con: duckdb.DuckDBPyConnection, view: str,
-                 instruments: Sequence[str]) -> str:
-    """Compact O(n) digest of the consumed (view, per-instrument OHLC).
+                 instruments: Sequence[str],
+                 feature_cols: Sequence[str] = ()) -> str:
+    """Compact O(n) digest of the consumed (view, per-instrument OHLC
+    + strategy-consumed feature columns).
 
-    Feeds the manifest so a data perturbation changes ``run_id`` (I5).  O(n)
-    over the bars actually consumed (light); deterministic for a fixed dataset.
+    Feeds the manifest so a data perturbation changes ``run_id`` (I5).
+    批次1-H2: feature columns that the strategy SQL actually reads are part
+    of the consumed data — perturbing only a feature value (OHLC unchanged)
+    must change the run identity.  O(n) over the bars actually consumed
+    (light); deterministic for a fixed dataset.
     """
+    cols = ", ".join([_q(c) for c in feature_cols])
     h = hashlib.sha256()
     h.update(view.encode("utf-8"))
     for inst in sorted(instruments):
         h.update(b"|inst=" + inst.encode("utf-8"))
+        if cols:
+            sel = f"SELECT time, mid_o, mid_h, mid_l, mid_c, {cols}"
+        else:
+            sel = "SELECT time, mid_o, mid_h, mid_l, mid_c"
         rows = con.execute(
-            f"SELECT time, mid_o, mid_h, mid_l, mid_c FROM {_q(view)} "
-            f"WHERE instrument = ? ORDER BY time", [inst],
+            f"{sel} FROM {_q(view)} WHERE instrument = ? ORDER BY time",
+            [inst],
         ).fetchall()
         h.update(str(len(rows)).encode("utf-8"))
         for r in rows:
             h.update(repr(r).encode("utf-8"))
     return h.hexdigest()
+
+
+def _counter_fingerprint(trading_days_for: Any) -> str:
+    """批次1-H2: behavioral fingerprint of the per-trade trading-day counter.
+
+    Two run configurations that charge different financing (different
+    counters) must not share a ``run_id``.  The fingerprint probes the
+    counter with a fixed canonical pair (2024-01-01 → 2024-01-08, Monday
+    start, crossing a weekend) and a same-day pair; the result values are
+    part of the run identity.  Counters are anonymous callables so their
+    *behavior* is the only stable identity available.
+    """
+    if trading_days_for is None:
+        return "natural"
+    import datetime as _dt
+
+    def _probe(a: _dt.datetime, b: _dt.datetime) -> str:
+        try:
+            v = trading_days_for(a, b)
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ValueError("counter must return a number")
+            fv = float(v)
+            if math.isnan(fv) or math.isinf(fv) or fv < 0:
+                raise ValueError("counter returned an invalid day count")
+            return repr(fv)
+        except Exception as exc:  # a raising counter is also part of behavior
+            return f"raised:{type(exc).__name__}"
+
+    a = _dt.datetime(2024, 1, 1, tzinfo=_dt.timezone.utc)
+    b = _dt.datetime(2024, 1, 8, tzinfo=_dt.timezone.utc)
+    return f"counter:{_probe(a, b)},{_probe(a, a)}"
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +301,11 @@ def run_strategy(
                 })
 
         # 4) reproducibility manifest inputs (D5/I5; computed while conn open)
-        data_digest = _data_digest(con, plan.view, instruments)
+        # 批次1-H2: the strategy's actual feature columns are consumed data —
+        # include them so a feature-only perturbation changes run_id.
+        data_digest = _data_digest(
+            con, plan.view, instruments, feature_cols=plan.features_used,
+        )
     finally:
         con.close()
 
@@ -273,6 +318,7 @@ def run_strategy(
         duckdb_version=duckdb.__version__,
         params=_params_dict(plan),
         trading_days_basis="trading" if trading_days_for else "calendar",
+        counter_fingerprint=_counter_fingerprint(trading_days_for),
         data_digest=data_digest,
         schema_version=spec.version,
         spec_id=spec.id,
@@ -283,7 +329,12 @@ def run_strategy(
     # 5) write artifacts -----------------------------------------------------
     run_name = name or spec.id
     run_date = datetime.now(timezone.utc).strftime("%Y%m%d")
-    run_dir = Path(result.out_dir) / run_name / run_date
+    # 批次1-H3: every run gets its own run_id-scoped directory.  Reusing a
+    # (name, date) directory across different run_ids would let a zero-trade
+    # re-run inherit (and re-hash) a previous run's trades.parquet; scoping by
+    # run_id makes each artifact set self-contained and verifiable against its
+    # own manifest.
+    run_dir = Path(result.out_dir) / run_name / run_date / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_artifacts(run_dir, plan, spec, result, run_id, trading_days_for,
                      feature_catalog_snapshot)
@@ -323,6 +374,7 @@ def _compute_run_id(
     duckdb_version: str,
     params: dict[str, Any],
     trading_days_basis: str,
+    counter_fingerprint: str,
     data_digest: str,
     schema_version: int,
     spec_id: str,
@@ -330,7 +382,13 @@ def _compute_run_id(
 ) -> str:
     """Deterministic run identity (D5/I5): everything the output depends on,
     except ``generated_at`` (wall clock) — that is excluded so identical inputs
-    always map to the same ``run_id``."""
+    always map to the same ``run_id``.
+
+    批次1-H2: ``counter_fingerprint`` captures the behavioral identity of the
+    per-trade trading-day counter (two different counters must not share a
+    run identity), and ``data_digest`` covers the strategy-consumed feature
+    values, not just OHLC.
+    """
     payload = {
         "strategy_yaml_sha256": _sha256_bytes(strategy_yaml_bytes),
         "spec_id": spec_id,
@@ -339,6 +397,7 @@ def _compute_run_id(
         "plan_hash": plan_hash,
         "params": params,
         "trading_days_basis": trading_days_basis,
+        "counter_fingerprint": counter_fingerprint,
         "feature_version": feature_version,
         "compiler_version": compiler_version,
         "engine_version": engine_version,
@@ -508,17 +567,18 @@ def _write_artifacts(
 ) -> None:
     generated_at = datetime.now(timezone.utc).isoformat()
 
-    # signals.parquet (per-bar signal matrix; deterministic instrument,time order)
+    # 批次1-M2: D8 lists signals.parquet + trades.parquet as required run
+    # artifacts; even a zero-row result must emit them (with the fixed schema)
+    # so downstream consumers can rely on a stable file layout.  批次1-H3:
+    # the caller writes into a run_id-scoped directory, so an empty re-run
+    # can never leave a stale trades.parquet from a previous run behind.
     sig_rows = _signals_rows(result)
-    if sig_rows:
-        _write_parquet(sig_rows, run_dir / "signals.parquet",
-                       _SIGNAL_COLUMNS, _TIME_COLS_SIGNAL)
+    _write_parquet(sig_rows, run_dir / "signals.parquet",
+                   _SIGNAL_COLUMNS, _TIME_COLS_SIGNAL)
 
-    # trades.parquet (0005 output)
     trade_rows = _trades_rows(result)
-    if trade_rows:
-        _write_parquet(trade_rows, run_dir / "trades.parquet",
-                       _TRADE_COLUMNS, _TIME_COLS_TRADE)
+    _write_parquet(trade_rows, run_dir / "trades.parquet",
+                   _TRADE_COLUMNS, _TIME_COLS_TRADE)
 
     # metrics.json: per-instrument (R5 set) + cross-instrument summary
     # (min/median/max — NOT synthesis, I7).
@@ -554,10 +614,10 @@ def _write_artifacts(
         "instrument_failures": result.instrument_failures,
     }
     # metrics.json is fully deterministic (I5): no wall-clock field.  The
-    # generation stamp lives only in manifest.json's ``generated_at``.  It is
-    # NOT hashed into the manifest's artifact checksums for
-    # reproducibility (I5): only the deterministic data artifacts
-    # (trades/signals/report) and the run_id are the reproducibility contract.
+    # generation stamp lives only in manifest.json's ``generated_at``.
+    # 批次1-M2: metrics.json is a key consumed artifact — it IS hashed into
+    # the manifest checksums (previously omitted, so tamper/corruption of the
+    # primary output was undetectable).
     _write_json(metrics_payload, run_dir / "metrics.json")
 
     # report.md (R5) — deterministic (no wall-clock inside; I5 byte-repro).
@@ -586,8 +646,16 @@ def _write_artifacts(
         "instrument_failures": result.instrument_failures,
         "artifacts": {},
     }
-    for fname in ("signals.parquet", "trades.parquet", "report.md"):
+    # 批次1-M2: hash ALL D8 artifacts (incl. metrics.json); they were all
+    # unconditionally written above, so existence is expected — fail closed
+    # if one is missing rather than silently skipping its checksum.
+    for fname in ("signals.parquet", "trades.parquet", "metrics.json",
+                  "report.md"):
         p = run_dir / fname
-        if p.exists():
-            manifest["artifacts"][fname] = _sha256_file(p)
+        if not p.exists():
+            raise RuntimeError(
+                f"run artifact {fname!r} was not written; refusing to emit a "
+                f"manifest with an incomplete artifact set (D8/M2)"
+            )
+        manifest["artifacts"][fname] = _sha256_file(p)
     _write_json(manifest, run_dir / "manifest.json")

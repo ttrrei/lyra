@@ -1,10 +1,11 @@
-# 0006 — 指标 + 运行管线（R5 + 可复现运行 + O17 融资收口）
+# 0006 — 指标 + 运行管线（R5 + 可复现运行 + O17 融资接口收口）
 
 > **English**: [0006-metrics-and-runner.en.md](./0006-metrics-and-runner.en.md)
 >
 > 本决策文档覆盖 0006 的范围：**R5 指标**（口径已冻结）+ **运行管线**
 > （`lyra run`，把 0004 编译出的信号 + 0005 逐 bar 交易引擎组装成可复现的
-> 逐标的评测）+ **报告与运行产物** + **可复现性（I5）** + **O17 融资日基准收口**。
+> 逐标的评测）+ **报告与运行产物** + **可复现性（I5）** + **O17 融资逐笔计数接口收口**
+> （R4 交易日合规未收口，见 D6/批次1-H1）。
 > 本 feature **不做** R12 交互式工作流（track/context/compare/merge）——它构建
 > 在 0006 的运行产物之上，单独成文（见 D1）。
 
@@ -21,7 +22,7 @@
 | 相关需求 | `docs/requirements.md` §R5（指标）、§R6/R7（数据 + 运行产物） |
 | 相关 HLD | `docs/hld.md` §1、§6、§8 |
 | 相关决策 | 0002（数据合约 / 快照）、0003（特征 + 快照身份 / FEATURE_VERSION）、0004（YAML 编译器 → 信号 SQL）、0005（逐 bar 交易引擎，`trade()`/`simulate()`） |
-| 未决项处置 | O17（融资日基准）本 feature **收口**；O-0005-1（融资日基准未决项）**关闭** |
+| 未决项处置 | O17（融资日基准）：本 feature 收口**逐笔计数接口能力**（每笔可单独计日）；**R4/O15 交易日口径合规未收口**，默认自然日为显式已知偏差（H1 挂起，见 D6/未决项）；O-0005-1（融资日基准未决项）相应**部分关闭** |
 
 **修订记录**
 
@@ -60,8 +61,8 @@
     支持 `trading_days` 覆盖（O15/O17）。
 - **R5 指标口径（已冻结，见 requirements §R5）**：见附录 A 的 D4。
 - **O17 融资日基准**：0003 D10 已定"per session_day + 日历日"，0005 引擎已支持
-  `trading_days` 覆盖；0006 让 runner 按每笔交易的 entry/exit bar 时间算出
-  `trading_days` 传入，**收口 O17**（见 D6）。
+  `trading_days` 覆盖；0006 让 runner 按每笔交易的 entry/exit bar 时间逐笔计日（默认
+  自然日）——**收口的是逐笔计数接口能力，R4 交易日合规未收口**（见 D6，批次1-H1 纠偏）。
 - **用户立场**（延续多轮）：轻量、不过度工程（B6）；0005 已确立"单一可复用
   引擎 + 多方向并行研究"的形态，0006 延续之。
 
@@ -78,9 +79,10 @@
   1. 解析策略 YAML → `StrategySpec`（复用 0004 `strategy_schema` + `compiler`）。
   2. `sql = compile_sql(spec)`；DuckDB 查询 `spec.view` 得到逐 bar 的
      `instrument/time/OHLC/entry_long/entry_short`。
-  3. **逐标的流式**（D3）：每个 instrument 在独立 DuckDB 作用域内取 bar+信号，
-     `signals = [entry_long - entry_short, ...]`（与 0005 `simulate` 契约一致），
-     调 `simulate(o,h,l,c,t,signals,plan, trading_days=<None 逐笔日历日 | --financing-days 扁平覆盖>)`，得 `Trade[]`。
+  3. **逐标的处理**（D3，批次1-M1：非真实 streaming，仅 I16 隔离）：每个 instrument
+     在独立 DuckDB 作用域内取 bar+信号，直接作为逐 bar **dict 序列**喂给
+     `simulate(plan, bars, trading_days_for=<None 逐笔自然日 | 用户注入的交易日计数器>)`，得 `Trade[]`
+     （扁平 `--financing-days` 已移除，0004 C2）。
   4. 逐标的汇总 `compute_metrics`（D4）；**绝不跨标的合成**（I7）。
   5. 写运行产物（D8）+ 报告（D7）+ 可复现性清单（D5）。
 - `lyra/cli.py` —— 新增 `lyra run`（+ `lyra report` 复用产物重渲染）子命令。
@@ -93,11 +95,11 @@
 **运行产物布局**（D8，本地镜像，`~/.lyra/<workspace>/runs/` 或仓库 `runs/`，
 均 gitignored per repo policy）：
 ```
-runs/<name>/<YYYYMMDD>/
-  manifest.json      # D5 可复现性清单 + 各文件 SHA256
-  signals.parquet    # 逐 bar 信号（instrument,time,side,...）
-  trades.parquet     # Trade[]（0005 输出）
-  metrics.json       # 逐标的 + summary（D4）
+runs/<name>/<YYYYMMDD>/<run_id>/      # 批次1-H3：按 run_id 作用域，互不覆盖
+  manifest.json      # D5 可复现性清单 + 全部四个产物 SHA256
+  signals.parquet    # 逐 bar 信号（instrument,time,side,...）；零行也写出
+  trades.parquet     # Trade[]（0005 输出）；零行也写出
+  metrics.json       # 逐标的 + summary（D4）；入 manifest 哈希（批次1-M2）
   report.md          # D7 人读报告
 ```
 
@@ -127,7 +129,7 @@ runs/<name>/<YYYYMMDD>/
 | # | 不变量 | 来源 |
 |---|---|---|
 | I1 | 因果性：信号只由 past-only 窗决定（0004 保证，0006 不破坏） | I1 (HLD §4) / 0004 |
-| I5 | **bit-for-bit 可复现**：同一清单（策略+数据+版本+参数）→ 同一 `run_id`、同一产物；任一输入变化 → 不同清单（见 D5） | I5 (HLD §4) / 本 feature 强化 |
+| I5 | **可复现**：同一清单（策略+数据+版本+参数+融资计数器身份）→ 同一 `run_id`、**确定性数据产物**字节一致（`signals/trades/report/metrics`）；任一输入变化 → 不同 `run_id`（见 D5）。**范围**：`manifest.json` 的 `generated_at`（wall clock）是**唯一被排除**的字段，不属于逐字节复现承诺——即契约是"确定性产物相同、生成时间戳可变"，并非所有产物含 manifest 逐字节一致（批次1-M4 明示） | I5 (HLD §4) / 本 feature 强化 |
 | I7 | **逐标的**：每标的独立报告；**绝不**跨标的合成收益/权益/组合分 | I7 (HLD §4) |
 | I8 | 月度机会数 = 实际开仓笔数（含零开仓月，计 0 而非剔除） | I8 (HLD §4) |
 | I9 | 交易级研究：无 sizing/杠杆/保证金/账户权益/账户 CAGR | I9 (HLD §4) |
@@ -159,10 +161,15 @@ runs/<name>/<YYYYMMDD>/
 | `test_run_multi_instrument_isolated` | 3 标的，互不串扰；每标的一个 `metrics.json` 条目；无组合分 |
 | `test_run_reproducible_identical_manifest` | 同输入跑两次 → `manifest.json` + `metrics.json` + `trades.parquet` 逐字节/字段一致 |
 | `test_run_reproducible_perturbation_fails` | 改策略参数/数据/版本之一 → `run_id` 变化（I5 失败即失败） |
+| `test_run_id_covers_consumed_feature_values` | 策略消费的特征值（mid_c）变化 → `run_id` 变化；仅未消费列（volume）变化 → `run_id` 不变（批次1-H2） |
+| `test_run_id_covers_trading_counter_behavior` | 两个行为不同的融资计数器 → `run_id` 不同（批次1-H2） |
+| `test_run_dir_scoped_by_run_id_no_stale_trades` | 零交易重跑 → 独立 `run_id` 目录、零行 `trades.parquet`、`manifest` 不哈希到他人目录的旧 trades（批次1-H3/M2） |
+| `test_run_manifest_hashes_metrics_json` | `metrics.json` 入 `manifest` 哈希且一致（批次1-M2） |
+| `test_metrics_zero_open_month_in_middle` | 首尾有交易、中间零开盘月 → 该月全 0 行保留、首尾行正常（批次1-M5） |
 | `test_run_monthly_zero_openings_counted` | 含零开仓月的数据 → 月度序列含 0 而非剔除（I8） |
 | `test_run_empty_produces_zero_trades` | 无信号 → trades 空、metrics 安全、run 仍产出 manifest（不崩溃） |
 | `test_run_manifest_sha256s` | `manifest.json` 内每个产物 SHA256 与文件实际哈希一致 |
-| `test_run_financing_wired` | 开仓跨日的长头 → 融资按逐笔 entry/exit 日历日计（O17 收口，`simulate` 默认 `trading_days=None`）；短持 → 0；`--financing-days` 覆盖生效 |
+| `test_run_financing_wired` | 开仓跨日的长头 → 融资按逐笔 entry/exit 计（`simulate` 默认 `trading_days=None` → **自然日**，H1 已知偏差）；短持 → 0；接口接受 `trading_days_for` 计数器（扁平 `--financing-days` 已移除，0004 C2） |
 | `test_run_report_fields` | `report.md`/`metrics.json` 含 R5 全部指标字段 + 运行元信息（无 sizing/$ PnL） |
 | `test_run_instrument_failure_isolated` | 一个标的数据异常 → 记入清单并可见；其余标的汇总不受影响（I16） |
 
@@ -189,6 +196,7 @@ runs/<name>/<YYYYMMDD>/
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-11-08 | 0.1 | 初稿：R5 指标 + `lyra run` 管线 + 报告 + 运行产物 + 可复现性清单 + O17 融资收口；R12 工作流明确移出（→0007）。 |
+| 2026-11-10 | 0.2 | **批次1 对抗性 review 处置**（H2/H3/M1/M2/M3/M4/M5 接受并落地、H1 挂起）：`run_id` 数据身份覆盖策略消费的全部特征列 + counter 行为指纹（H2）；run 目录按 `run_id` 作用域、零交易也写零行 Parquet、manifest 哈希全部四个产物（H3/M2）；D3 澄清非真实 streaming（M1）；D6/H1 口径纠偏为"接口能力已收口、R4 交易日合规未收口、默认自然日为显式已知偏差"；I5 明示 `generated_at` 为唯一排除字段（M4）；测试矩阵补 5 条批次1 回归。 |
 
 ---
 
@@ -202,12 +210,16 @@ runs/<name>/<YYYYMMDD>/
 **D2（数据路径）**：runner 读 `catalog.duckdb` 注册的 `spec.view`（0004 编译 SQL
 的目标）。OHLC bar 与信号同源于该 view（0003 宽表含 OHLCV）。**不新增数据管线**。
 
-**D3（逐标的流式）**：每个 instrument 在独立 DuckDB 作用域内，把 `plan.sql`
-（`SELECT instrument,time,entry_long,entry_short,exit_long,exit_short FROM <view>`）
-作为子查询与同一 `view` 的 OHLC（`mid_o/mid_h/mid_l/mid_c`）按 `(instrument,time)`
-JOIN，得到逐 bar 的 **dict**（`instrument/time/mid_* /entry_*/exit_*`，布尔信号），
-直接喂 0005 `simulate(plan, bars, trading_days=...)`（**bars 是 dict 序列，非
-o/h/l/c/signals 分离数组**）。**绝不跨标的合成**（I7）。
+**D3（逐标的隔离）**：信号 SQL 一次查出全部 `(instrument,time,signals)` 行
+（`plan.sql` 已投影 OHLC `mid_o/mid_h/mid_l/mid_c`，见 0004 C1），在 Python 侧
+按 `instrument` 分组为逐 bar 的 **dict**（`instrument/time/mid_* /entry_*/exit_*`，
+布尔信号），再**逐标的**喂 0005 `simulate(plan, bars, trading_days_for=...)`
+（**bars 是 dict 序列，非 o/h/l/c/signals 分离数组**）。**绝不跨标的合成**（I7）。
+> **批次1-M1（澄清）**：此处"逐标的"指 **I16 隔离边界**——每个 instrument 的
+> `simulate`/metrics 异常被独立捕获并记录（`instrument_failures`），不静默拖垮
+> 其余标的；但信号 SQL 是**单次跨标的查询**（数据级失败属整次 run 失败）。
+> 实现并非"逐标的流式/游标"（当前 `fetchall` + `bars_by_inst` 全量驻留），大数据
+> 集下的真流式/分批消费列为**后续增强**，不是本 feature 已交付契约。
 
 **D4（指标口径，I15，R5 冻结）**：
 - `annualized = Σnet / (span_days/365.25)`；跨度 0 → `None`。`score`（年化得分）
@@ -225,29 +237,54 @@ o/h/l/c/signals 分离数组**）。**绝不跨标的合成**（I7）。
 **D5（可复现性清单，I5）**：`manifest.json` 记录
 `{run_id, strategy_yaml_sha256, FEATURE_VERSION, engine_version, compiler_version,
 duckdb_version, data_snapshot_ids, params{stop_loss_pct,direction,max_holding_bars,
-slippage/commission/financing_bps}, git_commit, generated_at}`；
+slippage/commission/financing_bps}, trading_days_basis, counter_fingerprint,
+git_commit, generated_at}`；
 `run_id = sha256(上述字段，除 generated_at)`。同清单 → 同 `run_id`；任一变化 → 变。
 （扩展 0003 快照身份；对齐 nova `runner.py` 的 `run_id` 机制。）
+> **批次1-H2（已落地）**：`run_id` 的数据身份覆盖**策略 SQL 实际消费的全部输入**，
+> 不止 OHLC——`data_digest` 现含 `features_used` 各列值（改特征值、OHLC 不变 →
+> `run_id` 必变）；融资计数器的**行为指纹** `counter_fingerprint`（用固定探针区间
+> 求值）入 `run_id`（两个计费不同的计数器 → `run_id` 必不同）。匿名 Python 回调
+> 无法凭源码复现，故以行为指纹为身份；若需可复现审计，调用方应提供可版本化的
+> 交易日历并以其身份（版本/内容摘要）替代裸回调。
 
-**D6（O17 融资收口）**：0005 引擎的 `simulate(..., trading_days=None)` **已按每笔交易**
-用该笔的 entry/exit **bar 时间**算日历日（`_day_count`：`trading_days=None` → 逐笔按
-时间戳算；传 float → 全局扁平覆盖）。0006 的 runner **默认传 `None`** → 逐笔日历日
-融资（O15/O17 日基准已生效）；并暴露可选 `--financing-days` 做全局扁平覆盖（研究
-便利，非默认）。**O17 在此收口**：明确"融资按每笔 entry/exit 日历日计"是 0005 引擎
-已实现、0006 runner 默认启用的口径。
+**D6（O17 融资日基准——接口能力已收口，R4 交易日合规未收口）**：0005 引擎的
+`simulate(..., trading_days_for=None)` **已按每笔交易**用该笔 entry/exit 时间算日数
+（`_day_count`：`trading_days_for=None` → 逐笔按时间戳算**自然日**；传计数器
+`counter(entry,exit)->float` → 由 caller 逐笔定日数）。0006 runner **默认传 `None`**
+→ 逐笔**自然日**融资；可传入 `trading_days_for` 计数器（**扁平 `--financing-days`
+已移除**，0004 C2）。
+> **批次1-H1（口径纠偏，重要）**：本 feature 此前措辞"O17 在此收口 / R4 兼容"
+> **不准确**——O17 收口的是**逐笔计数接口能力**，但 **R4/O15 要求融资按交易日
+> （周末与市场节假日不计）**，而默认自然日**不满足 R4**（持仓跨周末会多计融资）。
+> 故正确表述为：**接口能力已收口**（每笔可单独计日，`trading_days_for` 已就位），
+> **R4 交易日合规未收口**——需在融资费率非零时接入**可版本化的真实市场日历**并
+> fail-closed，或用户正式裁定改用自然日（须同步修订 R4/O15 与双语文档）。
+> 当前默认自然日为**显式已知偏差**（保持 nova field-for-field cross-check 基准），
+> 不得再表述为"R4 已兼容"。
 
 **D7（报告）**：`report.md` + `metrics.json`：逐标的指标表 + 跨标的 summary
 （各指标的最小/中位/最大，**非合成**）+ 运行元信息（清单摘要）。**不含** sizing /
 $ PnL / 账户 CAGR（I9/R9）。
 
-**D8（运行产物）**：见 §3.1 布局。每个产物进 `manifest.json` 的 SHA256。
+**D8（运行产物）**：见 §3.1 布局。**全部四个规定产物**（`signals.parquet`、
+`trades.parquet`、`metrics.json`、`report.md`）无条件写出并**全部**进
+`manifest.json` 的 SHA256（批次1-M2：零行结果也写带固定 schema 的零行 Parquet；
+`metrics.json` 此前漏哈希，现纳入且缺失即 fail-closed）。
 本地镜像在 `~/.lyra/<workspace>/runs/`（B13：仓库外）或仓库 `runs/`（gitignored）。
+> **批次1-H3（已落地）**：每个 run 目录**按 `run_id` 作用域**
+> （`runs/<name>/<YYYYMMDD>/<run_id>/`），不同 `run_id` 绝不共享目录——零交易重跑
+> 不可能继承/再哈希上一次 run 的 `trades.parquet`；哈希只能证明文件未损坏，
+> 目录隔离保证文件**属于**该 `run_id` 的 manifest。
 
-**未决项**：融资日基准当前为**日历日**（0005 `_day_count`，`trading_days=None` 时
-按每笔 entry/exit 时间戳算）。若未来引入**交易日历**（按实际交易日计数），需扩展
-`_day_count`（传入交易日历或 `trading_days` 覆盖）——这是 O17 的**后续增强**，不是
-缺陷；0006 以"逐笔日历日"为已收口口径，`simulate(trading_days=...)` 覆盖入口已
-在 0005 就绪，无侵入可切换。
+**未决项（H1）**：融资日基准当前为**自然日**（0005 `_day_count`，`trading_days_for=None`
+时按每笔 entry/exit 时间戳算）——**接口能力已收口，但 R4 交易日合规未收口**
+（见 D6 批次1-H1 纠偏）。接入**可版本化的真实交易日历**（按实际交易日计数、周末/
+节假日不计）需在融资费率非零时 fail-closed，或由用户正式裁定改用自然日并同步修订
+R4/O15——这是**后续增强 / 用户裁决项**，不是
+缺陷；0006 以"逐笔**自然日**"为当前默认口径（显式已知偏差，见 D6 H1），
+`simulate(trading_days_for=...)` 计数器入口已在 0005 就绪，无侵入可切换到
+真实交易日历。
 
 ## 附录 B：自检
 
