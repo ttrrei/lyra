@@ -1,0 +1,10 @@
+{
+ "id": "campaign_volume_activity_p1_r03",
+ "family": "volume_activity",
+ "hypothesis": "A stronger activity burst may select better closing breakouts despite fewer openings.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volume_activity/experiments/128c2e2a91f53918b150/",
+ "content_sha256_12": "7b9cf32006ca"
+}

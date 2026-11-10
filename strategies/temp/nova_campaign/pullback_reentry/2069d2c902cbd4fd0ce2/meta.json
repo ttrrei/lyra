@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r06",
+ "family": "pullback_reentry",
+ "hypothesis": "Deeper RSI pullbacks could improve entry price enough to compensate for more trend failures.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/2069d2c902cbd4fd0ce2/",
+ "content_sha256_12": "7a3282ba1cba"
+}

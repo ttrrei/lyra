@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r19",
+ "family": "range_trading",
+ "hypothesis": "After a persistent edge rejection, price may travel beyond the midpoint toward the opposite inner range quarter.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/cdac8eb24cc70865adc6/",
+ "content_sha256_12": "6ae099933669"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r14",
+ "family": "mean_reversion",
+ "hypothesis": "Short recovery fades may contribute distinct reversion returns rather than merely filling quiet months.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/c58febe0d2ac4bb0fd1e/",
+ "content_sha256_12": "bc8eb5fafdce"
+}

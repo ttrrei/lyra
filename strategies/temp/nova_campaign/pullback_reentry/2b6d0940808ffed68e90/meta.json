@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r05",
+ "family": "pullback_reentry",
+ "hypothesis": "Shallow RSI excursions around neutral may be safer trend pullbacks than deeper countertrend moves.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/2b6d0940808ffed68e90/",
+ "content_sha256_12": "fe94ef71c7c0"
+}

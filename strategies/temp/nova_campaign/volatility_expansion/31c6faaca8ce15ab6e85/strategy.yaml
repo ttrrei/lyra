@@ -1,0 +1,45 @@
+version: 1
+id: volatility_expansion_p1_r17
+family: volatility_expansion
+hypothesis: Uncapped expansion continuations may remain useful at a24bar maximum rather
+  than depend on exactly18bars.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - feature: breakout_up_24
+      op: eq
+      value: true
+    - feature: range_atr
+      op: gt
+      value: 1.5
+    - feature: relative_volume_24
+      op: gt
+      value: 1.0
+  short:
+    all:
+    - feature: breakout_down_24
+      op: eq
+      value: true
+    - feature: range_atr
+      op: gt
+      value: 1.5
+    - feature: relative_volume_24
+      op: gt
+      value: 1.0
+exit:
+  stop_loss_pct: 0.02
+  max_holding_bars: 24
+  long:
+    feature: range_position_24
+    op: lt
+    value: 0.5
+  short:
+    feature: range_position_24
+    op: gt
+    value: 0.5
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

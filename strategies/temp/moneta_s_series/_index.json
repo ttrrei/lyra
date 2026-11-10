@@ -1,0 +1,1471 @@
+{
+ "corpus": "moneta S-series (S-01..S-132)",
+ "source_repo": "ttrrei/moneta (read-only reference; code NOT copied into lyra)",
+ "total": 132,
+ "with_matrix_results": [
+  "S01",
+  "S02",
+  "S03",
+  "S04",
+  "S05",
+  "S06",
+  "S07",
+  "S113",
+  "S114",
+  "S115",
+  "S116",
+  "S117",
+  "S118",
+  "S119",
+  "S120",
+  "S121",
+  "S122",
+  "S123",
+  "S124",
+  "S125",
+  "S126",
+  "S127",
+  "S128",
+  "S129",
+  "S130",
+  "S131",
+  "S132",
+  "S22"
+ ],
+ "note": "132 single-indicator rule strategies in Python (strategy_*_lib.py). 28 have matrix results, all on 3 instruments (EUR_USD/BTC_USD/XAU_USD) vs buy-hold; most lose to buy-hold. Not YAML, not part of the 0008 regression gate. Triage target for 0010. 27 registered libraries (S01-S27) have dedicated strategy_*_lib.py; the other 105 (S28-S132) are legacy sweep strategies registered via run_matrix.py _SWEEP_MODULES/legacy runner (lib_file=null).",
+ "entries": [
+  {
+   "id": "S01",
+   "label": "S-01 RSI-24 mean-reversion",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_rsi_lib.py",
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S02",
+   "label": "S-02 RSI-24 mean-reversion (1h)",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_rsi_1h_lib.py",
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S03",
+   "label": "S-03 RSI + trend filter",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_rsi_trend_lib.py",
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S04",
+   "label": "S-04 Squeeze-onset follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_squeeze_lib.py",
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S05",
+   "label": "S-05 SuperTrend-24 follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_supertrend_lib.py",
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S06",
+   "label": "S-06 EMA-spread-24/120 follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_ema_spread_lib.py",
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S07",
+   "label": "S-07 Regime-gated slow trend (ADX gate)",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_regime_trend_lib.py",
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S08",
+   "label": "S-08 CCI-24 dip-buying",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_cci_reversion_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S09",
+   "label": "S-09 Williams %R-24 rebound buyer",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_willr_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S10",
+   "label": "S-10 Stochastic-24 oversold-turn",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_stoch_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S11",
+   "label": "S-11 MACD-12/60 momentum turn",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_macd_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S12",
+   "label": "S-12 Dual-velocity (ROC + slow-EMA slope)",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_dual_velocity_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S13",
+   "label": "S-13 Slow PSAR direction follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_psar_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S14",
+   "label": "S-14 Donchian-24 channel follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_donchian_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S15",
+   "label": "S-15 Aroon-24 fresh-trend buyer",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_aroon_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S16",
+   "label": "S-16 MFI-24 volume-exhaustion dip-buyer",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_mfi_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S17",
+   "label": "S-17 Slow RSI-60 (1h) with regime gate",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_rsi_slow_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S18",
+   "label": "S-18 VWAP-stretch reversion",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_vwap_stretch_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S19",
+   "label": "S-19 CMF-24 accumulation follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_cmf_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S20",
+   "label": "S-20 Multi-scale SuperTrend alignment",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_multiscale_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S21",
+   "label": "S-21 Slow squeeze-expansion (60-bar) regime",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_squeeze_slow_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S22",
+   "label": "S-22 Efficiency-ratio regime follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_er_lib.py",
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S23",
+   "label": "S-23 Slow ATR-normalized MACD follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_macd_slow_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S24",
+   "label": "S-24 ATR-band breakout follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_atr_band_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S25",
+   "label": "S-25 Chop-regime mean-reversion",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_chop_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S26",
+   "label": "S-26 EMA-12/60-spread follower",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_spread_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S27",
+   "label": "S-27 Volume-confirmed momentum",
+   "form": "python_lib (not YAML)",
+   "lib_file": "moneta/strategy/strategy_volmom_lib.py",
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S28",
+   "label": "S28",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S29",
+   "label": "S29",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S30",
+   "label": "S30",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S31",
+   "label": "S31",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S32",
+   "label": "S32",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S33",
+   "label": "S33",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S34",
+   "label": "S34",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S35",
+   "label": "S35",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S36",
+   "label": "S36",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S37",
+   "label": "S37",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S38",
+   "label": "S38",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S39",
+   "label": "S39",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S40",
+   "label": "S40",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S41",
+   "label": "S41",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S42",
+   "label": "S42",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S43",
+   "label": "S43",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S44",
+   "label": "S44",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S45",
+   "label": "S45",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S46",
+   "label": "S46",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S47",
+   "label": "S47",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S48",
+   "label": "S48",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S49",
+   "label": "S49",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S50",
+   "label": "S50",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S51",
+   "label": "S51",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S52",
+   "label": "S52",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S53",
+   "label": "S53",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S54",
+   "label": "S54",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S55",
+   "label": "S55",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S56",
+   "label": "S56",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S57",
+   "label": "S57",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S58",
+   "label": "S58",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S59",
+   "label": "S59",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S60",
+   "label": "S60",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S61",
+   "label": "S61",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S62",
+   "label": "S62",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S63",
+   "label": "S63",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S64",
+   "label": "S64",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S65",
+   "label": "S65",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S66",
+   "label": "S66",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S67",
+   "label": "S67",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S68",
+   "label": "S68",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S69",
+   "label": "S69",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S70",
+   "label": "S70",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S71",
+   "label": "S71",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S72",
+   "label": "S72",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S73",
+   "label": "S73",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S74",
+   "label": "S74",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S75",
+   "label": "S75",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S76",
+   "label": "S76",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S77",
+   "label": "S77",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S78",
+   "label": "S78",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S79",
+   "label": "S79",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S80",
+   "label": "S80",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S81",
+   "label": "S81",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S82",
+   "label": "S82",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S83",
+   "label": "S83",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S84",
+   "label": "S84",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S85",
+   "label": "S85",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S86",
+   "label": "S86",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S87",
+   "label": "S87",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S88",
+   "label": "S88",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S89",
+   "label": "S89",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S90",
+   "label": "S90",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S91",
+   "label": "S91",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S92",
+   "label": "S92",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S93",
+   "label": "S93",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S94",
+   "label": "S94",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S95",
+   "label": "S95",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S96",
+   "label": "S96",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S97",
+   "label": "S97",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S98",
+   "label": "S98",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S99",
+   "label": "S99",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S100",
+   "label": "S100",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S101",
+   "label": "S101",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S102",
+   "label": "S102",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S103",
+   "label": "S103",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S104",
+   "label": "S104",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S105",
+   "label": "S105",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S106",
+   "label": "S106",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S107",
+   "label": "S107",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S108",
+   "label": "S108",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S109",
+   "label": "S109",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S110",
+   "label": "S110",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S111",
+   "label": "S111",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S112",
+   "label": "S112",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": false,
+   "instruments": [],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S113",
+   "label": "S-113 1h Aroon + ADX",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S114",
+   "label": "S-114 Higher-timeframe trend pullback",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S115",
+   "label": "S-115 Higher-timeframe channel break",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S116",
+   "label": "S-116 Squeeze release + close location",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S117",
+   "label": "S-117 Low-trend VWAP reclaim",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S118",
+   "label": "S-118 Choppy Bollinger re-entry",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S119",
+   "label": "S-119 Channel-position continuation",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S120",
+   "label": "S-120 DI cross + ADX",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S121",
+   "label": "S-121 1h normalized MACD + ER",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S122",
+   "label": "S-122 PSAR + 1h SuperTrend",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S123",
+   "label": "S-123 Wick rejection at bands",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S124",
+   "label": "S-124 Activity-confirmed squeeze break",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S125",
+   "label": "S-125 EMA distance + 1h SuperTrend",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S126",
+   "label": "S-126 ATR expansion breakout",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S127",
+   "label": "S-127 CMF + 1h trend",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S128",
+   "label": "S-128 Trend-aligned VWAP reclaim",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S129",
+   "label": "S-129 1h SuperTrend + 5m pullback",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S130",
+   "label": "S-130 1h channel + efficiency",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S131",
+   "label": "S-131 Close-location activity impulse",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  },
+  {
+   "id": "S132",
+   "label": "S-132 Bandwidth expansion + 1h trend",
+   "form": "legacy_sweep (run_matrix _SWEEP_MODULES / legacy runner; no dedicated lib)",
+   "lib_file": null,
+   "has_matrix_results": true,
+   "instruments": [
+    "EUR_USD",
+    "BTC_USD",
+    "XAU_USD"
+   ],
+   "source_repo": "ttrrei/moneta",
+   "verdict": null
+  }
+ ],
+ "legacy_sweep_count": 105
+}

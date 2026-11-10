@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r10",
+ "family": "range_trading",
+ "hypothesis": "Restricting a confirmed range reclaim to bars below1.2ATR may further separate range trading from expansion.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/305f3d83d4d7d2e4a13b/",
+ "content_sha256_12": "c88511982563"
+}

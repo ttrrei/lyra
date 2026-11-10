@@ -1,0 +1,10 @@
+{
+ "id": "campaign_volume_activity_p1_r01",
+ "family": "volume_activity",
+ "hypothesis": "A closing prior-range breakout with above-average quote activity may continue.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volume_activity/experiments/bc0e2b590600184b9afd/",
+ "content_sha256_12": "b37eb002f329"
+}

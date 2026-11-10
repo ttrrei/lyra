@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r11",
+ "family": "range_trading",
+ "hypothesis": "Moderately efficient paths may still support edge-to-midpoint recovery once signal-bar shocks are excluded.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/2b4e919dfe456315b447/",
+ "content_sha256_12": "bc83ed46bcbf"
+}

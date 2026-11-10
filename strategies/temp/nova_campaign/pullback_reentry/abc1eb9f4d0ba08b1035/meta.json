@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r02",
+ "family": "pullback_reentry",
+ "hypothesis": "A single confirmed RSI recovery close may capture trend resumption sooner than two closes.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/abc1eb9f4d0ba08b1035/",
+ "content_sha256_12": "4f52dee01668"
+}

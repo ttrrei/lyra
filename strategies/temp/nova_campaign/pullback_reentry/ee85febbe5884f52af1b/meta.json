@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r16",
+ "family": "pullback_reentry",
+ "hypothesis": "A modest24-bar directional-efficiency floor may remove noisy apparent-trend pullbacks.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/ee85febbe5884f52af1b/",
+ "content_sha256_12": "ca9e5633c09d"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r12",
+ "family": "pullback_reentry",
+ "hypothesis": "A smaller1.5% target may monetize short pullback bursts before they reverse.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/27e30e07b82aace7adec/",
+ "content_sha256_12": "573460be51e0"
+}

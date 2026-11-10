@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r05",
+ "family": "range_trading",
+ "hypothesis": "Allowing recovered range trades to reach the rolling midpoint without a1%profitcap may retain their larger successful reversions.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/8ba43fe50c328a564b6b/",
+ "content_sha256_12": "303bb5c7b476"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r13",
+ "family": "failed_breakout",
+ "hypothesis": "Two consecutive inside-range closes after a failed break may reject more false reversals than one.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/339e13d07dd5e09309e4/",
+ "content_sha256_12": "9b30ae3b0559"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r17",
+ "family": "mean_reversion",
+ "hypothesis": "A moderately looser efficiency ceiling may preserve reversion quality while restoring edge cases in monthly coverage.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/c22a00584a0e0f5f40a9/",
+ "content_sha256_12": "cb78cad75d6b"
+}

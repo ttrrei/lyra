@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r14",
+ "family": "range_trading",
+ "hypothesis": "A wider sixATR prior range may offer more recoverable travel from its edge after a confirmed rejection.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/827997bb7816452b6683/",
+ "content_sha256_12": "2a0b7395fd0d"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r07",
+ "family": "mean_reversion",
+ "hypothesis": "A longer18bar memory of a three-ATR stretch may retain more subsequent recovery opportunities.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/559ebaec81095b48dfbd/",
+ "content_sha256_12": "c676b38667ae"
+}

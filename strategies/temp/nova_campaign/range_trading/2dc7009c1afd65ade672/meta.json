@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r06",
+ "family": "range_trading",
+ "hypothesis": "Range-edge rejection aligned with the broader EMA60 side may avoid fading persistent directional moves.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/2dc7009c1afd65ade672/",
+ "content_sha256_12": "3ed451b33c3a"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r13",
+ "family": "volatility_expansion",
+ "hypothesis": "Upward volatility expansions may have different continuation behavior from downside expansions across this instrument set.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/12b23667b663add5ca69/",
+ "content_sha256_12": "4eeb783358b9"
+}

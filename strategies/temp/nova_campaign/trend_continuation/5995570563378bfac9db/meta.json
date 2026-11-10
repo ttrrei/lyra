@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r14",
+ "family": "trend_continuation",
+ "hypothesis": "A Supertrend flip followed by three PSAR-aligned closes may identify continuation earlier in a stronger trend transition.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/5995570563378bfac9db/",
+ "content_sha256_12": "b8c0c6222d33"
+}

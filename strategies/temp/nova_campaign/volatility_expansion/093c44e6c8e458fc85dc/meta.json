@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r15",
+ "family": "volatility_expansion",
+ "hypothesis": "The best continuation expansions may benefit from an uncapped target while the midpoint and18bar exits still bound holding.",
+ "pass_instruments": 11,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/093c44e6c8e458fc85dc/",
+ "content_sha256_12": "8b68a48cb4d2"
+}

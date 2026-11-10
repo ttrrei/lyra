@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r14",
+ "family": "pullback_reentry",
+ "hypothesis": "Uncapped pullback continuations with independent trend agreement may benefit from48-bar patience.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/b89349b6e0b8e7859dcd/",
+ "content_sha256_12": "7dcb57a804ac"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r11",
+ "family": "trend_continuation",
+ "hypothesis": "Excluding very efficient24-bar paths may avoid mature trends while preserving earlier confirmed continuation entries.",
+ "pass_instruments": 10,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/5f3edfe10b76fee78f75/",
+ "content_sha256_12": "8daa2dc50107"
+}

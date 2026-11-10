@@ -1,0 +1,10 @@
+{
+ "id": "campaign_volume_activity_p1_r04",
+ "family": "volume_activity",
+ "hypothesis": "Activity-backed breakouts may benefit from uncapped continuation rather than a fixed3%profit target.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volume_activity/experiments/07c2538af230add1d652/",
+ "content_sha256_12": "aed22d77db93"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r16",
+ "family": "trend_continuation",
+ "hypothesis": "Avoiding signal bars wider than1.5WilderATR may reduce buying or selling after transient shocks in confirmed trends.",
+ "pass_instruments": 11,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/ee98dd2b05da3dac5864/",
+ "content_sha256_12": "37a6cc79a3f8"
+}

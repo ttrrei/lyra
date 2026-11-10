@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r08",
+ "family": "range_trading",
+ "hypothesis": "A range-edge rejection can tolerate up to oneATR beyond EMA60 without becoming an unrestricted countertrend fade.",
+ "pass_instruments": 1,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/9ecdcb575c08e6d3df91/",
+ "content_sha256_12": "5452728a30c5"
+}

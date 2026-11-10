@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r11",
+ "family": "volatility_expansion",
+ "hypothesis": "The expansion continuation payoff may be concentrated in the first six observed bars.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/69bb45daf8cd25101d7b/",
+ "content_sha256_12": "5cf4e074cdb5"
+}

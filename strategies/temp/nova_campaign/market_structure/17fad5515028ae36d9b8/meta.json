@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r04",
+ "family": "market_structure",
+ "hypothesis": "Uncapped structural continuation may recover losses from prematurely truncated large winners.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/17fad5515028ae36d9b8/",
+ "content_sha256_12": "f7cbe57452bf"
+}

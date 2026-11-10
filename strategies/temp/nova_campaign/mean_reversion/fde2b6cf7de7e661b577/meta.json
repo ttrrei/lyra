@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r01",
+ "family": "mean_reversion",
+ "hypothesis": "A two-ATR displacement from SMA24 reverts toward its moving mean.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/fde2b6cf7de7e661b577/",
+ "content_sha256_12": "afd431eda195"
+}

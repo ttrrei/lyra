@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r13",
+ "family": "range_trading",
+ "hypothesis": "A prior24bar range wider than fourATR may leave sufficient edge-to-midpoint distance for a practical recovery trade.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/f40f9f3ac9540f3d71c8/",
+ "content_sha256_12": "7fa7cbaaf8d8"
+}

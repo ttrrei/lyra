@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r01",
+ "family": "pullback_reentry",
+ "hypothesis": "RSI recovery following a recent pullback within an EMA trend can resume continuation.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/e9b88c1f4498afd65aae/",
+ "content_sha256_12": "b86c44d2ca79"
+}

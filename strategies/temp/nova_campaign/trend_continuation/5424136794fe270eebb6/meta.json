@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r18",
+ "family": "trend_continuation",
+ "hypothesis": "A short-only ablation separates downside continuation value from the long drift visible in round17.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/5424136794fe270eebb6/",
+ "content_sha256_12": "a3fcace42944"
+}

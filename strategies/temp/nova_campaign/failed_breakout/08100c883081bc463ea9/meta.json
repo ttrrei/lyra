@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r08",
+ "family": "failed_breakout",
+ "hypothesis": "A modest10%return inside the swept range may filter marginal failures without sacrificing every-month entries.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/08100c883081bc463ea9/",
+ "content_sha256_12": "e6f7e2c884a2"
+}

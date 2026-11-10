@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r18",
+ "family": "pullback_reentry",
+ "hypothesis": "Long pullback resumptions may contribute differently from short resumptions across the shared history.",
+ "pass_instruments": 13,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/00d5575a38e5bda33229/",
+ "content_sha256_12": "ba4cd89af10a"
+}

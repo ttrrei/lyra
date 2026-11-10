@@ -1,0 +1,77 @@
+version: 1
+id: range_p1_r14
+family: range_trading
+hypothesis: A wider sixATR prior range may offer more recoverable travel from its
+  edge after a confirmed rejection.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - feature: efficiency_24
+      op: lt
+      value: 0.25
+    - within:
+        bars: 3
+        condition:
+          all:
+          - feature: range_position_24
+            op: gte
+            value: 0
+          - feature: range_position_24
+            op: lt
+            value: 0.15
+    - feature: range_position_24
+      op: gte
+      value: 0.15
+    - feature: range_position_24
+      op: lt
+      value: 0.5
+    - feature: range_atr
+      op: lt
+      value: 1.5
+    - feature: range_width_atr_24
+      op: gt
+      value: 6
+  short:
+    all:
+    - feature: efficiency_24
+      op: lt
+      value: 0.25
+    - within:
+        bars: 3
+        condition:
+          all:
+          - feature: range_position_24
+            op: gt
+            value: 0.85
+          - feature: range_position_24
+            op: lte
+            value: 1
+    - feature: range_position_24
+      op: lte
+      value: 0.85
+    - feature: range_position_24
+      op: gt
+      value: 0.5
+    - feature: range_atr
+      op: lt
+      value: 1.5
+    - feature: range_width_atr_24
+      op: gt
+      value: 6
+exit:
+  stop_loss_pct: 0.02
+  max_holding_bars: 48
+  long:
+    feature: range_position_24
+    op: gte
+    value: 0.5
+  short:
+    feature: range_position_24
+    op: lte
+    value: 0.5
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

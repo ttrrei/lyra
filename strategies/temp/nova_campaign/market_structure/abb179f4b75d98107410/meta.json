@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r09",
+ "family": "market_structure",
+ "hypothesis": "Confirmed breaks outside already-mature efficient paths may avoid late structural entries.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/abb179f4b75d98107410/",
+ "content_sha256_12": "e2608e0a98c0"
+}

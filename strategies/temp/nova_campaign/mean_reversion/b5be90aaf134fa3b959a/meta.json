@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r15",
+ "family": "mean_reversion",
+ "hypothesis": "Actual recovery-direction confirmation may be sufficient without requiring low24bar efficiency.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/b5be90aaf134fa3b959a/",
+ "content_sha256_12": "647716feae28"
+}

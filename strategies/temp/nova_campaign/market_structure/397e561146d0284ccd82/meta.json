@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r16",
+ "family": "market_structure",
+ "hypothesis": "Short structural acceptance may contribute distinct returns and monthly opportunities.",
+ "pass_instruments": 1,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/397e561146d0284ccd82/",
+ "content_sha256_12": "82b6832844d2"
+}

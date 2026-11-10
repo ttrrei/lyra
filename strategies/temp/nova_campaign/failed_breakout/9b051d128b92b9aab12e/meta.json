@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r16",
+ "family": "failed_breakout",
+ "hypothesis": "A confirmed failed break may carry a longer reversal payoff than a moving-midpoint exit captures.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/9b051d128b92b9aab12e/",
+ "content_sha256_12": "7caa50b48975"
+}

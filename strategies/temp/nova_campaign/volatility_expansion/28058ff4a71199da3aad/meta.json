@@ -1,0 +1,10 @@
+{
+ "id": "directions_volatility_expansion",
+ "family": "volatility_expansion",
+ "hypothesis": "A close beyond the prior 24 observed bars during a range expansion above 1.5 Wilder ATR14 may precede continuation.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/28058ff4a71199da3aad/",
+ "content_sha256_12": "f78fd85f35d3"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r02",
+ "family": "mean_reversion",
+ "hypothesis": "Recovery into the outer mean-deviation band after a recent two-ATR stretch may avoid ongoing directional shocks.",
+ "pass_instruments": 1,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/f712ae7a0898f83a88bd/",
+ "content_sha256_12": "409faeefee89"
+}

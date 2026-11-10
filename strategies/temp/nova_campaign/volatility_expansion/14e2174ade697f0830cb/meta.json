@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r18",
+ "family": "volatility_expansion",
+ "hypothesis": "An uncapped12bar expansion hold may preserve strong moves while reducing marginal losing exposure.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/14e2174ade697f0830cb/",
+ "content_sha256_12": "34c2fad62a3b"
+}

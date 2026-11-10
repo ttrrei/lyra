@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r15",
+ "family": "trend_continuation",
+ "hypothesis": "A confirmed PSAR continuation close on the directional side of the prior24-bar midpoint may reject weak follow-through.",
+ "pass_instruments": 11,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/23a479dcf654cd6ad901/",
+ "content_sha256_12": "3391ac1272bc"
+}

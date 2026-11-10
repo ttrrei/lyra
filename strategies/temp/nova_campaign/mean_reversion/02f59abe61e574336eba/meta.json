@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r05",
+ "family": "mean_reversion",
+ "hypothesis": "A24bar cap may let a confirmed low-efficiency recovery finish reverting before a forced exit.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/02f59abe61e574336eba/",
+ "content_sha256_12": "804d2fb1c0a2"
+}

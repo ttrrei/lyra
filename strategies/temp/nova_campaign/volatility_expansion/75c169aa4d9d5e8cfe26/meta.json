@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r02",
+ "family": "volatility_expansion",
+ "hypothesis": "Larger two-ATR breakout bars may separate sustained expansions from weaker range releases.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/75c169aa4d9d5e8cfe26/",
+ "content_sha256_12": "8c055cb516a8"
+}

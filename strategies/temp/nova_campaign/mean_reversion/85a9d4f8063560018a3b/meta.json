@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r08",
+ "family": "mean_reversion",
+ "hypothesis": "An intermediate2.5ATR stretch with long recovery memory may balance dislocation quality and monthly availability.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/85a9d4f8063560018a3b/",
+ "content_sha256_12": "f1089e2bcb5c"
+}

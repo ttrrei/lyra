@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r11",
+ "family": "pullback_reentry",
+ "hypothesis": "Removing the fixed profit cap may preserve rare strong trend resumptions.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/b8f4ebb4c06f004aa033/",
+ "content_sha256_12": "e95f8e72be38"
+}

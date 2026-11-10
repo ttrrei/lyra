@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r13",
+ "family": "trend_continuation",
+ "hypothesis": "Three-bar persistent PSAR alignment with EMA60 agreement may support repeated continuation opportunities without requiring a specific flip age.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/730a33a2eb7a6794d9db/",
+ "content_sha256_12": "3f3bcdefad03"
+}

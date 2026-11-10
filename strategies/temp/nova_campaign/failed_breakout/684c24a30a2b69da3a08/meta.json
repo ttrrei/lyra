@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r18",
+ "family": "failed_breakout",
+ "hypothesis": "Failed breaks may resolve over two observed days when midpoint exits are avoided.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/684c24a30a2b69da3a08/",
+ "content_sha256_12": "7fdd63655f13"
+}

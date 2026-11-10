@@ -1,0 +1,54 @@
+version: 1
+id: trend_continuation_p1_r01
+family: trend_continuation
+hypothesis: A three-bar confirmed PSAR flip with Supertrend agreement can capture
+  continued directional moves.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - feature: supertrend_direction
+      op: eq
+      value: 1
+    - after_event:
+        bars: 3
+        event:
+          feature: psar_flip_up
+          op: eq
+          value: true
+        condition:
+          feature: psar_direction
+          op: eq
+          value: 1
+  short:
+    all:
+    - feature: supertrend_direction
+      op: eq
+      value: -1
+    - after_event:
+        bars: 3
+        event:
+          feature: psar_flip_down
+          op: eq
+          value: true
+        condition:
+          feature: psar_direction
+          op: eq
+          value: -1
+exit:
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.04
+  max_holding_bars: 60
+  long:
+    feature: psar_flip_down
+    op: eq
+    value: true
+  short:
+    feature: psar_flip_up
+    op: eq
+    value: true
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

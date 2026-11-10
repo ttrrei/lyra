@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r04",
+ "family": "pullback_reentry",
+ "hypothesis": "A twelve-bar pullback memory may recover opportunities lost when RSI recovery takes longer than six bars.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/92c275208795905ddcf8/",
+ "content_sha256_12": "5587a337caa8"
+}

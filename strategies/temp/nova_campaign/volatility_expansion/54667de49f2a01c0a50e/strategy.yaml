@@ -1,0 +1,32 @@
+version: 1
+id: volatility_expansion_p1_r05
+family: volatility_expansion
+hypothesis: A volatility breakout may need room beyond a rolling midpoint rather than
+  being liquidated by that moving reference.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - feature: breakout_up_24
+      op: eq
+      value: true
+    - feature: range_atr
+      op: gt
+      value: 1.5
+  short:
+    all:
+    - feature: breakout_down_24
+      op: eq
+      value: true
+    - feature: range_atr
+      op: gt
+      value: 1.5
+exit:
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.04
+  max_holding_bars: 24
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

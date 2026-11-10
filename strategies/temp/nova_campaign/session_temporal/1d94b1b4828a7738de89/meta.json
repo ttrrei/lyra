@@ -1,0 +1,10 @@
+{
+ "id": "session_p1_r01",
+ "family": "session_temporal",
+ "hypothesis": "Trend-aligned RSI momentum during signal bars opening13-16UTC may continue over the next six observed bars.",
+ "pass_instruments": 2,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/session_temporal/experiments/1d94b1b4828a7738de89/",
+ "content_sha256_12": "17c1c6abfe68"
+}

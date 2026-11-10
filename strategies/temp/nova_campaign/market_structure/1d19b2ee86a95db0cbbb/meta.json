@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r06",
+ "family": "market_structure",
+ "hypothesis": "Allowing established range breaks more time may preserve longer structural continuation.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/1d19b2ee86a95db0cbbb/",
+ "content_sha256_12": "31f09aecd861"
+}

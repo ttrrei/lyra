@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r06",
+ "family": "mean_reversion",
+ "hypothesis": "An initial three-ATR stretch followed by recovery may isolate more genuine dislocations than two-ATR drift.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/e3823b352c37766c088a/",
+ "content_sha256_12": "b83f744a3fca"
+}

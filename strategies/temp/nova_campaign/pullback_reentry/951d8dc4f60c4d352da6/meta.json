@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r19",
+ "family": "pullback_reentry",
+ "hypothesis": "Short pullback resumptions may be the principal source of losses in the symmetric strategy.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/951d8dc4f60c4d352da6/",
+ "content_sha256_12": "7e5d983ba9d7"
+}

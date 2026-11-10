@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r17",
+ "family": "range_trading",
+ "hypothesis": "Long-side range rejection may carry more of the historical range-fading edge than symmetric short entries.",
+ "pass_instruments": 1,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/8d3810380382bf3a3d7e/",
+ "content_sha256_12": "67308c973ecc"
+}

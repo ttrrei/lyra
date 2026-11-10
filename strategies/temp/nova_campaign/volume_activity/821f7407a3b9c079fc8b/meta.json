@@ -1,0 +1,10 @@
+{
+ "id": "campaign_volume_activity_p1_r07",
+ "family": "volume_activity",
+ "hypothesis": "Shorter12bar containment may avoid failed activity-led breakouts that reverse before midpoint exits.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volume_activity/experiments/821f7407a3b9c079fc8b/",
+ "content_sha256_12": "c875282b8b7a"
+}

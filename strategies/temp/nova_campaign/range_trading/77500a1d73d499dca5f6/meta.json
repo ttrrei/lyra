@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r12",
+ "family": "range_trading",
+ "hypothesis": "Only strongly non-directional paths may support a clean range-reclaim fade.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/77500a1d73d499dca5f6/",
+ "content_sha256_12": "3bd36f431e1a"
+}

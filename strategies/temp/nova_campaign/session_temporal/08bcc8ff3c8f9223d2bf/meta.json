@@ -1,0 +1,10 @@
+{
+ "id": "session_p1_r02",
+ "family": "session_temporal",
+ "hypothesis": "Momentum confirmed during the same13-16UTC signal window may require a full24observed-bar horizon rather than six bars.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/session_temporal/experiments/08bcc8ff3c8f9223d2bf/",
+ "content_sha256_12": "63c99a31bdd3"
+}

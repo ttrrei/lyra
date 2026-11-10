@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r17",
+ "family": "volatility_expansion",
+ "hypothesis": "Uncapped expansion continuations may remain useful at a24bar maximum rather than depend on exactly18bars.",
+ "pass_instruments": 8,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/31c6faaca8ce15ab6e85/",
+ "content_sha256_12": "c934b1815891"
+}

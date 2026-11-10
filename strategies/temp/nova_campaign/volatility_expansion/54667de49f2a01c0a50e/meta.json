@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r05",
+ "family": "volatility_expansion",
+ "hypothesis": "A volatility breakout may need room beyond a rolling midpoint rather than being liquidated by that moving reference.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/54667de49f2a01c0a50e/",
+ "content_sha256_12": "80a018b2b800"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r13",
+ "family": "mean_reversion",
+ "hypothesis": "Long recovery fades may account for most positive index results under a broad rising-price history.",
+ "pass_instruments": 2,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/e5b5ab963df9ea671f97/",
+ "content_sha256_12": "cf4e77dffece"
+}

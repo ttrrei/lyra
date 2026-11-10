@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r03",
+ "family": "pullback_reentry",
+ "hypothesis": "Three recovery closes may suppress false recoveries enough to offset delayed fills.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/b86867380e2526cff331/",
+ "content_sha256_12": "521490e29fe9"
+}

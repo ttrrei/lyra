@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r17",
+ "family": "failed_breakout",
+ "hypothesis": "A shorter fixed horizon may retain reversal gains without exposing failed breaks to later renewed trends.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/b6b0bd0f9be6e6b0228c/",
+ "content_sha256_12": "b84019dd4031"
+}

@@ -1,0 +1,46 @@
+version: 1
+id: pullback_phase1_r19
+family: pullback_reentry
+hypothesis: Short pullback resumptions may be the principal source of losses in the
+  symmetric strategy.
+timeframe_minutes: 60
+entry:
+  short:
+    all:
+    - feature: ema_alignment_6_24
+      op: eq
+      value: -1
+    - feature: close_ema60_distance_atr
+      op: lt
+      value: 0
+    - within:
+        bars: 12
+        condition:
+          feature: rsi_14
+          op: gt
+          value: 52
+    - held_for:
+        bars: 1
+        condition:
+          feature: rsi_14
+          op: lt
+          value: 50
+    - feature: supertrend_direction
+      op: eq
+      value: -1
+exit:
+  stop_loss_pct: 0.02
+  max_holding_bars: 48
+  long:
+    feature: supertrend_direction
+    op: eq
+    value: -1
+  short:
+    feature: supertrend_direction
+    op: eq
+    value: 1
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

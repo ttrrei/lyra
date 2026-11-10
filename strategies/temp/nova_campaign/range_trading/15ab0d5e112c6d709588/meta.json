@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r07",
+ "family": "range_trading",
+ "hypothesis": "A moderately efficient local range can still reject its edge when aligned with EMA60.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/15ab0d5e112c6d709588/",
+ "content_sha256_12": "5c984529cfb8"
+}

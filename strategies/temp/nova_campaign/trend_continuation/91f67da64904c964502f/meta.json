@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r17",
+ "family": "trend_continuation",
+ "hypothesis": "A long-only ablation can reveal whether the improved continuation template relies on upward directional drift.",
+ "pass_instruments": 10,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/91f67da64904c964502f/",
+ "content_sha256_12": "e1c763119bf0"
+}

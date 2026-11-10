@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r07",
+ "family": "market_structure",
+ "hypothesis": "Shorter structural continuation horizons may capture range acceptance before later reversal.",
+ "pass_instruments": 8,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/7e0f2b1298512217a838/",
+ "content_sha256_12": "feda84dcf4ac"
+}

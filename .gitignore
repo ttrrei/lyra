@@ -6,7 +6,7 @@
 #     B1  git 不出现任何 alpha 方向文件夹内容（hypothesis.md / lessons.md / vNN.yaml）
 #     B2  凭证不进 git
 #     B13 OCI 镜像默认在仓库外 ~/.lyra/<workspace>/…（可重建）
-#     B14 strategies/examples/ 是 git 里唯一的 strategies 子树
+#     B14 strategies/examples/ 与 strategies/temp/ 是 git 里仅有的 strategies 子树
 #
 # 注意 gitignore 否定规则：父目录被忽略后子项无法再包含。
 # 因此用 `strategies/*`（忽略"子项"，不忽略目录本身）再 `!strategies/examples/` 反包含。
@@ -23,12 +23,16 @@ credentials.yml
 .lyra/
 
 # --- Alpha 策略（B1） --------------------------------------------------------
-# 只跟踪公开示例子树（B14）；忽略一切真实方向文件夹
+# 只跟踪公开示例子树（B14）与 temp/ 待归类候选池；忽略一切真实方向文件夹
 # （trend_continuation/、failed_breakout/、…、_new/）及其 vNN.yaml +
 # hypothesis.md + lessons.md。
+# temp/（#99）：只读历史语料索引 + 快照（来源 nova/moneta，非本项目 alpha），
+# 0010 triage 的输入契约，需入 git 供跨机/多 AI 读取。
 strategies/*
 !strategies/examples/
 !strategies/examples/**
+!strategies/temp/
+!strategies/temp/**
 
 # --- 本地 OCI 镜像（B13，可重建） -------------------------------------------
 # 默认落在 ~/.lyra/<workspace>/…；若被 --inside-repo 落进仓库则忽略

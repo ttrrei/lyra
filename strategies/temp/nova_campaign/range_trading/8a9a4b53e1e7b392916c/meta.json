@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r20",
+ "family": "range_trading",
+ "hypothesis": "An edge-to-opposite-quarter range recovery may need up to96observed bars once early profittruncation is removed.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/8a9a4b53e1e7b392916c/",
+ "content_sha256_12": "fe5b371504be"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r17",
+ "family": "pullback_reentry",
+ "hypothesis": "Recovery just before RSI reaches neutral may capture resumption with less latency while still requiring a prior pullback.",
+ "pass_instruments": 10,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/b728737a2239bd65db2d/",
+ "content_sha256_12": "645d6684a98a"
+}

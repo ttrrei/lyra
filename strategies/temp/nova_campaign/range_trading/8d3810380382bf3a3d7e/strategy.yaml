@@ -1,0 +1,50 @@
+version: 1
+id: range_p1_r17
+family: range_trading
+hypothesis: Long-side range rejection may carry more of the historical range-fading
+  edge than symmetric short entries.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - feature: efficiency_24
+      op: lt
+      value: 0.25
+    - within:
+        bars: 3
+        condition:
+          all:
+          - feature: range_position_24
+            op: gte
+            value: 0
+          - feature: range_position_24
+            op: lt
+            value: 0.15
+    - held_for:
+        bars: 2
+        condition:
+          all:
+          - feature: range_position_24
+            op: gte
+            value: 0.15
+          - feature: range_position_24
+            op: lt
+            value: 0.5
+    - feature: range_atr
+      op: lt
+      value: 1.5
+    - feature: range_width_atr_24
+      op: gt
+      value: 4
+exit:
+  stop_loss_pct: 0.02
+  max_holding_bars: 48
+  long:
+    feature: range_position_24
+    op: gte
+    value: 0.5
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

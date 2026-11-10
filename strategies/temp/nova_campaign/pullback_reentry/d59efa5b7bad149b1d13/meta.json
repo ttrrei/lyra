@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r07",
+ "family": "pullback_reentry",
+ "hypothesis": "Fast EMA trend plus shallow RSI recovery may be sufficient without requiring price already beyond EMA60.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/d59efa5b7bad149b1d13/",
+ "content_sha256_12": "b85fe24d05bb"
+}

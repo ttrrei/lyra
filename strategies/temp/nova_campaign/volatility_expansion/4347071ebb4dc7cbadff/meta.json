@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r12",
+ "family": "volatility_expansion",
+ "hypothesis": "Supported expansion continuation may persist across a12-to18bar horizon rather than depend on an exact12bar cutoff.",
+ "pass_instruments": 8,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/4347071ebb4dc7cbadff/",
+ "content_sha256_12": "86cdeb7330be"
+}

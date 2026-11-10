@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r09",
+ "family": "failed_breakout",
+ "hypothesis": "Failed breaks may revert within moderately inefficient paths as well as very flat ones.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/ed8f5f5fb1ef4e497230/",
+ "content_sha256_12": "bc5a2f3ea265"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r16",
+ "family": "volatility_expansion",
+ "hypothesis": "If rare long continuations drive expansion returns, a tighter2%profit cap should worsen breadth rather than improve it.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/22af0aae7eb7db6ac447/",
+ "content_sha256_12": "59b3d7eb179c"
+}

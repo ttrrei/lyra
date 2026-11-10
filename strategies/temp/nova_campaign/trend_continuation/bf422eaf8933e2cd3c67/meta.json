@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r08",
+ "family": "trend_continuation",
+ "hypothesis": "A2%profit target is a tighter-tail control for the hypothesis that trend winners need room to extend.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/bf422eaf8933e2cd3c67/",
+ "content_sha256_12": "76365c604d03"
+}

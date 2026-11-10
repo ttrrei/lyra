@@ -1,0 +1,45 @@
+version: 1
+id: mean_reversion_p1_r13
+family: mean_reversion
+hypothesis: Long recovery fades may account for most positive index results under
+  a broad rising-price history.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - all:
+      - all:
+        - within:
+            bars: 18
+            condition:
+              feature: close_sma24_distance_atr
+              op: lt
+              value: -2.5
+        - feature: close_sma24_distance_atr
+          op: gt
+          value: -1.5
+        - feature: close_sma24_distance_atr
+          op: lt
+          value: 0
+      - feature: efficiency_24
+        op: lt
+        value: 0.25
+    - feature: return_6_atr
+      op: gt
+      value: 0
+exit:
+  stop_loss_pct: 0.02
+  max_holding_bars: 24
+  long:
+    feature: close_sma24_distance_atr
+    op: gte
+    value: 0.5
+  short:
+    feature: close_sma24_distance_atr
+    op: lte
+    value: -0.5
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

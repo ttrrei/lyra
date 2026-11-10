@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r20",
+ "family": "pullback_reentry",
+ "hypothesis": "A broader memory of shallow pullbacks may retain long resumption opportunities that develop more slowly.",
+ "pass_instruments": 12,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/d5e07900b6a00a3e9afc/",
+ "content_sha256_12": "6386f4109d73"
+}

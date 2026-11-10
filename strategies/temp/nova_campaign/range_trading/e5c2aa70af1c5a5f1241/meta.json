@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r18",
+ "family": "range_trading",
+ "hypothesis": "Short-side range rejection may contribute independent reversion opportunities even when its aggregate historical scores are weaker.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/e5c2aa70af1c5a5f1241/",
+ "content_sha256_12": "971a46f977a1"
+}

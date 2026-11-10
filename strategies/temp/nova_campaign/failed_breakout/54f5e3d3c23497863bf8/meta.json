@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r02",
+ "family": "failed_breakout",
+ "hypothesis": "Failed range breaks may revert more reliably when the prior path is directionally inefficient.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/54f5e3d3c23497863bf8/",
+ "content_sha256_12": "7ac72f01cc56"
+}

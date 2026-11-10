@@ -1,0 +1,1480 @@
+{
+ "corpus": "nova research_campaign experiments",
+ "source_repo": "ttrrei/nova",
+ "total_files": 146,
+ "unique_by_content": 146,
+ "family_distribution": {
+  "failed_breakout": 20,
+  "market_structure": 16,
+  "mean_reversion": 20,
+  "pullback_reentry": 20,
+  "range_trading": 20,
+  "session_temporal": 3,
+  "trend_continuation": 20,
+  "volatility_expansion": 20,
+  "volume_activity": 7
+ },
+ "note": "Held in temp/ for 0010 AI triage. NOT part of the 0008 regression gate.",
+ "entries_sorted_by_pass": [
+  {
+   "id": "pullback_phase1_r18",
+   "family": "pullback_reentry",
+   "hypothesis": "Long pullback resumptions may contribute differently from short resumptions across the shared history.",
+   "pass_instruments": 13,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/00d5575a38e5bda33229/",
+   "content_sha256_12": "ba4cd89af10a"
+  },
+  {
+   "id": "pullback_phase1_r20",
+   "family": "pullback_reentry",
+   "hypothesis": "A broader memory of shallow pullbacks may retain long resumption opportunities that develop more slowly.",
+   "pass_instruments": 12,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/d5e07900b6a00a3e9afc/",
+   "content_sha256_12": "6386f4109d73"
+  },
+  {
+   "id": "trend_continuation_p1_r15",
+   "family": "trend_continuation",
+   "hypothesis": "A confirmed PSAR continuation close on the directional side of the prior24-bar midpoint may reject weak follow-through.",
+   "pass_instruments": 11,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/23a479dcf654cd6ad901/",
+   "content_sha256_12": "3391ac1272bc"
+  },
+  {
+   "id": "trend_continuation_p1_r16",
+   "family": "trend_continuation",
+   "hypothesis": "Avoiding signal bars wider than1.5WilderATR may reduce buying or selling after transient shocks in confirmed trends.",
+   "pass_instruments": 11,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/ee98dd2b05da3dac5864/",
+   "content_sha256_12": "37a6cc79a3f8"
+  },
+  {
+   "id": "volatility_expansion_p1_r15",
+   "family": "volatility_expansion",
+   "hypothesis": "The best continuation expansions may benefit from an uncapped target while the midpoint and18bar exits still bound holding.",
+   "pass_instruments": 11,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/093c44e6c8e458fc85dc/",
+   "content_sha256_12": "8b68a48cb4d2"
+  },
+  {
+   "id": "market_structure_p1_r13",
+   "family": "market_structure",
+   "hypothesis": "A confirmed structural break may survive a midpoint retest before continuing within18bars.",
+   "pass_instruments": 10,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/4f8a99dda66a3747cddd/",
+   "content_sha256_12": "c57627d5ccb7"
+  },
+  {
+   "id": "market_structure_p1_r10",
+   "family": "market_structure",
+   "hypothesis": "Structural acceptance with above-average quote participation may persist more often.",
+   "pass_instruments": 10,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/7ad3802f0fa3791f2dae/",
+   "content_sha256_12": "0682d5eda26d"
+  },
+  {
+   "id": "pullback_phase1_r15",
+   "family": "pullback_reentry",
+   "hypothesis": "Using the same slower trend state for continuation exits may retain pullback winners that survive fast EMA reversals.",
+   "pass_instruments": 10,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/10165a4ebd45ad985355/",
+   "content_sha256_12": "d994c63b5e5a"
+  },
+  {
+   "id": "pullback_phase1_r17",
+   "family": "pullback_reentry",
+   "hypothesis": "Recovery just before RSI reaches neutral may capture resumption with less latency while still requiring a prior pullback.",
+   "pass_instruments": 10,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/b728737a2239bd65db2d/",
+   "content_sha256_12": "645d6684a98a"
+  },
+  {
+   "id": "trend_continuation_p1_r12",
+   "family": "trend_continuation",
+   "hypothesis": "Supertrend agreement may be redundant once confirmed PSAR persistence,EMA60 direction and a mature-trend filter are required.",
+   "pass_instruments": 10,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/0ee4f105fc99b04a7b2b/",
+   "content_sha256_12": "86fcffa17fd1"
+  },
+  {
+   "id": "trend_continuation_p1_r19",
+   "family": "trend_continuation",
+   "hypothesis": "With redundant Supertrend gating removed and price-location filters added,two-bar PSAR confirmation may capture continuation earlier without the original one-bar timing failure.",
+   "pass_instruments": 10,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/313680f6f7ace5e9fad7/",
+   "content_sha256_12": "3f35047b4a0e"
+  },
+  {
+   "id": "trend_continuation_p1_r11",
+   "family": "trend_continuation",
+   "hypothesis": "Excluding very efficient24-bar paths may avoid mature trends while preserving earlier confirmed continuation entries.",
+   "pass_instruments": 10,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/5f3edfe10b76fee78f75/",
+   "content_sha256_12": "8daa2dc50107"
+  },
+  {
+   "id": "trend_continuation_p1_r17",
+   "family": "trend_continuation",
+   "hypothesis": "A long-only ablation can reveal whether the improved continuation template relies on upward directional drift.",
+   "pass_instruments": 10,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/91f67da64904c964502f/",
+   "content_sha256_12": "e1c763119bf0"
+  },
+  {
+   "id": "trend_continuation_p1_r09",
+   "family": "trend_continuation",
+   "hypothesis": "Requiring price on the EMA60 trend side may remove countertrend confirmed PSAR flips while leaving profitable tails uncapped.",
+   "pass_instruments": 10,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/bf613485e7df3215a52d/",
+   "content_sha256_12": "ee4c8791ef66"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r18",
+   "family": "failed_breakout",
+   "hypothesis": "Failed breaks may resolve over two observed days when midpoint exits are avoided.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/684c24a30a2b69da3a08/",
+   "content_sha256_12": "7fdd63655f13"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r16",
+   "family": "failed_breakout",
+   "hypothesis": "A confirmed failed break may carry a longer reversal payoff than a moving-midpoint exit captures.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/9b051d128b92b9aab12e/",
+   "content_sha256_12": "7caa50b48975"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r19",
+   "family": "failed_breakout",
+   "hypothesis": "Long-side confirmed failed breaks may account for most gains under the48bar fixed exit.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/dea823d228e4830946bb/",
+   "content_sha256_12": "db51e62969b8"
+  },
+  {
+   "id": "market_structure_p1_r08",
+   "family": "market_structure",
+   "hypothesis": "Established-trend agreement may work better when structural trades use the shorter observed useful horizon.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/9caffa95c460112f9290/",
+   "content_sha256_12": "d4a9e9ed7d38"
+  },
+  {
+   "id": "pullback_phase1_r14",
+   "family": "pullback_reentry",
+   "hypothesis": "Uncapped pullback continuations with independent trend agreement may benefit from48-bar patience.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/b89349b6e0b8e7859dcd/",
+   "content_sha256_12": "7dcb57a804ac"
+  },
+  {
+   "id": "pullback_phase1_r16",
+   "family": "pullback_reentry",
+   "hypothesis": "A modest24-bar directional-efficiency floor may remove noisy apparent-trend pullbacks.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/ee85febbe5884f52af1b/",
+   "content_sha256_12": "ca9e5633c09d"
+  },
+  {
+   "id": "range_p1_r20",
+   "family": "range_trading",
+   "hypothesis": "An edge-to-opposite-quarter range recovery may need up to96observed bars once early profittruncation is removed.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/8a9a4b53e1e7b392916c/",
+   "content_sha256_12": "fe5b371504be"
+  },
+  {
+   "id": "range_p1_r19",
+   "family": "range_trading",
+   "hypothesis": "After a persistent edge rejection, price may travel beyond the midpoint toward the opposite inner range quarter.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/cdac8eb24cc70865adc6/",
+   "content_sha256_12": "6ae099933669"
+  },
+  {
+   "id": "trend_continuation_p1_r20",
+   "family": "trend_continuation",
+   "hypothesis": "Four-bar PSAR confirmation tests whether the selected three-bar continuation template survives a nearby delay.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/00bf47b4b053b6feb1e5/",
+   "content_sha256_12": "e654ddc19c63"
+  },
+  {
+   "id": "trend_continuation_p1_r07",
+   "family": "trend_continuation",
+   "hypothesis": "Removing the fixed profit target may let the original PSAR exit capture larger continuation tails.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/292a6f618ef81a71afbd/",
+   "content_sha256_12": "55bbc01953dd"
+  },
+  {
+   "id": "volatility_expansion_p1_r20",
+   "family": "volatility_expansion",
+   "hypothesis": "The uncapped18bar expansion rule may work without its above-average activity filter, making the simpler price rule preferable if breadth remains.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/c109956cd8bab08271bd/",
+   "content_sha256_12": "03f94e4d91b3"
+  },
+  {
+   "id": "campaign_volume_activity_p1_r06",
+   "family": "volume_activity",
+   "hypothesis": "Activity-backed closing breakouts may need up to48 observed bars to realize continuation.",
+   "pass_instruments": 9,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volume_activity/experiments/6d3d65b457305acfc085/",
+   "content_sha256_12": "8750e615dcab"
+  },
+  {
+   "id": "market_structure_p1_r07",
+   "family": "market_structure",
+   "hypothesis": "Shorter structural continuation horizons may capture range acceptance before later reversal.",
+   "pass_instruments": 8,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/7e0f2b1298512217a838/",
+   "content_sha256_12": "feda84dcf4ac"
+  },
+  {
+   "id": "market_structure_p1_r12",
+   "family": "market_structure",
+   "hypothesis": "Stronger participation may improve structural-break follow-through but risks missing monthly openings.",
+   "pass_instruments": 8,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/dd76e88a5c134580af87/",
+   "content_sha256_12": "07992b44fc5c"
+  },
+  {
+   "id": "trend_continuation_p1_r06",
+   "family": "trend_continuation",
+   "hypothesis": "A24-bar holding cap may limit stale confirmed trends while retaining the original PSAR reversal exit.",
+   "pass_instruments": 8,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/02ad9a00b806a7738da6/",
+   "content_sha256_12": "dfdaa4cd9bb1"
+  },
+  {
+   "id": "trend_continuation_p1_r01",
+   "family": "trend_continuation",
+   "hypothesis": "A three-bar confirmed PSAR flip with Supertrend agreement can capture continued directional moves.",
+   "pass_instruments": 8,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/312ef0ac9d14eab91f5c/",
+   "content_sha256_12": "246d8b3ca7bc"
+  },
+  {
+   "id": "volatility_expansion_p1_r10",
+   "family": "volatility_expansion",
+   "hypothesis": "A volatility expansion may deliver most continuation during the first12observed hours rather than a full24bar hold.",
+   "pass_instruments": 8,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/1b2318819465fc4852bd/",
+   "content_sha256_12": "c1c4829e496f"
+  },
+  {
+   "id": "volatility_expansion_p1_r17",
+   "family": "volatility_expansion",
+   "hypothesis": "Uncapped expansion continuations may remain useful at a24bar maximum rather than depend on exactly18bars.",
+   "pass_instruments": 8,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/31c6faaca8ce15ab6e85/",
+   "content_sha256_12": "c934b1815891"
+  },
+  {
+   "id": "volatility_expansion_p1_r12",
+   "family": "volatility_expansion",
+   "hypothesis": "Supported expansion continuation may persist across a12-to18bar horizon rather than depend on an exact12bar cutoff.",
+   "pass_instruments": 8,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/4347071ebb4dc7cbadff/",
+   "content_sha256_12": "86cdeb7330be"
+  },
+  {
+   "id": "campaign_volume_activity_p1_r05",
+   "family": "volume_activity",
+   "hypothesis": "Broader above-average quote participation may restore monthly opportunities when activity-led winners are uncapped.",
+   "pass_instruments": 8,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volume_activity/experiments/54dc9d3cea7058ab6710/",
+   "content_sha256_12": "2db0f72ec2f2"
+  },
+  {
+   "id": "market_structure_p1_r14",
+   "family": "market_structure",
+   "hypothesis": "A successful structural continuation may need to stay in the directional outer quarter rather than merely above midpoint.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/7f8f6ec73131c96a8066/",
+   "content_sha256_12": "67e33d79b00b"
+  },
+  {
+   "id": "market_structure_p1_r09",
+   "family": "market_structure",
+   "hypothesis": "Confirmed breaks outside already-mature efficient paths may avoid late structural entries.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/abb179f4b75d98107410/",
+   "content_sha256_12": "e2608e0a98c0"
+  },
+  {
+   "id": "mean_reversion_p1_r20",
+   "family": "mean_reversion",
+   "hypothesis": "A48bar horizon may allow confirmed reversions to finish a halfATR overshoot before forced liquidation.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/c140e7d6fc1884f4c3f6/",
+   "content_sha256_12": "d1c90dd2494c"
+  },
+  {
+   "id": "pullback_phase1_r11",
+   "family": "pullback_reentry",
+   "hypothesis": "Removing the fixed profit cap may preserve rare strong trend resumptions.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/b8f4ebb4c06f004aa033/",
+   "content_sha256_12": "e95f8e72be38"
+  },
+  {
+   "id": "pullback_phase1_r13",
+   "family": "pullback_reentry",
+   "hypothesis": "Supertrend agreement may improve the quality of uncapped pullback continuation winners.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/c06901923479cd0ed695/",
+   "content_sha256_12": "8fd72729cc70"
+  },
+  {
+   "id": "range_p1_r15",
+   "family": "range_trading",
+   "hypothesis": "Two consecutive inner-band closes after an outer-edge touch may confirm a durable range rejection.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/dafcceecef1d5b89f714/",
+   "content_sha256_12": "cbc81755cf96"
+  },
+  {
+   "id": "range_p1_r13",
+   "family": "range_trading",
+   "hypothesis": "A prior24bar range wider than fourATR may leave sufficient edge-to-midpoint distance for a practical recovery trade.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/f40f9f3ac9540f3d71c8/",
+   "content_sha256_12": "7fa7cbaaf8d8"
+  },
+  {
+   "id": "trend_continuation_p1_r14",
+   "family": "trend_continuation",
+   "hypothesis": "A Supertrend flip followed by three PSAR-aligned closes may identify continuation earlier in a stronger trend transition.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/5995570563378bfac9db/",
+   "content_sha256_12": "b8c0c6222d33"
+  },
+  {
+   "id": "trend_continuation_p1_r13",
+   "family": "trend_continuation",
+   "hypothesis": "Three-bar persistent PSAR alignment with EMA60 agreement may support repeated continuation opportunities without requiring a specific flip age.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/730a33a2eb7a6794d9db/",
+   "content_sha256_12": "3f3bcdefad03"
+  },
+  {
+   "id": "trend_continuation_p1_r08",
+   "family": "trend_continuation",
+   "hypothesis": "A2%profit target is a tighter-tail control for the hypothesis that trend winners need room to extend.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/bf422eaf8933e2cd3c67/",
+   "content_sha256_12": "76365c604d03"
+  },
+  {
+   "id": "trend_continuation_p1_r04",
+   "family": "trend_continuation",
+   "hypothesis": "Holding confirmed PSAR entries until Supertrend reverses may preserve broader trend moves that PSAR exits truncate.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/fee9f840669b2c161410/",
+   "content_sha256_12": "1e10ad4cd4b7"
+  },
+  {
+   "id": "volatility_expansion_p1_r18",
+   "family": "volatility_expansion",
+   "hypothesis": "An uncapped12bar expansion hold may preserve strong moves while reducing marginal losing exposure.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/14e2174ade697f0830cb/",
+   "content_sha256_12": "34c2fad62a3b"
+  },
+  {
+   "id": "volatility_expansion_p1_r16",
+   "family": "volatility_expansion",
+   "hypothesis": "If rare long continuations drive expansion returns, a tighter2%profit cap should worsen breadth rather than improve it.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/22af0aae7eb7db6ac447/",
+   "content_sha256_12": "59b3d7eb179c"
+  },
+  {
+   "id": "directions_volatility_expansion",
+   "family": "volatility_expansion",
+   "hypothesis": "A close beyond the prior 24 observed bars during a range expansion above 1.5 Wilder ATR14 may precede continuation.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/28058ff4a71199da3aad/",
+   "content_sha256_12": "f78fd85f35d3"
+  },
+  {
+   "id": "volatility_expansion_p1_r03",
+   "family": "volatility_expansion",
+   "hypothesis": "A one-ATR closing breakout may capture more ordinary volatility expansion with better monthly reach.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/2ba9f220114e0f30fb9b/",
+   "content_sha256_12": "b7ec30105bca"
+  },
+  {
+   "id": "volatility_expansion_p1_r08",
+   "family": "volatility_expansion",
+   "hypothesis": "An expansion breakout supported by above-average quoteactivity may be less likely to be a low-participation spike.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/dc7fe411d592ddd986b1/",
+   "content_sha256_12": "671ce5f0052e"
+  },
+  {
+   "id": "volatility_expansion_p1_r19",
+   "family": "volatility_expansion",
+   "hypothesis": "A moderately smaller1.25ATR expansion may broaden the uncapped18bar continuation rule without admitting ordinary nonexpansion bars.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/f6ec6a188417d538401a/",
+   "content_sha256_12": "d90de5ad5ea7"
+  },
+  {
+   "id": "campaign_volume_activity_p1_r04",
+   "family": "volume_activity",
+   "hypothesis": "Activity-backed breakouts may benefit from uncapped continuation rather than a fixed3%profit target.",
+   "pass_instruments": 7,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volume_activity/experiments/07c2538af230add1d652/",
+   "content_sha256_12": "aed22d77db93"
+  },
+  {
+   "id": "market_structure_p1_r04",
+   "family": "market_structure",
+   "hypothesis": "Uncapped structural continuation may recover losses from prematurely truncated large winners.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/17fad5515028ae36d9b8/",
+   "content_sha256_12": "f7cbe57452bf"
+  },
+  {
+   "id": "market_structure_p1_r06",
+   "family": "market_structure",
+   "hypothesis": "Allowing established range breaks more time may preserve longer structural continuation.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/1d19b2ee86a95db0cbbb/",
+   "content_sha256_12": "31f09aecd861"
+  },
+  {
+   "id": "market_structure_p1_r11",
+   "family": "market_structure",
+   "hypothesis": "Moderately active structural confirmations may retain useful opportunities excluded by above-mean activity.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/3e2b5fb46cd61f51ecd0/",
+   "content_sha256_12": "b562f521aa17"
+  },
+  {
+   "id": "mean_reversion_p1_r19",
+   "family": "mean_reversion",
+   "hypothesis": "Waiting until price recovers within half anATR of its mean may offer clearer reversion despite later fills.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/66e96fe2e70dcaf4def4/",
+   "content_sha256_12": "be3369f60366"
+  },
+  {
+   "id": "mean_reversion_p1_r17",
+   "family": "mean_reversion",
+   "hypothesis": "A moderately looser efficiency ceiling may preserve reversion quality while restoring edge cases in monthly coverage.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/c22a00584a0e0f5f40a9/",
+   "content_sha256_12": "cb78cad75d6b"
+  },
+  {
+   "id": "mean_reversion_p1_r12",
+   "family": "mean_reversion",
+   "hypothesis": "A confirmed price reversal may overshoot the moving mean by half anATR before decaying.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/ddf42e5233827717f376/",
+   "content_sha256_12": "511a415b3725"
+  },
+  {
+   "id": "mean_reversion_p1_r11",
+   "family": "mean_reversion",
+   "hypothesis": "A positive six-bar price change after downside stretch, or negative after upside stretch, may confirm actual recovery rather than a moving-mean artifact.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/e7298657c3fb2fe94c68/",
+   "content_sha256_12": "c7752948f0d8"
+  },
+  {
+   "id": "pullback_phase1_r05",
+   "family": "pullback_reentry",
+   "hypothesis": "Shallow RSI excursions around neutral may be safer trend pullbacks than deeper countertrend moves.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/2b6d0940808ffed68e90/",
+   "content_sha256_12": "fe94ef71c7c0"
+  },
+  {
+   "id": "range_p1_r09",
+   "family": "range_trading",
+   "hypothesis": "An outer-edge reclaim on a non-shock bar may be more likely to remain a range than one with exceptionally large intrabar movement.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/01daabc597e31fcd9923/",
+   "content_sha256_12": "147b44cca275"
+  },
+  {
+   "id": "volatility_expansion_p1_r06",
+   "family": "volatility_expansion",
+   "hypothesis": "A true expansion should hold the outer quarter; loss of that position may identify failure before midpoint loss.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/492643705ef84dec6426/",
+   "content_sha256_12": "d24ca96d990e"
+  },
+  {
+   "id": "campaign_volume_activity_p1_r02",
+   "family": "volume_activity",
+   "hypothesis": "A closing breakout with activity above its prior mean may retain useful participation while restoring monthly openings.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volume_activity/experiments/78ba17cb1240130b3c7b/",
+   "content_sha256_12": "7162437cca2f"
+  },
+  {
+   "id": "campaign_volume_activity_p1_r07",
+   "family": "volume_activity",
+   "hypothesis": "Shorter12bar containment may avoid failed activity-led breakouts that reverse before midpoint exits.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volume_activity/experiments/821f7407a3b9c079fc8b/",
+   "content_sha256_12": "c875282b8b7a"
+  },
+  {
+   "id": "campaign_volume_activity_p1_r01",
+   "family": "volume_activity",
+   "hypothesis": "A closing prior-range breakout with above-average quote activity may continue.",
+   "pass_instruments": 6,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volume_activity/experiments/bc0e2b590600184b9afd/",
+   "content_sha256_12": "b37eb002f329"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r12",
+   "family": "failed_breakout",
+   "hypothesis": "A failed break followed by one more close inside the same range half may confirm rejection before fading.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/9c87b47389285ae5a16e/",
+   "content_sha256_12": "6e08cc6d7ea0"
+  },
+  {
+   "id": "market_structure_p1_r05",
+   "family": "market_structure",
+   "hypothesis": "A confirmed structural range break on the established-trend side of EMA60 may avoid countertrend failures.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/034cf3df5ba82a736352/",
+   "content_sha256_12": "59c15b379472"
+  },
+  {
+   "id": "market_structure_p1_r01",
+   "family": "market_structure",
+   "hypothesis": "A prior24-bar range break confirmed for two following outer-quarter closes may continue.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/7ae01c4d167a24bad743/",
+   "content_sha256_12": "8d45eb564976"
+  },
+  {
+   "id": "market_structure_p1_r02",
+   "family": "market_structure",
+   "hypothesis": "A single outer-quarter confirmation close may enter structural continuation earlier.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/c71bf9bc4597f844d4eb/",
+   "content_sha256_12": "aabaace56627"
+  },
+  {
+   "id": "mean_reversion_p1_r18",
+   "family": "mean_reversion",
+   "hypothesis": "Avoiding signal bars wider than1.5ATR may reduce entries immediately after volatile recovery shocks.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/3371f9df791247d2881e/",
+   "content_sha256_12": "dc51c140cb06"
+  },
+  {
+   "id": "pullback_phase1_r06",
+   "family": "pullback_reentry",
+   "hypothesis": "Deeper RSI pullbacks could improve entry price enough to compensate for more trend failures.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/2069d2c902cbd4fd0ce2/",
+   "content_sha256_12": "7a3282ba1cba"
+  },
+  {
+   "id": "pullback_phase1_r10",
+   "family": "pullback_reentry",
+   "hypothesis": "Giving established pullback resumptions up to48bars may retain more directional continuation.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/28c85b1febc40d1e10a2/",
+   "content_sha256_12": "f66fa41d06aa"
+  },
+  {
+   "id": "pullback_phase1_r08",
+   "family": "pullback_reentry",
+   "hypothesis": "Shallow RSI pullbacks may work better when both EMA trend and Supertrend direction agree.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/ece019261bf57a943b97/",
+   "content_sha256_12": "fec185626632"
+  },
+  {
+   "id": "range_p1_r16",
+   "family": "range_trading",
+   "hypothesis": "A confirmed two-close reclaim may remain linked to an outer-edge test up to sixbars earlier.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/5c1039e9f938e6837b1d/",
+   "content_sha256_12": "f692e5503c6a"
+  },
+  {
+   "id": "range_p1_r12",
+   "family": "range_trading",
+   "hypothesis": "Only strongly non-directional paths may support a clean range-reclaim fade.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/77500a1d73d499dca5f6/",
+   "content_sha256_12": "3bd36f431e1a"
+  },
+  {
+   "id": "volatility_expansion_p1_r09",
+   "family": "volatility_expansion",
+   "hypothesis": "Moderately stronger quoteactivity support may improve the quality of already large expansion breakouts.",
+   "pass_instruments": 5,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/da088d60107fae5f4a3a/",
+   "content_sha256_12": "7c03517ff269"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r15",
+   "family": "failed_breakout",
+   "hypothesis": "A confirmed failed break may be safer to fade after extreme RSI pressure has eased.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/199c981f0f75fff24033/",
+   "content_sha256_12": "ad1b6fd63557"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r13",
+   "family": "failed_breakout",
+   "hypothesis": "Two consecutive inside-range closes after a failed break may reject more false reversals than one.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/339e13d07dd5e09309e4/",
+   "content_sha256_12": "9b30ae3b0559"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r06",
+   "family": "failed_breakout",
+   "hypothesis": "Failed breaks can occasionally lead to extended reversals, so an absolute profit cap may reduce their payoff.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/5a6465b4e3e77e76328a/",
+   "content_sha256_12": "89a5f7af7de2"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r05",
+   "family": "failed_breakout",
+   "hypothesis": "Low-efficiency failed breaks may need a full observed day to complete reversion.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/9bb843a118ff0d792100/",
+   "content_sha256_12": "8ca13132eec0"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r09",
+   "family": "failed_breakout",
+   "hypothesis": "Failed breaks may revert within moderately inefficient paths as well as very flat ones.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/ed8f5f5fb1ef4e497230/",
+   "content_sha256_12": "bc5a2f3ea265"
+  },
+  {
+   "id": "market_structure_p1_r03",
+   "family": "market_structure",
+   "hypothesis": "Three outer-quarter closes may better distinguish structural acceptance from a brief range break.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/fdb79786b7072bfae101/",
+   "content_sha256_12": "b5516bd54a50"
+  },
+  {
+   "id": "mean_reversion_p1_r07",
+   "family": "mean_reversion",
+   "hypothesis": "A longer18bar memory of a three-ATR stretch may retain more subsequent recovery opportunities.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/559ebaec81095b48dfbd/",
+   "content_sha256_12": "c676b38667ae"
+  },
+  {
+   "id": "mean_reversion_p1_r10",
+   "family": "mean_reversion",
+   "hypothesis": "Allowing a recovery fade to exit at the mean without a fixed profitcap may retain valuable reversions.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/6c8084f0c6026bce02f4/",
+   "content_sha256_12": "ba2c7332930e"
+  },
+  {
+   "id": "mean_reversion_p1_r08",
+   "family": "mean_reversion",
+   "hypothesis": "An intermediate2.5ATR stretch with long recovery memory may balance dislocation quality and monthly availability.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/85a9d4f8063560018a3b/",
+   "content_sha256_12": "f1089e2bcb5c"
+  },
+  {
+   "id": "mean_reversion_p1_r15",
+   "family": "mean_reversion",
+   "hypothesis": "Actual recovery-direction confirmation may be sufficient without requiring low24bar efficiency.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/b5be90aaf134fa3b959a/",
+   "content_sha256_12": "647716feae28"
+  },
+  {
+   "id": "pullback_phase1_r04",
+   "family": "pullback_reentry",
+   "hypothesis": "A twelve-bar pullback memory may recover opportunities lost when RSI recovery takes longer than six bars.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/92c275208795905ddcf8/",
+   "content_sha256_12": "5587a337caa8"
+  },
+  {
+   "id": "pullback_phase1_r19",
+   "family": "pullback_reentry",
+   "hypothesis": "Short pullback resumptions may be the principal source of losses in the symmetric strategy.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/951d8dc4f60c4d352da6/",
+   "content_sha256_12": "7e5d983ba9d7"
+  },
+  {
+   "id": "pullback_phase1_r02",
+   "family": "pullback_reentry",
+   "hypothesis": "A single confirmed RSI recovery close may capture trend resumption sooner than two closes.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/abc1eb9f4d0ba08b1035/",
+   "content_sha256_12": "4f52dee01668"
+  },
+  {
+   "id": "pullback_phase1_r03",
+   "family": "pullback_reentry",
+   "hypothesis": "Three recovery closes may suppress false recoveries enough to offset delayed fills.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/b86867380e2526cff331/",
+   "content_sha256_12": "521490e29fe9"
+  },
+  {
+   "id": "pullback_phase1_r07",
+   "family": "pullback_reentry",
+   "hypothesis": "Fast EMA trend plus shallow RSI recovery may be sufficient without requiring price already beyond EMA60.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/d59efa5b7bad149b1d13/",
+   "content_sha256_12": "b85fe24d05bb"
+  },
+  {
+   "id": "range_p1_r04",
+   "family": "range_trading",
+   "hypothesis": "Range recovery may require up to48observed bars when the midpoint exit remains active.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/87636400532d11b116cf/",
+   "content_sha256_12": "ee98fbffd50e"
+  },
+  {
+   "id": "range_p1_r05",
+   "family": "range_trading",
+   "hypothesis": "Allowing recovered range trades to reach the rolling midpoint without a1%profitcap may retain their larger successful reversions.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/8ba43fe50c328a564b6b/",
+   "content_sha256_12": "303bb5c7b476"
+  },
+  {
+   "id": "session_p1_r02",
+   "family": "session_temporal",
+   "hypothesis": "Momentum confirmed during the same13-16UTC signal window may require a full24observed-bar horizon rather than six bars.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/session_temporal/experiments/08bcc8ff3c8f9223d2bf/",
+   "content_sha256_12": "63c99a31bdd3"
+  },
+  {
+   "id": "trend_continuation_p1_r05",
+   "family": "trend_continuation",
+   "hypothesis": "An EMA6/24 reversal exit may retain trends longer than PSAR while exiting earlier than Supertrend.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/01453288eca6b0b8e8e0/",
+   "content_sha256_12": "9448c5e2141c"
+  },
+  {
+   "id": "trend_continuation_p1_r03",
+   "family": "trend_continuation",
+   "hypothesis": "Five-bar PSAR persistence with Supertrend agreement may reject more failed flips than three-bar confirmation.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/77f0009d0b6501929166/",
+   "content_sha256_12": "b0687bcf2ec0"
+  },
+  {
+   "id": "trend_continuation_p1_r10",
+   "family": "trend_continuation",
+   "hypothesis": "A mild24-bar path-efficiency floor may avoid choppy confirmed trends after EMA60 agreement.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/e0cdf8fbc007eba0bcbb/",
+   "content_sha256_12": "742c3740980c"
+  },
+  {
+   "id": "volatility_expansion_p1_r04",
+   "family": "volatility_expansion",
+   "hypothesis": "One close holding the outer range quarter after a1.5ATR breakout may exclude immediate expansion failures.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/3f7e679790b94a2b3ae0/",
+   "content_sha256_12": "bf5b8fb02448"
+  },
+  {
+   "id": "volatility_expansion_p1_r05",
+   "family": "volatility_expansion",
+   "hypothesis": "A volatility breakout may need room beyond a rolling midpoint rather than being liquidated by that moving reference.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/54667de49f2a01c0a50e/",
+   "content_sha256_12": "80a018b2b800"
+  },
+  {
+   "id": "volatility_expansion_p1_r11",
+   "family": "volatility_expansion",
+   "hypothesis": "The expansion continuation payoff may be concentrated in the first six observed bars.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/69bb45daf8cd25101d7b/",
+   "content_sha256_12": "5cf4e074cdb5"
+  },
+  {
+   "id": "volatility_expansion_p1_r02",
+   "family": "volatility_expansion",
+   "hypothesis": "Larger two-ATR breakout bars may separate sustained expansions from weaker range releases.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/75c169aa4d9d5e8cfe26/",
+   "content_sha256_12": "8c055cb516a8"
+  },
+  {
+   "id": "campaign_volume_activity_p1_r03",
+   "family": "volume_activity",
+   "hypothesis": "A stronger activity burst may select better closing breakouts despite fewer openings.",
+   "pass_instruments": 4,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volume_activity/experiments/128c2e2a91f53918b150/",
+   "content_sha256_12": "7b9cf32006ca"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r02",
+   "family": "failed_breakout",
+   "hypothesis": "Failed range breaks may revert more reliably when the prior path is directionally inefficient.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/54f5e3d3c23497863bf8/",
+   "content_sha256_12": "7ac72f01cc56"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r17",
+   "family": "failed_breakout",
+   "hypothesis": "A shorter fixed horizon may retain reversal gains without exposing failed breaks to later renewed trends.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/b6b0bd0f9be6e6b0228c/",
+   "content_sha256_12": "b84019dd4031"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r14",
+   "family": "failed_breakout",
+   "hypothesis": "A failed range break with above-baseline quote activity may represent stronger rejection than a quiet sweep.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/f8915c7161c219e45242/",
+   "content_sha256_12": "28b91cd412ee"
+  },
+  {
+   "id": "market_structure_p1_r15",
+   "family": "market_structure",
+   "hypothesis": "Long structural acceptance may contribute most of the symmetric strategy returns.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/2c6099c9b0a12a017dfb/",
+   "content_sha256_12": "bc218fa74ddb"
+  },
+  {
+   "id": "mean_reversion_p1_r05",
+   "family": "mean_reversion",
+   "hypothesis": "A24bar cap may let a confirmed low-efficiency recovery finish reverting before a forced exit.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/02f59abe61e574336eba/",
+   "content_sha256_12": "804d2fb1c0a2"
+  },
+  {
+   "id": "mean_reversion_p1_r03",
+   "family": "mean_reversion",
+   "hypothesis": "Recovery fades are more plausible when the recent24bar path has low directional efficiency.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/454a25c02fd4a0035ea2/",
+   "content_sha256_12": "6eeabad67ce0"
+  },
+  {
+   "id": "pullback_phase1_r12",
+   "family": "pullback_reentry",
+   "hypothesis": "A smaller1.5% target may monetize short pullback bursts before they reverse.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/27e30e07b82aace7adec/",
+   "content_sha256_12": "573460be51e0"
+  },
+  {
+   "id": "pullback_phase1_r01",
+   "family": "pullback_reentry",
+   "hypothesis": "RSI recovery following a recent pullback within an EMA trend can resume continuation.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/e9b88c1f4498afd65aae/",
+   "content_sha256_12": "b86c44d2ca79"
+  },
+  {
+   "id": "range_p1_r11",
+   "family": "range_trading",
+   "hypothesis": "Moderately efficient paths may still support edge-to-midpoint recovery once signal-bar shocks are excluded.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/2b4e919dfe456315b447/",
+   "content_sha256_12": "bc83ed46bcbf"
+  },
+  {
+   "id": "range_p1_r10",
+   "family": "range_trading",
+   "hypothesis": "Restricting a confirmed range reclaim to bars below1.2ATR may further separate range trading from expansion.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/305f3d83d4d7d2e4a13b/",
+   "content_sha256_12": "c88511982563"
+  },
+  {
+   "id": "range_p1_r18",
+   "family": "range_trading",
+   "hypothesis": "Short-side range rejection may contribute independent reversion opportunities even when its aggregate historical scores are weaker.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/e5c2aa70af1c5a5f1241/",
+   "content_sha256_12": "971a46f977a1"
+  },
+  {
+   "id": "trend_continuation_p1_r02",
+   "family": "trend_continuation",
+   "hypothesis": "Confirming a PSAR flip after one bar rather than three may reduce delayed entry while Supertrend agrees.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/084d90d1eaab926a2d56/",
+   "content_sha256_12": "b578390c33c5"
+  },
+  {
+   "id": "volatility_expansion_p1_r07",
+   "family": "volatility_expansion",
+   "hypothesis": "Expansion beyond a24bar range is more likely to continue when the24bar path already has directional efficiency above.25.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/10fe96294fbf5d3a6282/",
+   "content_sha256_12": "da87b123a4ba"
+  },
+  {
+   "id": "volatility_expansion_p1_r13",
+   "family": "volatility_expansion",
+   "hypothesis": "Upward volatility expansions may have different continuation behavior from downside expansions across this instrument set.",
+   "pass_instruments": 3,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/12b23667b663add5ca69/",
+   "content_sha256_12": "4eeb783358b9"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r11",
+   "family": "failed_breakout",
+   "hypothesis": "Short failed-upside breaks may explain the FX and UK-index passes in the combined branch.",
+   "pass_instruments": 2,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/109e4cccf5afb2ce9121/",
+   "content_sha256_12": "242fd4117458"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r10",
+   "family": "failed_breakout",
+   "hypothesis": "Long failed-downside breaks may carry a different payoff from failed-upside breaks over this historical instrument set.",
+   "pass_instruments": 2,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/a1d0b3eb4beaa450ed83/",
+   "content_sha256_12": "04c3f1105853"
+  },
+  {
+   "id": "mean_reversion_p1_r04",
+   "family": "mean_reversion",
+   "hypothesis": "A six-bar horizon may cut failed fades sooner while retaining quick recoveries toward the mean.",
+   "pass_instruments": 2,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/8ea01ab589c2a6929c13/",
+   "content_sha256_12": "4953db6ebe1b"
+  },
+  {
+   "id": "mean_reversion_p1_r13",
+   "family": "mean_reversion",
+   "hypothesis": "Long recovery fades may account for most positive index results under a broad rising-price history.",
+   "pass_instruments": 2,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/e5b5ab963df9ea671f97/",
+   "content_sha256_12": "cf4e77dffece"
+  },
+  {
+   "id": "pullback_phase1_r09",
+   "family": "pullback_reentry",
+   "hypothesis": "Pullback recovery edge may be concentrated in the first twelve observed bars.",
+   "pass_instruments": 2,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/pullback_reentry/experiments/2277789c357befd4452a/",
+   "content_sha256_12": "629be19233a5"
+  },
+  {
+   "id": "range_p1_r03",
+   "family": "range_trading",
+   "hypothesis": "A reclaimed range edge may need a full24bar observation horizon to reach its rolling midpoint.",
+   "pass_instruments": 2,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/08e59ab6eb094bd3ebf8/",
+   "content_sha256_12": "a556ad652ccf"
+  },
+  {
+   "id": "range_p1_r02",
+   "family": "range_trading",
+   "hypothesis": "A return from the outer range back into its inner band may confirm range rejection before fading to midpoint.",
+   "pass_instruments": 2,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/e3991d5aa70ea9781dd5/",
+   "content_sha256_12": "ea52d09c2de4"
+  },
+  {
+   "id": "session_p1_r01",
+   "family": "session_temporal",
+   "hypothesis": "Trend-aligned RSI momentum during signal bars opening13-16UTC may continue over the next six observed bars.",
+   "pass_instruments": 2,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/session_temporal/experiments/1d94b1b4828a7738de89/",
+   "content_sha256_12": "17c1c6abfe68"
+  },
+  {
+   "id": "session_p1_r03",
+   "family": "session_temporal",
+   "hypothesis": "Session momentum may benefit from a fixed24bar hold without reactive EMA-flip exits.",
+   "pass_instruments": 2,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/session_temporal/experiments/72724501eedffa597452/",
+   "content_sha256_12": "41287dbdd156"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r01",
+   "family": "failed_breakout",
+   "hypothesis": "A prior-range wick sweep that closes back inside can revert toward its rolling midpoint.",
+   "pass_instruments": 1,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/5ffb8149d51234cf9142/",
+   "content_sha256_12": "f4da2f3ca269"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r20",
+   "family": "failed_breakout",
+   "hypothesis": "Short-side failed-upside breaks may contribute selective FX reversion but impair the long reversal payoff.",
+   "pass_instruments": 1,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/8229a6bc69b2753e2b5f/",
+   "content_sha256_12": "7c885838ade8"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r04",
+   "family": "failed_breakout",
+   "hypothesis": "A range-sweep fade may work when it is not excessively displaced against the slow trend.",
+   "pass_instruments": 1,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/bd385e8b09518642b750/",
+   "content_sha256_12": "1763602b10ed"
+  },
+  {
+   "id": "market_structure_p1_r16",
+   "family": "market_structure",
+   "hypothesis": "Short structural acceptance may contribute distinct returns and monthly opportunities.",
+   "pass_instruments": 1,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/market_structure/experiments/397e561146d0284ccd82/",
+   "content_sha256_12": "82b6832844d2"
+  },
+  {
+   "id": "mean_reversion_p1_r16",
+   "family": "mean_reversion",
+   "hypothesis": "A stricter low-efficiency regime may isolate cleaner reversion conditions.",
+   "pass_instruments": 1,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/472bab47c44e10dc7c88/",
+   "content_sha256_12": "8b782db907bc"
+  },
+  {
+   "id": "mean_reversion_p1_r02",
+   "family": "mean_reversion",
+   "hypothesis": "Recovery into the outer mean-deviation band after a recent two-ATR stretch may avoid ongoing directional shocks.",
+   "pass_instruments": 1,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/f712ae7a0898f83a88bd/",
+   "content_sha256_12": "409faeefee89"
+  },
+  {
+   "id": "range_p1_r17",
+   "family": "range_trading",
+   "hypothesis": "Long-side range rejection may carry more of the historical range-fading edge than symmetric short entries.",
+   "pass_instruments": 1,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/8d3810380382bf3a3d7e/",
+   "content_sha256_12": "67308c973ecc"
+  },
+  {
+   "id": "range_p1_r08",
+   "family": "range_trading",
+   "hypothesis": "A range-edge rejection can tolerate up to oneATR beyond EMA60 without becoming an unrestricted countertrend fade.",
+   "pass_instruments": 1,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/9ecdcb575c08e6d3df91/",
+   "content_sha256_12": "5452728a30c5"
+  },
+  {
+   "id": "volatility_expansion_p1_r14",
+   "family": "volatility_expansion",
+   "hypothesis": "Downside volatility expansions may contribute differently to score and regularity than upside expansions.",
+   "pass_instruments": 1,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/volatility_expansion/experiments/b265ffdd3cdf1bc8395e/",
+   "content_sha256_12": "04e6a4f1c288"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r08",
+   "family": "failed_breakout",
+   "hypothesis": "A modest10%return inside the swept range may filter marginal failures without sacrificing every-month entries.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/08100c883081bc463ea9/",
+   "content_sha256_12": "e6f7e2c884a2"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r07",
+   "family": "failed_breakout",
+   "hypothesis": "A failed range break that closes decisively back inside may have stronger reversal information than a marginal rejection.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/6113524f63a64c32f03f/",
+   "content_sha256_12": "01a8335ddded"
+  },
+  {
+   "id": "campaign_failed_breakout_p1_r03",
+   "family": "failed_breakout",
+   "hypothesis": "Range sweeps in a low-efficiency pause may revert in the direction of the slower EMA60 trend.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/failed_breakout/experiments/d5b205aa87023878ea98/",
+   "content_sha256_12": "36c95ab81343"
+  },
+  {
+   "id": "mean_reversion_p1_r09",
+   "family": "mean_reversion",
+   "hypothesis": "Reverting a local SMA24 displacement in the direction of broaderEMA60location may avoid fading structural trends.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/9a87164e30a8cf2b7ee4/",
+   "content_sha256_12": "210ac3a2dede"
+  },
+  {
+   "id": "mean_reversion_p1_r14",
+   "family": "mean_reversion",
+   "hypothesis": "Short recovery fades may contribute distinct reversion returns rather than merely filling quiet months.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/c58febe0d2ac4bb0fd1e/",
+   "content_sha256_12": "bc8eb5fafdce"
+  },
+  {
+   "id": "mean_reversion_p1_r06",
+   "family": "mean_reversion",
+   "hypothesis": "An initial three-ATR stretch followed by recovery may isolate more genuine dislocations than two-ATR drift.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/e3823b352c37766c088a/",
+   "content_sha256_12": "b83f744a3fca"
+  },
+  {
+   "id": "mean_reversion_p1_r01",
+   "family": "mean_reversion",
+   "hypothesis": "A two-ATR displacement from SMA24 reverts toward its moving mean.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/mean_reversion/experiments/fde2b6cf7de7e661b577/",
+   "content_sha256_12": "afd431eda195"
+  },
+  {
+   "id": "range_p1_r07",
+   "family": "range_trading",
+   "hypothesis": "A moderately efficient local range can still reject its edge when aligned with EMA60.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/15ab0d5e112c6d709588/",
+   "content_sha256_12": "5c984529cfb8"
+  },
+  {
+   "id": "range_p1_r06",
+   "family": "range_trading",
+   "hypothesis": "Range-edge rejection aligned with the broader EMA60 side may avoid fading persistent directional moves.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/2dc7009c1afd65ade672/",
+   "content_sha256_12": "3ed451b33c3a"
+  },
+  {
+   "id": "range_p1_r01",
+   "family": "range_trading",
+   "hypothesis": "Low-efficiency closes within the outer15 percent of the prior24bar range may fade toward the rolling midpoint.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/5a4dd8aac1abc51692e6/",
+   "content_sha256_12": "95281230d47e"
+  },
+  {
+   "id": "range_p1_r14",
+   "family": "range_trading",
+   "hypothesis": "A wider sixATR prior range may offer more recoverable travel from its edge after a confirmed rejection.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/range_trading/experiments/827997bb7816452b6683/",
+   "content_sha256_12": "2a0b7395fd0d"
+  },
+  {
+   "id": "trend_continuation_p1_r18",
+   "family": "trend_continuation",
+   "hypothesis": "A short-only ablation separates downside continuation value from the long drift visible in round17.",
+   "pass_instruments": 0,
+   "total_instruments": 21,
+   "source_repo": "ttrrei/nova",
+   "source_path": "runs/research_campaign/trend_continuation/experiments/5424136794fe270eebb6/",
+   "content_sha256_12": "a3fcace42944"
+  }
+ ]
+}

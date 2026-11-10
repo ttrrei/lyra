@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r03",
+ "family": "market_structure",
+ "hypothesis": "Three outer-quarter closes may better distinguish structural acceptance from a brief range break.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/fdb79786b7072bfae101/",
+ "content_sha256_12": "b5516bd54a50"
+}

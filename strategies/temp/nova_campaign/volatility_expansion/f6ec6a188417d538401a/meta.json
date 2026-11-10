@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r19",
+ "family": "volatility_expansion",
+ "hypothesis": "A moderately smaller1.25ATR expansion may broaden the uncapped18bar continuation rule without admitting ordinary nonexpansion bars.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/f6ec6a188417d538401a/",
+ "content_sha256_12": "d90de5ad5ea7"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r12",
+ "family": "failed_breakout",
+ "hypothesis": "A failed break followed by one more close inside the same range half may confirm rejection before fading.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/9c87b47389285ae5a16e/",
+ "content_sha256_12": "6e08cc6d7ea0"
+}

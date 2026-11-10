@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r06",
+ "family": "volatility_expansion",
+ "hypothesis": "A true expansion should hold the outer quarter; loss of that position may identify failure before midpoint loss.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/492643705ef84dec6426/",
+ "content_sha256_12": "d24ca96d990e"
+}

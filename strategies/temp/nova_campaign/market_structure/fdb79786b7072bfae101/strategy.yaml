@@ -1,0 +1,46 @@
+version: 1
+id: market_structure_p1_r03
+family: market_structure
+hypothesis: Three outer-quarter closes may better distinguish structural acceptance
+  from a brief range break.
+timeframe_minutes: 60
+entry:
+  long:
+    after_event:
+      bars: 3
+      event:
+        feature: breakout_up_24
+        op: eq
+        value: true
+      condition:
+        feature: range_position_24
+        op: gt
+        value: 0.75
+  short:
+    after_event:
+      bars: 3
+      event:
+        feature: breakout_down_24
+        op: eq
+        value: true
+      condition:
+        feature: range_position_24
+        op: lt
+        value: 0.25
+exit:
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.04
+  max_holding_bars: 36
+  long:
+    feature: range_position_24
+    op: lt
+    value: 0.5
+  short:
+    feature: range_position_24
+    op: gt
+    value: 0.5
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

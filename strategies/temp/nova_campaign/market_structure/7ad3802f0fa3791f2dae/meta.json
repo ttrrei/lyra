@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r10",
+ "family": "market_structure",
+ "hypothesis": "Structural acceptance with above-average quote participation may persist more often.",
+ "pass_instruments": 10,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/7ad3802f0fa3791f2dae/",
+ "content_sha256_12": "0682d5eda26d"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r07",
+ "family": "volatility_expansion",
+ "hypothesis": "Expansion beyond a24bar range is more likely to continue when the24bar path already has directional efficiency above.25.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/10fe96294fbf5d3a6282/",
+ "content_sha256_12": "da87b123a4ba"
+}

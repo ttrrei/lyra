@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r09",
+ "family": "range_trading",
+ "hypothesis": "An outer-edge reclaim on a non-shock bar may be more likely to remain a range than one with exceptionally large intrabar movement.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/01daabc597e31fcd9923/",
+ "content_sha256_12": "147b44cca275"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r11",
+ "family": "mean_reversion",
+ "hypothesis": "A positive six-bar price change after downside stretch, or negative after upside stretch, may confirm actual recovery rather than a moving-mean artifact.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/e7298657c3fb2fe94c68/",
+ "content_sha256_12": "c7752948f0d8"
+}

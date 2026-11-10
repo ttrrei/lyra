@@ -1,0 +1,10 @@
+{
+ "id": "campaign_volume_activity_p1_r06",
+ "family": "volume_activity",
+ "hypothesis": "Activity-backed closing breakouts may need up to48 observed bars to realize continuation.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volume_activity/experiments/6d3d65b457305acfc085/",
+ "content_sha256_12": "8750e615dcab"
+}

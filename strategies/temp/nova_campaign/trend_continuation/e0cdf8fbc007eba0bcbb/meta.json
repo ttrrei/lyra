@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r10",
+ "family": "trend_continuation",
+ "hypothesis": "A mild24-bar path-efficiency floor may avoid choppy confirmed trends after EMA60 agreement.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/e0cdf8fbc007eba0bcbb/",
+ "content_sha256_12": "742c3740980c"
+}

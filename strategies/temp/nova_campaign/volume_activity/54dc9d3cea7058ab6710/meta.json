@@ -1,0 +1,10 @@
+{
+ "id": "campaign_volume_activity_p1_r05",
+ "family": "volume_activity",
+ "hypothesis": "Broader above-average quote participation may restore monthly opportunities when activity-led winners are uncapped.",
+ "pass_instruments": 8,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volume_activity/experiments/54dc9d3cea7058ab6710/",
+ "content_sha256_12": "2db0f72ec2f2"
+}

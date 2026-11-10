@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r19",
+ "family": "mean_reversion",
+ "hypothesis": "Waiting until price recovers within half anATR of its mean may offer clearer reversion despite later fills.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/66e96fe2e70dcaf4def4/",
+ "content_sha256_12": "be3369f60366"
+}

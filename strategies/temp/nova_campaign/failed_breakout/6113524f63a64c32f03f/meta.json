@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r07",
+ "family": "failed_breakout",
+ "hypothesis": "A failed range break that closes decisively back inside may have stronger reversal information than a marginal rejection.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/6113524f63a64c32f03f/",
+ "content_sha256_12": "01a8335ddded"
+}

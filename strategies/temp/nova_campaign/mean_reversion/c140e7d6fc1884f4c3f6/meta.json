@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r20",
+ "family": "mean_reversion",
+ "hypothesis": "A48bar horizon may allow confirmed reversions to finish a halfATR overshoot before forced liquidation.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/c140e7d6fc1884f4c3f6/",
+ "content_sha256_12": "d1c90dd2494c"
+}

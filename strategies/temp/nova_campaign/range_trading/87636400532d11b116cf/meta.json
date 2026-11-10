@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r04",
+ "family": "range_trading",
+ "hypothesis": "Range recovery may require up to48observed bars when the midpoint exit remains active.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/87636400532d11b116cf/",
+ "content_sha256_12": "ee98fbffd50e"
+}

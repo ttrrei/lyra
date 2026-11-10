@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r13",
+ "family": "market_structure",
+ "hypothesis": "A confirmed structural break may survive a midpoint retest before continuing within18bars.",
+ "pass_instruments": 10,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/4f8a99dda66a3747cddd/",
+ "content_sha256_12": "c57627d5ccb7"
+}

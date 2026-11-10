@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r09",
+ "family": "mean_reversion",
+ "hypothesis": "Reverting a local SMA24 displacement in the direction of broaderEMA60location may avoid fading structural trends.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/9a87164e30a8cf2b7ee4/",
+ "content_sha256_12": "210ac3a2dede"
+}

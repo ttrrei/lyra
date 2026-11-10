@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r01",
+ "family": "market_structure",
+ "hypothesis": "A prior24-bar range break confirmed for two following outer-quarter closes may continue.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/7ae01c4d167a24bad743/",
+ "content_sha256_12": "8d45eb564976"
+}

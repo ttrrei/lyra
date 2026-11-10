@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r03",
+ "family": "failed_breakout",
+ "hypothesis": "Range sweeps in a low-efficiency pause may revert in the direction of the slower EMA60 trend.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/d5b205aa87023878ea98/",
+ "content_sha256_12": "36c95ab81343"
+}

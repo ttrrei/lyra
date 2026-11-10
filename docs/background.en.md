@@ -42,7 +42,15 @@ solved "can I keep researching on a small AI budget in spare time".
   as-of join; signals confirmed on a closed bar, filled at T+1 open).
 - Shared engine + test coverage (6 quality gates on indicators, metric
   definitions, pipeline units).
-- 332 strategy YAMLs all in-grammar (also verified later in nova).
+> **Erratum (2026-11-10)**: earlier text said "332 strategy YAMLs".
+> Verified: moneta has **no strategy YAMLs at all** — its 132 S-series
+> strategies are Python libraries (`strategy/*_lib.py`, 28 with matrix
+> results), and its 200 research strategies (SR-20261031-200) are a
+> 50-feature × 2-entry_model template Cartesian product with 0
+> promotions. "332" is actually the total number of YAML *files* in the
+> nova repo (17 hand-written strategies + 146 campaign experiment
+> snapshots + 169 manifest/protocol/other runs YAMLs), not a strategy
+> count; deduplicated by content there are ~162–169 distinct strategies.
 
 **Why it stopped**:
 
@@ -62,7 +70,9 @@ solved "can I keep researching on a small AI budget in spare time".
 **Assets left** (inherited by nova):
 - Validated trade semantics (2% stop / next-open / losing-side priority /
   warmup-NULL behavior).
-- 332 strategy YAMLs (all in-grammar, usable as Lyra's regression set).
+- 132 S-series strategies (Python libraries, 28 with matrix results;
+  see erratum — not YAML; listed in lyra
+  `strategies/temp/moneta_s_series/` pending 0010 triage).
 - 17 registered features with their names and parameters.
 - OCI PAR download in `extract_oci.py` (portable to Lyra).
 
@@ -83,13 +93,14 @@ inspect trades" a **light** operation.
 | 3 | Compiler | `compiler.py` + `config.py` (YAML → past-only SQL) |
 | 4 | Trade engine | `trades.py` (2% stop / next-open / costs) |
 | 5 | Metrics + runner | `metrics.py` + `runner.py` |
-| 6 | Migration | 332 strategies verified in-grammar |
+| 6 | Migration | 17 hand-written + 146 campaign snapshots verified in-grammar |
 | 7 | Polish | `cli.py` + `doctor.py` + `audit.py` |
 
 **What it got right**:
 - The 4 core components' semantics are **identical** to moneta — no drift.
-- 332 strategy YAMLs pass on the nova compiler: 0 failures, 0 unregistered
-  features, 0 unsupported operators.
+- All 332 YAML files (17 hand-written + 146 campaign snapshots + 169
+  other runs YAMLs; see §1 erratum) pass the nova compiler: 0 failures,
+  0 unregistered features, 0 unsupported operators.
 - Tests cover causality / temporal confirmation / long-short fills /
   adverse gaps / costs / monthly zeros / data contracts / reproducibility.
 
@@ -120,7 +131,8 @@ Specifically:
 **Assets left** (inherited by Lyra):
 - Validated semantics of the 4 core components (trade semantics, compiler
   grammar, metric definitions, data contracts).
-- In-grammar validation results for the 332 strategy YAMLs.
+- In-grammar validation results for the 17 hand-written strategies +
+  146 campaign snapshots (held in temp/ pending triage).
 - PAR download implementation in `extract_oci.py` (from moneta, portable).
 - **A complete "what to drop" list** (DECISIONS §7).
 
@@ -155,7 +167,8 @@ alpha boundary that nova lacked.
    components, ported semantics-intact from Nova; each component is
    proven on fixture data first, then wired to real OCI data
 4. **0007 OCI push + backup** — the other half of the core feature
-5. **0008 332-strategy migration + regression** → **0009 Polish**
+5. **0008 corpus migration + regression (12-direction formal library +
+   temp/ gate)** → **0009 Polish** → **0010 temp/ AI triage**
 
 **What we do not do** (see `requirements.md` §R9):
 - Sizing / leverage / margin / equity / CAGR / HWM / Sharpe

@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r09",
+ "family": "trend_continuation",
+ "hypothesis": "Requiring price on the EMA60 trend side may remove countertrend confirmed PSAR flips while leaving profitable tails uncapped.",
+ "pass_instruments": 10,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/bf613485e7df3215a52d/",
+ "content_sha256_12": "ee4c8791ef66"
+}

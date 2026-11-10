@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r14",
+ "family": "market_structure",
+ "hypothesis": "A successful structural continuation may need to stay in the directional outer quarter rather than merely above midpoint.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/7f8f6ec73131c96a8066/",
+ "content_sha256_12": "67e33d79b00b"
+}

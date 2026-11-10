@@ -1,0 +1,40 @@
+version: 1
+id: campaign_failed_breakout_p1_r19
+family: failed_breakout
+hypothesis: Long-side confirmed failed breaks may account for most gains under the48bar
+  fixed exit.
+timeframe_minutes: 60
+entry:
+  long:
+    after_event:
+      bars: 1
+      event:
+        all:
+        - feature: failed_breakout_down_24
+          op: eq
+          value: true
+        - feature: range_position_24
+          op: lt
+          value: 0.5
+        - feature: efficiency_24
+          op: lt
+          value: 0.4
+      condition:
+        all:
+        - feature: range_position_24
+          op: lt
+          value: 0.5
+        - feature: range_position_24
+          op: gte
+          value: 0
+        - feature: efficiency_24
+          op: lt
+          value: 0.4
+exit:
+  stop_loss_pct: 0.02
+  max_holding_bars: 48
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

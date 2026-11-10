@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r06",
+ "family": "failed_breakout",
+ "hypothesis": "Failed breaks can occasionally lead to extended reversals, so an absolute profit cap may reduce their payoff.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/5a6465b4e3e77e76328a/",
+ "content_sha256_12": "89a5f7af7de2"
+}

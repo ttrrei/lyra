@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r11",
+ "family": "market_structure",
+ "hypothesis": "Moderately active structural confirmations may retain useful opportunities excluded by above-mean activity.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/3e2b5fb46cd61f51ecd0/",
+ "content_sha256_12": "b562f521aa17"
+}

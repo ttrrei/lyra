@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r20",
+ "family": "trend_continuation",
+ "hypothesis": "Four-bar PSAR confirmation tests whether the selected three-bar continuation template survives a nearby delay.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/00bf47b4b053b6feb1e5/",
+ "content_sha256_12": "e654ddc19c63"
+}

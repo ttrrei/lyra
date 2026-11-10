@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r02",
+ "family": "range_trading",
+ "hypothesis": "A return from the outer range back into its inner band may confirm range rejection before fading to midpoint.",
+ "pass_instruments": 2,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/e3991d5aa70ea9781dd5/",
+ "content_sha256_12": "ea52d09c2de4"
+}

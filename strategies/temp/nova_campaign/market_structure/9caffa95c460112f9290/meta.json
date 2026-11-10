@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r08",
+ "family": "market_structure",
+ "hypothesis": "Established-trend agreement may work better when structural trades use the shorter observed useful horizon.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/9caffa95c460112f9290/",
+ "content_sha256_12": "d4a9e9ed7d38"
+}

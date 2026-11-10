@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r08",
+ "family": "pullback_reentry",
+ "hypothesis": "Shallow RSI pullbacks may work better when both EMA trend and Supertrend direction agree.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/ece019261bf57a943b97/",
+ "content_sha256_12": "fec185626632"
+}

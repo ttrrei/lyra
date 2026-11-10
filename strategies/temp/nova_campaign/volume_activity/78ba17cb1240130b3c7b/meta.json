@@ -1,0 +1,10 @@
+{
+ "id": "campaign_volume_activity_p1_r02",
+ "family": "volume_activity",
+ "hypothesis": "A closing breakout with activity above its prior mean may retain useful participation while restoring monthly openings.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volume_activity/experiments/78ba17cb1240130b3c7b/",
+ "content_sha256_12": "7162437cca2f"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r15",
+ "family": "range_trading",
+ "hypothesis": "Two consecutive inner-band closes after an outer-edge touch may confirm a durable range rejection.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/dafcceecef1d5b89f714/",
+ "content_sha256_12": "cbc81755cf96"
+}

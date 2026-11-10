@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r15",
+ "family": "market_structure",
+ "hypothesis": "Long structural acceptance may contribute most of the symmetric strategy returns.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/2c6099c9b0a12a017dfb/",
+ "content_sha256_12": "bc218fa74ddb"
+}

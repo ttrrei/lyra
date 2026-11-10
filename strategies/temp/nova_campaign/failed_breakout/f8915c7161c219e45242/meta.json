@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r14",
+ "family": "failed_breakout",
+ "hypothesis": "A failed range break with above-baseline quote activity may represent stronger rejection than a quiet sweep.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/f8915c7161c219e45242/",
+ "content_sha256_12": "28b91cd412ee"
+}

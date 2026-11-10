@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r11",
+ "family": "failed_breakout",
+ "hypothesis": "Short failed-upside breaks may explain the FX and UK-index passes in the combined branch.",
+ "pass_instruments": 2,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/109e4cccf5afb2ce9121/",
+ "content_sha256_12": "242fd4117458"
+}

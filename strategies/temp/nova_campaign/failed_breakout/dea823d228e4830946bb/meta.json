@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r19",
+ "family": "failed_breakout",
+ "hypothesis": "Long-side confirmed failed breaks may account for most gains under the48bar fixed exit.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/dea823d228e4830946bb/",
+ "content_sha256_12": "db51e62969b8"
+}

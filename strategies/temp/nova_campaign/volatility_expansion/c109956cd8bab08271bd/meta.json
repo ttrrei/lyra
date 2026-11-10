@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r20",
+ "family": "volatility_expansion",
+ "hypothesis": "The uncapped18bar expansion rule may work without its above-average activity filter, making the simpler price rule preferable if breadth remains.",
+ "pass_instruments": 9,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/c109956cd8bab08271bd/",
+ "content_sha256_12": "03f94e4d91b3"
+}

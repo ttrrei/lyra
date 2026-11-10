@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r13",
+ "family": "pullback_reentry",
+ "hypothesis": "Supertrend agreement may improve the quality of uncapped pullback continuation winners.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/c06901923479cd0ed695/",
+ "content_sha256_12": "8fd72729cc70"
+}

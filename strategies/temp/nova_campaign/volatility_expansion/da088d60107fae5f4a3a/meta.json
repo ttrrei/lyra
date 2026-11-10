@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r09",
+ "family": "volatility_expansion",
+ "hypothesis": "Moderately stronger quoteactivity support may improve the quality of already large expansion breakouts.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/da088d60107fae5f4a3a/",
+ "content_sha256_12": "7c03517ff269"
+}

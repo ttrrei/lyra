@@ -1,0 +1,52 @@
+version: 1
+id: session_p1_r02
+family: session_temporal
+hypothesis: Momentum confirmed during the same13-16UTC signal window may require a
+  full24observed-bar horizon rather than six bars.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - feature: utc_hour
+      op: gte
+      value: 13
+    - feature: utc_hour
+      op: lt
+      value: 17
+    - feature: ema_alignment_6_24
+      op: eq
+      value: 1
+    - feature: rsi_14
+      op: gt
+      value: 55
+  short:
+    all:
+    - feature: utc_hour
+      op: gte
+      value: 13
+    - feature: utc_hour
+      op: lt
+      value: 17
+    - feature: ema_alignment_6_24
+      op: eq
+      value: -1
+    - feature: rsi_14
+      op: lt
+      value: 45
+exit:
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.02
+  max_holding_bars: 24
+  long:
+    feature: ema_alignment_6_24
+    op: eq
+    value: -1
+  short:
+    feature: ema_alignment_6_24
+    op: eq
+    value: 1
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

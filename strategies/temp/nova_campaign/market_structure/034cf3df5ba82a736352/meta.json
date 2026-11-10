@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r05",
+ "family": "market_structure",
+ "hypothesis": "A confirmed structural range break on the established-trend side of EMA60 may avoid countertrend failures.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/034cf3df5ba82a736352/",
+ "content_sha256_12": "59c15b379472"
+}

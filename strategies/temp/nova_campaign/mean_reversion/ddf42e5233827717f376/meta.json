@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r12",
+ "family": "mean_reversion",
+ "hypothesis": "A confirmed price reversal may overshoot the moving mean by half anATR before decaying.",
+ "pass_instruments": 6,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/ddf42e5233827717f376/",
+ "content_sha256_12": "511a415b3725"
+}

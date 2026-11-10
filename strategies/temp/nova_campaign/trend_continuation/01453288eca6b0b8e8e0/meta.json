@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r05",
+ "family": "trend_continuation",
+ "hypothesis": "An EMA6/24 reversal exit may retain trends longer than PSAR while exiting earlier than Supertrend.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/01453288eca6b0b8e8e0/",
+ "content_sha256_12": "9448c5e2141c"
+}

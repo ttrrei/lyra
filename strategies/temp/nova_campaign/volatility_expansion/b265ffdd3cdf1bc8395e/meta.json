@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r14",
+ "family": "volatility_expansion",
+ "hypothesis": "Downside volatility expansions may contribute differently to score and regularity than upside expansions.",
+ "pass_instruments": 1,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/b265ffdd3cdf1bc8395e/",
+ "content_sha256_12": "04e6a4f1c288"
+}

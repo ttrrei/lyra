@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r03",
+ "family": "volatility_expansion",
+ "hypothesis": "A one-ATR closing breakout may capture more ordinary volatility expansion with better monthly reach.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/2ba9f220114e0f30fb9b/",
+ "content_sha256_12": "b7ec30105bca"
+}

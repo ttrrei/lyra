@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r16",
+ "family": "mean_reversion",
+ "hypothesis": "A stricter low-efficiency regime may isolate cleaner reversion conditions.",
+ "pass_instruments": 1,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/472bab47c44e10dc7c88/",
+ "content_sha256_12": "8b782db907bc"
+}

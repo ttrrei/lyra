@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r03",
+ "family": "mean_reversion",
+ "hypothesis": "Recovery fades are more plausible when the recent24bar path has low directional efficiency.",
+ "pass_instruments": 3,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/454a25c02fd4a0035ea2/",
+ "content_sha256_12": "6eeabad67ce0"
+}

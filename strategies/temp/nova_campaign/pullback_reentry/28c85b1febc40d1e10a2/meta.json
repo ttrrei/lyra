@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r10",
+ "family": "pullback_reentry",
+ "hypothesis": "Giving established pullback resumptions up to48bars may retain more directional continuation.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/28c85b1febc40d1e10a2/",
+ "content_sha256_12": "f66fa41d06aa"
+}

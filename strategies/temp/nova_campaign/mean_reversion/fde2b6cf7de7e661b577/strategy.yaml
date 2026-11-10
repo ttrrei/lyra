@@ -1,0 +1,31 @@
+version: 1
+id: mean_reversion_p1_r01
+family: mean_reversion
+hypothesis: A two-ATR displacement from SMA24 reverts toward its moving mean.
+timeframe_minutes: 60
+entry:
+  long:
+    feature: close_sma24_distance_atr
+    op: lt
+    value: -2
+  short:
+    feature: close_sma24_distance_atr
+    op: gt
+    value: 2
+exit:
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.01
+  max_holding_bars: 12
+  long:
+    feature: close_sma24_distance_atr
+    op: gte
+    value: 0
+  short:
+    feature: close_sma24_distance_atr
+    op: lte
+    value: 0
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

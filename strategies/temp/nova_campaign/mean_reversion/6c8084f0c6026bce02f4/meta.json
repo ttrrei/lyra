@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r10",
+ "family": "mean_reversion",
+ "hypothesis": "Allowing a recovery fade to exit at the mean without a fixed profitcap may retain valuable reversions.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/6c8084f0c6026bce02f4/",
+ "content_sha256_12": "ba2c7332930e"
+}

@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r02",
+ "family": "market_structure",
+ "hypothesis": "A single outer-quarter confirmation close may enter structural continuation earlier.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/c71bf9bc4597f844d4eb/",
+ "content_sha256_12": "aabaace56627"
+}

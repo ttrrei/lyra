@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r10",
+ "family": "failed_breakout",
+ "hypothesis": "Long failed-downside breaks may carry a different payoff from failed-upside breaks over this historical instrument set.",
+ "pass_instruments": 2,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/a1d0b3eb4beaa450ed83/",
+ "content_sha256_12": "04c3f1105853"
+}

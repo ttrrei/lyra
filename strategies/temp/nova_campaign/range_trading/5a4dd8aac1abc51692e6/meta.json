@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r01",
+ "family": "range_trading",
+ "hypothesis": "Low-efficiency closes within the outer15 percent of the prior24bar range may fade toward the rolling midpoint.",
+ "pass_instruments": 0,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/5a4dd8aac1abc51692e6/",
+ "content_sha256_12": "95281230d47e"
+}

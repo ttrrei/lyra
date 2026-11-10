@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r12",
+ "family": "trend_continuation",
+ "hypothesis": "Supertrend agreement may be redundant once confirmed PSAR persistence,EMA60 direction and a mature-trend filter are required.",
+ "pass_instruments": 10,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/0ee4f105fc99b04a7b2b/",
+ "content_sha256_12": "86fcffa17fd1"
+}

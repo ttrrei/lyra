@@ -1,0 +1,59 @@
+version: 1
+id: trend_continuation_p1_r12
+family: trend_continuation
+hypothesis: Supertrend agreement may be redundant once confirmed PSAR persistence,EMA60
+  direction and a mature-trend filter are required.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - after_event:
+        bars: 3
+        event:
+          feature: psar_flip_up
+          op: eq
+          value: true
+        condition:
+          feature: psar_direction
+          op: eq
+          value: 1
+    - feature: close_ema60_distance_atr
+      op: gt
+      value: 0
+    - feature: efficiency_24
+      op: lt
+      value: 0.5
+  short:
+    all:
+    - after_event:
+        bars: 3
+        event:
+          feature: psar_flip_down
+          op: eq
+          value: true
+        condition:
+          feature: psar_direction
+          op: eq
+          value: -1
+    - feature: close_ema60_distance_atr
+      op: lt
+      value: 0
+    - feature: efficiency_24
+      op: lt
+      value: 0.5
+exit:
+  stop_loss_pct: 0.02
+  max_holding_bars: 60
+  long:
+    feature: psar_flip_down
+    op: eq
+    value: true
+  short:
+    feature: psar_flip_up
+    op: eq
+    value: true
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

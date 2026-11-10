@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r08",
+ "family": "volatility_expansion",
+ "hypothesis": "An expansion breakout supported by above-average quoteactivity may be less likely to be a low-participation spike.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/dc7fe411d592ddd986b1/",
+ "content_sha256_12": "671ce5f0052e"
+}

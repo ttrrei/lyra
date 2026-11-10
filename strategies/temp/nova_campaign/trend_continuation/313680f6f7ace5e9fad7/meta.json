@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r19",
+ "family": "trend_continuation",
+ "hypothesis": "With redundant Supertrend gating removed and price-location filters added,two-bar PSAR confirmation may capture continuation earlier without the original one-bar timing failure.",
+ "pass_instruments": 10,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/313680f6f7ace5e9fad7/",
+ "content_sha256_12": "3f35047b4a0e"
+}

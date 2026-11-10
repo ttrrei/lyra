@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r01",
+ "family": "failed_breakout",
+ "hypothesis": "A prior-range wick sweep that closes back inside can revert toward its rolling midpoint.",
+ "pass_instruments": 1,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/5ffb8149d51234cf9142/",
+ "content_sha256_12": "f4da2f3ca269"
+}

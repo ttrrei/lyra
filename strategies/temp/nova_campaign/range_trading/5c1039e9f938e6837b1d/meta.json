@@ -1,0 +1,10 @@
+{
+ "id": "range_p1_r16",
+ "family": "range_trading",
+ "hypothesis": "A confirmed two-close reclaim may remain linked to an outer-edge test up to sixbars earlier.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/range_trading/experiments/5c1039e9f938e6837b1d/",
+ "content_sha256_12": "f692e5503c6a"
+}

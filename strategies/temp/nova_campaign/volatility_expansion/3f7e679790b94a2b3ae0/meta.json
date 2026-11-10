@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r04",
+ "family": "volatility_expansion",
+ "hypothesis": "One close holding the outer range quarter after a1.5ATR breakout may exclude immediate expansion failures.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/3f7e679790b94a2b3ae0/",
+ "content_sha256_12": "bf5b8fb02448"
+}

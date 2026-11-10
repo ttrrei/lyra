@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r04",
+ "family": "trend_continuation",
+ "hypothesis": "Holding confirmed PSAR entries until Supertrend reverses may preserve broader trend moves that PSAR exits truncate.",
+ "pass_instruments": 7,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/fee9f840669b2c161410/",
+ "content_sha256_12": "1e10ad4cd4b7"
+}

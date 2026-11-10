@@ -1,0 +1,10 @@
+{
+ "id": "mean_reversion_p1_r18",
+ "family": "mean_reversion",
+ "hypothesis": "Avoiding signal bars wider than1.5ATR may reduce entries immediately after volatile recovery shocks.",
+ "pass_instruments": 5,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/mean_reversion/experiments/3371f9df791247d2881e/",
+ "content_sha256_12": "dc51c140cb06"
+}

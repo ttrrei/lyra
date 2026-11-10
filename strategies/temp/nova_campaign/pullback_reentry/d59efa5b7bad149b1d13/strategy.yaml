@@ -1,0 +1,58 @@
+version: 1
+id: pullback_phase1_r07
+family: pullback_reentry
+hypothesis: Fast EMA trend plus shallow RSI recovery may be sufficient without requiring
+  price already beyond EMA60.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - feature: ema_alignment_6_24
+      op: eq
+      value: 1
+    - within:
+        bars: 12
+        condition:
+          feature: rsi_14
+          op: lt
+          value: 48
+    - held_for:
+        bars: 1
+        condition:
+          feature: rsi_14
+          op: gt
+          value: 50
+  short:
+    all:
+    - feature: ema_alignment_6_24
+      op: eq
+      value: -1
+    - within:
+        bars: 12
+        condition:
+          feature: rsi_14
+          op: gt
+          value: 52
+    - held_for:
+        bars: 1
+        condition:
+          feature: rsi_14
+          op: lt
+          value: 50
+exit:
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.03
+  max_holding_bars: 24
+  long:
+    feature: ema_alignment_6_24
+    op: eq
+    value: -1
+  short:
+    feature: ema_alignment_6_24
+    op: eq
+    value: 1
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

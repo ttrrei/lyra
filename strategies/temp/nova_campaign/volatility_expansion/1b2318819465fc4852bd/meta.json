@@ -1,0 +1,10 @@
+{
+ "id": "volatility_expansion_p1_r10",
+ "family": "volatility_expansion",
+ "hypothesis": "A volatility expansion may deliver most continuation during the first12observed hours rather than a full24bar hold.",
+ "pass_instruments": 8,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/volatility_expansion/experiments/1b2318819465fc4852bd/",
+ "content_sha256_12": "c1c4829e496f"
+}

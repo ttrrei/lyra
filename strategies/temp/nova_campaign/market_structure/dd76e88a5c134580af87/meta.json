@@ -1,0 +1,10 @@
+{
+ "id": "market_structure_p1_r12",
+ "family": "market_structure",
+ "hypothesis": "Stronger participation may improve structural-break follow-through but risks missing monthly openings.",
+ "pass_instruments": 8,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/market_structure/experiments/dd76e88a5c134580af87/",
+ "content_sha256_12": "07992b44fc5c"
+}

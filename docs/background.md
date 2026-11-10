@@ -40,7 +40,14 @@ Lyra 是同一个研究目标（forex / precious metals / crude oil / equity ind
 - 因果性保护（1h feature 用 `m.close_time >= h.close_time` 的 as-of join；
   信号在 closed bar 确认、T+1 open 成交）。
 - 共享引擎 + 测试覆盖（指标 6 道质量门、metrics 口径、pipeline 单元）。
-- 332 个策略 YAML 全部在语法内（这个事实后来在 nova 里也验证过）。
+
+> **勘误（2026-11-10）**：早期文案曾写"332 个策略 YAML"。经核实，moneta
+> **没有任何策略 YAML**——其 132 个 S 系列策略是 Python 库
+> （`strategy/*_lib.py`，28 个有矩阵结果），200 个研究策略
+> （SR-20261031-200）是 50 feature × 2 entry_model 模板的笛卡尔积、
+> 0 晋级。"332"实为 nova 仓库 YAML 文件总数（17 手写策略 +
+> 146 个 campaign 实验快照 + 169 个 manifest/协议/其它 runs YAML），
+> 不是策略数；按内容去重后的独立策略约 162–169 个。
 
 **为什么停下**：
 
@@ -54,7 +61,8 @@ Lyra 是同一个研究目标（forex / precious metals / crude oil / equity ind
 
 **留下的资产**（nova 继承）：
 - 验证过的 trade 语义（2% stop / next-open / 亏损方优先 / warmup-NULL）。
-- 332 个策略 YAML（全部 in-grammar，可作为 Lyra 的回归集）。
+- 132 个 S 系列策略（Python 库，28 个有矩阵结果；见勘误，非 YAML，
+  已列入 lyra `strategies/temp/moneta_s_series/` 待 0010 归类）。
 - 17 个已注册 feature 的名称和参数。
 - OCI PAR 下载的 `extract_oci.py`（可移植到 Lyra）。
 
@@ -75,12 +83,13 @@ Lyra 是同一个研究目标（forex / precious metals / crude oil / equity ind
 | 3 | Compiler | `compiler.py` + `config.py`（YAML → past-only SQL） |
 | 4 | Trade engine | `trades.py`（2% stop / next-open / 成本） |
 | 5 | Metrics + runner | `metrics.py` + `runner.py` |
-| 6 | Migration | 332 策略 in-grammar 验证通过 |
+| 6 | Migration | 17 手写策略 + 146 campaign 快照 in-grammar 验证通过 |
 | 7 | Polish | `cli.py` + `doctor.py` + `audit.py` |
 
 **做得好的**：
 - 4 个核心组件的语义**和 moneta 一致**，没有漂移。
-- 332 个策略 YAML 在 nova 编译器上 0 失败、0 未注册 feature、0 不支持算子。
+- 332 个 YAML 文件（17 手写策略 + 146 campaign 快照 + 169 runs 其它
+  YAML；见 §1 勘误）在 nova 编译器上 0 失败、0 未注册 feature、0 不支持算子。
 - 测试覆盖因果性 / 时间确认 / long-short 成交价 / 不利 gap / 成本 /
   月度零值 / 数据合约 / 可复现性。
 
@@ -108,7 +117,7 @@ Lyra 是同一个研究目标（forex / precious metals / crude oil / equity ind
 **留下的资产**（lyra 继承）：
 - 验证过的 4 个核心组件的语义（trade 语义、compiler 语法、
   指标口径、数据合约）。
-- 332 个策略 YAML 的 in-grammar 验证结果。
+- 17 手写策略 + 146 campaign 快照的 in-grammar 验证结果（temp/ 待归类）。
 - `extract_oci.py` 的 PAR 下载实现（moneta 的，可移植）。
 - **一份完整的"要 drop 什么"清单**（DECISIONS §7）。
 
@@ -136,7 +145,8 @@ Lyra 是同一个研究目标（forex / precious metals / crude oil / equity ind
    engine** → **0006 Metrics & runner** —— nova 验证过的 4 个核心组件
    语义原样移植；每组件先用 fixture 数据跑通，再接真实 OCI 数据
 4. **0007 OCI push + backup** —— 主功能的另一半
-5. **0008 332 策略迁移 + 回归** → **0009 Polish**
+5. **0008 语料迁移 + 回归（12 方向正式库 + temp/ 门禁）** →
+   **0009 Polish** → **0010 temp/ AI 归类**
 
 **不做**（见 `requirements.md` R9）：
 - 仓位 / 杠杆 / 保证金 / 账户净值 / CAGR / HWM / Sharpe

@@ -1,0 +1,10 @@
+{
+ "id": "trend_continuation_p1_r06",
+ "family": "trend_continuation",
+ "hypothesis": "A24-bar holding cap may limit stale confirmed trends while retaining the original PSAR reversal exit.",
+ "pass_instruments": 8,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/trend_continuation/experiments/02ad9a00b806a7738da6/",
+ "content_sha256_12": "dfdaa4cd9bb1"
+}

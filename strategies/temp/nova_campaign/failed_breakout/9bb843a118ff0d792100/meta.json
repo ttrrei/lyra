@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r05",
+ "family": "failed_breakout",
+ "hypothesis": "Low-efficiency failed breaks may need a full observed day to complete reversion.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/9bb843a118ff0d792100/",
+ "content_sha256_12": "8ca13132eec0"
+}

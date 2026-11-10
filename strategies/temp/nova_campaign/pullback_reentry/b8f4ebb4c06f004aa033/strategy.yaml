@@ -1,0 +1,62 @@
+version: 1
+id: pullback_phase1_r11
+family: pullback_reentry
+hypothesis: Removing the fixed profit cap may preserve rare strong trend resumptions.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+    - feature: ema_alignment_6_24
+      op: eq
+      value: 1
+    - feature: close_ema60_distance_atr
+      op: gt
+      value: 0
+    - within:
+        bars: 12
+        condition:
+          feature: rsi_14
+          op: lt
+          value: 48
+    - held_for:
+        bars: 1
+        condition:
+          feature: rsi_14
+          op: gt
+          value: 50
+  short:
+    all:
+    - feature: ema_alignment_6_24
+      op: eq
+      value: -1
+    - feature: close_ema60_distance_atr
+      op: lt
+      value: 0
+    - within:
+        bars: 12
+        condition:
+          feature: rsi_14
+          op: gt
+          value: 52
+    - held_for:
+        bars: 1
+        condition:
+          feature: rsi_14
+          op: lt
+          value: 50
+exit:
+  stop_loss_pct: 0.02
+  max_holding_bars: 24
+  long:
+    feature: ema_alignment_6_24
+    op: eq
+    value: -1
+  short:
+    feature: ema_alignment_6_24
+    op: eq
+    value: 1
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

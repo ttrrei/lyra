@@ -1,0 +1,10 @@
+{
+ "id": "pullback_phase1_r09",
+ "family": "pullback_reentry",
+ "hypothesis": "Pullback recovery edge may be concentrated in the first twelve observed bars.",
+ "pass_instruments": 2,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/pullback_reentry/experiments/2277789c357befd4452a/",
+ "content_sha256_12": "629be19233a5"
+}

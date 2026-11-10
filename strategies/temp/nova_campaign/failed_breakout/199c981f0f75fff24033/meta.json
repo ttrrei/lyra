@@ -1,0 +1,10 @@
+{
+ "id": "campaign_failed_breakout_p1_r15",
+ "family": "failed_breakout",
+ "hypothesis": "A confirmed failed break may be safer to fade after extreme RSI pressure has eased.",
+ "pass_instruments": 4,
+ "total_instruments": 21,
+ "source_repo": "ttrrei/nova",
+ "source_path": "runs/research_campaign/failed_breakout/experiments/199c981f0f75fff24033/",
+ "content_sha256_12": "ad1b6fd63557"
+}
