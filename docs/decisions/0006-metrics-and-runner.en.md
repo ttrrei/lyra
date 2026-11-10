@@ -6,7 +6,8 @@
 > (`lyra run`, assembling 0004-compiled signals + 0005 per-bar trade engine into a
 > reproducible per-instrument evaluation) + **report & run artifacts** +
 > **reproducibility (I5)** + **O17 per-trade financing counter interface closure**
-> (R4 trading-day compliance NOT closed, see D6 / Batch 1 H1). This feature does
+> (natural-day default **ruled by the user and held** — 5m/1h granularity has no "day"; see
+> D6 / Batch 1 H1). This feature does
 > **not** do the R12 interactive workflow (track/context/compare/merge) — it builds
 > on 0006's run artifacts and gets its own doc (see D1).
 
@@ -23,7 +24,7 @@
 | Related requirements | `docs/requirements.md` §R5 (metrics), §R6/R7 (data + run artifacts) |
 | Related HLD | `docs/hld.md` §1, §6, §8 |
 | Related decisions | 0002 (data contract / snapshot), 0003 (features + snapshot identity / FEATURE_VERSION), 0004 (YAML compiler → signal SQL), 0005 (per-bar trade engine, `trade()`/`simulate()`) |
-| Open items | O17 (financing day-basis): the **per-trade counter interface is closed here** (each trade countable individually); **R4/O15 trading-day compliance is NOT closed** — the natural-day default is a **documented known deviation** (H1 held, see D6 / Open item); O-0005-1 accordingly **partially closed** |
+| Open items | O17 (financing day-basis): the **per-trade counter interface is closed here** (each trade countable individually); the natural-day default is **ruled by the user and held** — 5m/1h granularity has no "day", and FX/index trading-day rules are self-contained bar-timestamp rules needing no trading calendar (H1, see D6 / Open item); O-0005-1 accordingly **partially closed** |
 
 ## 1. Problem
 
@@ -59,8 +60,8 @@ can be judged, and the R12 workflow has no footing. 0006 fills this gap: **`lyra
 - **O17 financing day-basis**: 0003 D10 set "per session_day + calendar days", 0005
   engine already supports the `trading_days` override; 0006 lets the runner count days
   per trade's entry/exit bar time (natural-day default) — **closes the per-trade counter
-  interface capability, but R4 trading-day compliance is NOT closed** (D6, Batch 1 H1
-  correction).
+  interface capability**; the natural-day default is **ruled by the user and held** (5m/1h
+  granularity has no "day"; see D6 / Batch 1 H1).
 - **User stance** (consistent): lightweight, no over-engineering (B6); 0005 established
   "one reusable engine + parallel direction research", 0006 continues that shape.
 
@@ -199,7 +200,7 @@ runs/<name>/<YYYYMMDD>/<run_id>/      # Batch 1 H3: scoped by run_id, never shar
 | Date | Version | Change |
 |---|---|---|
 | 2026-11-08 | 0.1 | Draft: R5 metrics + `lyra run` pipeline + report + run artifacts + reproducibility manifest + O17 financing closure; R12 workflow explicitly moved out (→0007). |
-| 2026-11-10 | 0.2 | **Batch 1 adversarial review disposition** (H2/H3/M1/M2/M3/M4/M5 accepted and landed, H1 held): `run_id` data identity now covers all feature columns consumed by the strategy SQL + counter behavior fingerprint (H2); run dir scoped by `run_id`, zero-trade results still write a zero-row Parquet, manifest hashes all four D8 artifacts (H3/M2); D3 clarified as not true streaming (M1); D6/H1 wording corrected to "interface capability closed, R4 trading-day compliance NOT closed, natural-day default is a documented known deviation"; I5 states `generated_at` is the sole excluded field (M4); test matrix gains 5 Batch 1 regressions. |
+| 2026-11-10 | 0.2 | **Batch 1 adversarial review disposition** (H2/H3/M1/M2/M3/M4/M5 accepted and landed, H1 ruled and held): `run_id` data identity now covers all feature columns consumed by the strategy SQL + counter behavior fingerprint (H2); run dir scoped by `run_id`, zero-trade results still write a zero-row Parquet, manifest hashes all four D8 artifacts (H3/M2); D3 clarified as not true streaming (M1); D6/H1 set to "interface capability closed; natural-day default **ruled by the user and held** — 5m/1h granularity has no 'day', FX/index trading-day rules are self-contained bar-timestamp rules needing no trading calendar"; I5 states `generated_at` is the sole excluded field (M4); test matrix gains 5 Batch 1 regressions. |
 | 2026-11-08 | 0.2 | **Align to R5**: code-phase adversarial self-check found the first-draft D4/I15/B3/H5/§5 test table introduced Sharpe / profit factor (R5 forbids, nova lacks them). Rewrote D4/I15/B3/H5/§5 to the R5 frozen set (`avg_bars_held` + per-month rows + report metadata), added `test_metrics_forbidden_fields_absent`; code was already R5-correct, doc-only correction. |
 
 ---
@@ -257,20 +258,27 @@ slippage/commission/financing_bps}, git_commit, generated_at}`;
 > probe interval) is part of `run_id` (two counters that bill differently → `run_id` must
 > differ).
 
-**D6 (O17 interface closure)**: 0005 engine's `simulate(..., trading_days=None)` **already
-computes per-trade** days from each trade's entry/exit **bar time** (`_day_count`:
-`trading_days=None` → per-trade from timestamps; a `trading_days_for` counter → per-trade
-counter). 0006's runner **defaults to passing `None`** → per-trade **natural-day** financing;
-a `trading_days_for` counter can be injected for per-trade trading-day counting (the flat
-`--financing-days` override was **removed**, 0004 C2).
-> **Batch 1 H1 (wording corrected, IMPORTANT)**: the earlier phrasing "O17 closed here / R4
-> compliant" was **inaccurate** — O17 closes the **per-trade counter interface capability**,
-> but **R4/O15 require financing counted on trading days** (weekends and market holidays
-> excluded), which the natural-day default does **not** satisfy (holding across a weekend
-> over-counts financing). Correct statement: **the interface capability is closed** (each trade
-> counted individually, `trading_days_for` in place), but **trading-day compliance is not
-> closed**; the natural-day default is a **documented known deviation** pending a real trading
-> calendar or a user decision (H1 held).
+**D6 (O17 financing day-basis — interface capability closed; natural-day default ruled, held)**:
+0005 engine's `simulate(..., trading_days_for=None)` **already computes per-trade** days from
+each trade's entry/exit **bar time** (`_day_count`: `trading_days_for=None` → per-trade from
+timestamps; a `trading_days_for` counter → per-trade counter). 0006's runner **defaults to
+passing `None`** → per-trade **natural-day** financing; a `trading_days_for` counter can be
+injected for per-trade trading-day counting (the flat `--financing-days` override was
+**removed**, 0004 C2).
+> **Batch 1 H1 (ruled, held; 2026-11-10 user ruling)**: the earlier phrasing "O17 closed here
+> / R4 compliant" was inaccurate — O17 closes the **per-trade counter interface capability**,
+> while **R4/O15 literally require financing on trading days** (weekends/holidays excluded),
+> which the natural-day default does not literally satisfy (a weekend-spanning hold over-counts
+> financing). **The user ruled this is NOT a problem and held it as a decided item**: (1) all
+> current research is **5m/1h jobs** — financing is counted per-trade from entry/exit
+> timestamps with **no day-level aggregation at all**, so natural-day vs trading-day has no
+> observable effect at that granularity; (2) if a trading day is ever needed it does **not
+> require a trading calendar** — **FX anchors on the week's first open and counts every 24h as
+> one day** (continuous market); **indices/cash count the open→close interval as one day**;
+> both are **self-contained rules on bar timestamps**, ready to be implemented as concrete
+> `trading_days_for` values non-invasively later. The natural-day default is kept unchanged
+> (preserves the nova field-for-field cross-check baseline); the item is **held** — revisit when
+> research reaches day-level financing granularity, then land the FX/index rules above.
 
 **D7 (report)**: `report.md` + `metrics.json`: per-instrument metric table + cross-instrument
 summary (min/median/max of each metric, **not synthesis**) + run metadata (manifest
@@ -288,16 +296,23 @@ Local mirror in `~/.lyra/<workspace>/runs/` (B13: out of repo) or repo `runs/` (
 > checksum only proves a file is uncorrupted; directory isolation proves the file **belongs**
 > to that `run_id`'s manifest.
 
-**Open item (H1)**: the financing day-basis is currently **natural days** (0005
-`_day_count`, with `trading_days_for=None` counting per-trade entry/exit timestamps) —
-**the interface capability is closed, but R4 trading-day compliance is not** (see D6 Batch 1
-H1 correction). Wiring a **versioned real trading calendar** (count actual trading days,
-exclude weekends/holidays) requires fail-closed behavior when financing rate is non-zero, or
-an explicit user ruling to adopt natural days and revise R4/O15 accordingly — this is a
-**follow-up enhancement / user decision item**, not a defect; 0006 uses per-trade **natural
-days** as the current default definition (documented known deviation, see D6 H1). The
-`simulate(trading_days_for=...)` counter entry is already in place in 0005, allowing a
-non-invasive switch to a real trading calendar.
+**Open item (H1) — decided, held, revisit later (2026-11-10 user ruling)**: the financing
+day-basis is currently **natural days** (0005 `_day_count`, with `trading_days_for=None`
+counting per-trade entry/exit timestamps). **The user ruled this is not a problem and held it
+as a decided item**, on these grounds: (1) **granularity does not reach "day"** — all current
+research is **5m/1h jobs**, financing is counted per-trade from entry/exit timestamps with
+**no day-level aggregation**, so natural-day vs trading-day has no observable effect there;
+(2) **if a trading day is ever needed, no trading calendar is required** (user's wording):
+- **FX**: anchor on the week's first open, **count every 24 hours as one day** (continuous
+  market, no holiday table needed);
+- **indices/cash**: count the day's **open → close** interval as one day;
+- both are **self-contained rules on bar timestamps**, independent of any external trading
+  calendar data source.
+Conclusion: the `simulate(trading_days_for=...)` counter entry is already in place (0005); the
+two rules above become the **concrete implementation** of `trading_days_for` later, wired in
+non-invasively. The natural-day default is kept unchanged. The item is **held** — revisit when
+5m/1h research advances to needing day-level financing granularity, then land the FX/index
+rules; it is not expanded in this round.
 
 ## Appendix B: Self-check
 
