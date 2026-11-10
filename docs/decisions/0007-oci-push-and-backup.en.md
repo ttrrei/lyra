@@ -203,12 +203,15 @@ gate 0007 introduces (all other commands are read-only/derivation/organization, 
 gates).
 
 **D7 (canonical OCI runs path — O2 ruling)**: OCI runs are always
-`runs/<direction>/<track_id>/<run_id>/`. `push` resolution: direction from the strategy
-folder (`strategies/<direction>/vNN.yaml`); track_id from the run manifest's recorded track
-(0006's run manifest already contains direction/track provenance, D5). 0006's **local
-workspace** layout `runs/<name>/<YYYYMMDD>/<run_id>/` is unchanged (staging area); `push`
-maps it to the canonical OCI path. **Local and OCI layouts need not match** (local is the
-workspace, OCI is the canonical archive).
+`runs/<direction>/<track_id>/<run_id>/`. `push` resolution: **direction** from the strategy
+folder (`strategies/<direction>/vNN.yaml`; 0006's manifest already carries a `direction`
+field that can be reused directly); **track_id** is the research identity introduced by
+0007, supplied by `push --track` (or that track's track manifest) and recorded into the
+archive path — 0006's manifest does **not** contain `track_id` (0006 has no track concept,
+which is correct). 0006's **local workspace** layout `runs/<name>/<YYYYMMDD>/<run_id>/` is
+unchanged (staging area); `push` maps it to the canonical OCI path (injecting `--track` into
+the archive path). **Local and OCI layouts need not match** (local is the workspace, OCI is
+the canonical archive).
 
 **D8 (compare / synthesize are read-only, no auto-write-back — R12)**: `compare --siblings`
 and `synthesize` only **read** 0006 artifacts and emit a **read-only evidence table/report**;
@@ -216,6 +219,10 @@ they **never** auto-write back to lessons, candidates, or cross-track promotion.
 only **adds** a candidate branch (`vNN.yaml`, writing `inherited`/`driven_by_lesson`) and
 **does not modify** the source branch. Cross-track synthesis reports land in `reviews/`,
 stored independently.
+> **Reuse point**: 0004's `strategy_schema.py` already implements the three provenance
+> fields `parents`/`driven_by_lesson`/`inherited` (retained, never compiled into SQL);
+> `new-version --branch` derivation and `merge` provenance **reuse** these directly — 0007
+> needs no schema extension.
 
 **D9 (fail-closed first)**: the following all **error rather than silently** proceed — push
 target not configured (D4); I17 classification fails (D2); immutable conflict without
@@ -323,6 +330,7 @@ field-for-field (R5 frozen set).
 | Date | Version | Change |
 |---|---|---|
 | 2026-11-10 | 0.1 | Draft: scope ruling (OCI sync + full R12 workflow, user 2026-11-10); D1–D10; invariants I18/I21/I22; test matrix; O2 runs layout takes `runs/<direction>/<track_id>/<run_id>`, O15 `backup`/`sync` alias; R10/R11/R12 held items — the OCI/workflow portions are taken here, 332 stays in 0008. |
+| 2026-11-10 | 0.2 | Self-check + adversarial verification (#93) fixed 3 items: ① D7 corrected — `track_id` is a 0007 construct, injected into the OCI archive path by `push --track`; 0006 manifest carries `direction` (reusable) but **not** `track_id`; ② B5/C1 PAR-PUT wording refined — depends on **mount mode** (read-only: no PUT; read/write: PUT via `shutil.copy2`), not "PAR is necessarily read-only"; ③ D8 added the reuse point that 0004's `strategy_schema.py` already implements `parents`/`driven_by_lesson`/`inherited`. No blocking design issue; 27-row test matrix verified; ready for implementation. |
 
 ---
 
@@ -367,18 +375,19 @@ out (§3.2) ✓.
 
 **B5 to confirm at implementation time (not design defects; listed as implementation
 check-items)**:
-- Does the 0006 run manifest already record `direction` + `track_id`? If the 0006 manifest
-  lacks direction (0006 uses `<name>` as the primary key), at implementation the push side
-  fills direction from the strategy folder and resolves track from `--track`/track manifest
-  (D7 leaves this exit), **not requiring** a change to 0006.
+- The 0006 run manifest already records `direction` (runner.py L631); **`track_id` is not
+  in the 0006 manifest** (0006 has no track concept — correct). At implementation, `push`
+  resolves `--track` from the CLI arg or track manifest and injects it into the OCI archive
+  path (D7 leaves this exit), **not requiring** a change to 0006.
 - The concrete granularity of the `append-only superset` check (line-level vs paragraph-level
   vs content-hash prefix) is decided at implementation time (D2 only fixes the "new ⊇ old"
   semantics).
-- Whether PAR PUT is supported by OCI (PAR is traditionally read-only) — confirm the
-  transport at implementation time; if PAR does not support PUT, the push side uses the OCI
-  SDK (`config.auth_file`); D3/D4 already leave the SDK exit. **This is the largest
-  uncertainty for 0007's implementation** (the pull side in 0002 using PAR read-only holds,
-  but push needs write permission).
+- PAR PUT availability depends on **mount mode**: read-only PAR does not support PUT;
+  read/write PAR does (via `shutil.copy2`, no new dependency). The first implementation
+  step is to verify the target bucket can be mounted read/write; if only read-only is
+  available, the push side uses the OCI SDK (`config.auth_file`). D3/D4 already leave the
+  SDK exit. **This is the largest uncertainty for 0007's implementation** (the pull side in
+  0002 using PAR read-only holds; push needs write permission).
 
 **Self-check conclusion**: scope/contract/boundary/invariants all checked and passed; 4
 self-check findings (G1–G4) are handled in the D decisions in the body; 3 implementation-time

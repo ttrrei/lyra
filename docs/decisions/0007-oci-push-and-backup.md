@@ -177,17 +177,22 @@ active 分支时，计数**该 track**（非方向全局）的 active branches�
 组织，不加门禁）。
 
 **D7（runs 规范 OCI 路径——O2 裁决）**：OCI 上 runs 一律
-`runs/<direction>/<track_id>/<run_id>/`。`push` 解析：direction 来自策略文件夹
-（`strategies/<direction>/vNN.yaml`）；track_id 来自该 run manifest 记录的 track
-（0006 run manifest 已含 direction/track provenance，D5）。0006 的**本地工作区**
-布局 `runs/<name>/<YYYYMMDD>/<run_id>/` 保持不变（暂存区），`push` 负责映射到规范
-OCI 路径。**本地与 OCI 布局不必相同**（本地是工作区，OCI 是规范归档）。
+`runs/<direction>/<track_id>/<run_id>/`。`push` 解析：**direction** 来自策略文件夹
+（`strategies/<direction>/vNN.yaml`，0006 manifest 已含 `direction` 字段可直接复用）；
+**track_id** 是 0007 引入的研究身份，由 `push` 的 `--track` 参数（或该 track 的 track
+manifest）指定并写入——0006 manifest **不含** track_id（0006 无 track 概念，正确）。
+0006 的**本地工作区**布局 `runs/<name>/<YYYYMMDD>/<run_id>/` 保持不变（暂存区），
+`push` 负责映射到规范 OCI 路径（把 `--track` 注入归档路径）。**本地与 OCI 布局不必
+相同**（本地是工作区，OCI 是规范归档）。
 
 **D8（compare / synthesize 只读，不自动回写——R12）**：`compare --siblings` 与
 `synchronize/synthesize` 只**读** 0006 产物并输出**只读证据表/报告**；**绝不**自动
 写回 lessons、候选或跨轨道晋升。`merge` 只**新增**候选分支（`vNN.yaml`，写
 `inherited`/`driven_by_lesson`），**不改**源分支。跨轨道综合报告落 `reviews/`，
 独立保存。
+> **复用点**：0004 `strategy_schema.py` 已实现 `parents`/`driven_by_lesson`/`inherited`
+> 三个 provenance 字段（保留、不编译进 SQL），`new-version --branch` 派生与 `merge`
+> 溯源**直接复用**这些字段，0007 无需扩展 schema。
 
 **D9（fail-closed 优先）**：以下一律**报错而非静默**——push 目标未配置（D4）；
 I17 分类失败（D2）；immutable 冲突无 `--force-push`（D2）；append-only 非超集
@@ -288,6 +293,7 @@ git、不联网（除 OCI）。
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-11-10 | 0.1 | 初稿：范围裁决（OCI 同步 + R12 工作流全套，用户 2026-11-10）；D1–D10；不变量 I18/I21/I22；测试矩阵；O2 runs 布局取 `runs/<direction>/<track_id>/<run_id>`、O15 `backup`/`sync` 别名；R10/R11/R12 挂起项中 OCI/工作流部分承接，332 归 0008。 |
+| 2026-11-10 | 0.2 | 自检+对抗性核验（#93）修正 3 处：① D7 纠偏——track_id 为 0007 引入、由 `push --track` 注入 OCI 归档路径，0006 manifest 含 `direction`（可复用）但**无** `track_id`；② B5/C1 PAR-PUT 措辞精确化——取决于**挂载模式**（只读不支持、读写支持，`shutil.copy2` 即可），非"PAR 必然只读"；③ D8 补 0004 `strategy_schema.py` 已实现 `parents`/`driven_by_lesson`/`inherited` 的复用点。无阻塞设计问题，27 行测试矩阵实测通过，进入实现。 |
 
 ---
 
@@ -329,9 +335,10 @@ doctor 明确移出（§3.2）✓。
   track 从 `--track`/track manifest 解析（D7 已留此出口），**不要求**改 0006。
 - `append-only 超集`校验的具体粒度（行级 vs 段级 vs 内容哈希前缀）在实现期定
   （D2 只定"新 ⊇ 旧"的语义）。
-- PAR PUT 是否被 OCI 支持（PAR 传统上只读）——实现期确认传输方式；若 PAR 不支持
-  PUT，则 push 侧走 OCI SDK（`config.auth_file`），D3/D4 已留 SDK 出口。**这是
-  0007 实现期的最大不确定点**（拉取侧 0002 用 PAR 只读是成立的，但 push 需要写权限）。
+- PAR PUT 是否可用取决于**挂载模式**：**只读** PAR 不支持 PUT；**读写** PAR 支持
+  PUT（`shutil.copy2` 即可，无新依赖）。实现期第一步确认可否以读写 PAR 挂载目标桶；
+  只读时 push 侧走 OCI SDK（`config.auth_file`），D3/D4 已留 SDK 出口。**这是
+  0007 实现期的最大不确定点**（拉取侧 0002 用只读 PAR 成立，push 需要写权限）。
 
 **自检结论**：范围/契约/边界/不变量全对照通过；4 个自检发现（G1–G4）已在正文
 D 决策处置；3 个实现期检查项（B5）非设计缺陷。无阻塞设计问题。
