@@ -23,7 +23,7 @@
 |---|---|
 | ID | 0007 |
 | Title | OCI bidirectional sync (push/backup/list) + R12 interactive workflow (tracks/context/new-version/compare/merge) |
-| Status | proposal |
+| Status | **Implemented (code review passed; R10 real-OCI-bucket acceptance pending)** |
 | Owner | `ttrrei` |
 | Created | 2026-11-10 |
 | Related proposals | `docs/proposals/2026-11-08-vectorbt-multi-ai-consolidated.md` (tracks landing path §9), `docs/proposals/oci-alpha-layout.md` (OCI layout + B9/I17) |
@@ -186,6 +186,11 @@ sha256, stronger than md5); if PAR only provides md5, fall back to md5 (consiste
 targets (reserved by 0002); `auth_file` (`~/.lyra/credentials`) optional. **Credentials
 never in git** (R7 / config_example comment); `push` with no push target configured →
 **error** (not silently skipped, no local placeholder written).
+> **Batch-2/M3 current state:** `auth_file` / OCI SDK auth is **not yet implemented** —
+> the currently supported behavior = credential-free PAR read/write + a `requests.Session`
+> (`cli._push_transport`). Against a read-only PAR, push fails with a clear error rather
+> than a silent no-op; the SDK auth fallback is to be added and verified under **R10 real-OCI-bucket**
+> access (a batch-2 held item).
 
 **D5 (track is a research identity, does not change machine gates — R12/consolidated)**:
 `track_id` is only for **isolation** (each track owns context/lessons/candidates/run
@@ -236,6 +241,10 @@ effects** (R9): dry-run only reports, does not upload; no command writes git or 
 primary name, `sync` as the alias, the two equivalent). `list` is read-only. `push`
 supports `--dry-run` (first validate under D2 two-tier rules and report "will upload / will
 skip / will conflict", without actually uploading).
+> **Batch-2/M2 semantics ruling:** `backup`/`sync`/`push` are all **push-only**
+> (local→OCI), matching the implementation; HLD §2.5's early "pull+push" wording was synced to
+> push-only in the 0.5 round. backup additionally covers the default `~/.lyra/runs` (H9),
+> coexisting with `push-runs`' canonical 4-level mapping in a conflict-safe way.
 
 ## 4. Invariants
 
@@ -333,6 +342,7 @@ field-for-field (R5 frozen set).
 | 2026-11-10 | 0.2 | Self-check + adversarial verification (#93) fixed 3 items: ① D7 corrected — `track_id` is a 0007 construct, injected into the OCI archive path by `push --track`; 0006 manifest carries `direction` (reusable) but **not** `track_id`; ② B5/C1 PAR-PUT wording refined — depends on **mount mode** (read-only: no PUT; read/write: PUT via `shutil.copy2`), not "PAR is necessarily read-only"; ③ D8 added the reuse point that 0004's `strategy_schema.py` already implements `parents`/`driven_by_lesson`/`inherited`. No blocking design issue; 27-row test matrix verified; ready for implementation. |
 | 2026-11-10 | 0.3 | **Implemented** (#94): added `lyra/oci_push.py` (I17 classifier / plan / dry-run / force-push promotes immutable conflicts / append-only **line-subsequence** preservation / unclassified fail-closed / I19 redaction / D4 no-target error / out-of-scope top-level skip / top-level filter) + `lyra/workflow.py` (tracks baseline freeze / per-track 8-active cap `MAX_ACTIVE_BRANCHES_PER_TRACK` — the only machine gate / prune / new-version reusing 0004 `parent`+`parents`+`driven_by_lesson` / context track isolation + 0006 metrics summary / compare read-only / merge adds candidate only with parent sha256 provenance (C6) / synthesize writes `reviews/` only); CLI added 12 commands (push/backup/sync/list/push-strategy/push-direction/push-runs/tracks/context/new-version/compare/merge/synthesize); `tests/test_oci_push.py` (36) + `tests/test_workflow.py` (20) green, full suite 228→283, pyflakes clean. Implementation confirmations: C1 landed (`push` requires transport `.put`; CLI exposes get+put via requests.Session); C2 landed (append-only = ordered line-subsequence, reorder rejected, `test_superset_reorder_rejected`); C6 landed (merge records `# parent_sha256` per parent); D7 landed (`push-runs <direction> <run> --track` maps local `runs/<name>/<date>/<run_id>/` to canonical `runs/<direction>/<track_id>/<run_id>/`, direction cross-checked against the 0006 manifest, `test_push_runs_maps_to_direction_track_runid`). Backup scope = strategies+runs+alpha (raw `data/` not re-pushed, one-shot R7). |
 | 2026-11-10 | 0.4 | **Self-check + adversarial verification fixed two real bugs** (independent audit of the 0.3 implementation): ① **I20 idempotent skips broken on real PAR listings** — real OCI PAR listings carry only `name,size,md5(base64),timeModified` (see `oci_client._LIST_FIELDS`), **no sha256**, while the old `plan_push` compared a remote md5 to a local sha256 (different digests → never equal), so every unchanged file misfired `immutable-sha-conflict` and I20 skips never happened; the `FakeParRW` test transport invented a `sha256` field and masked it. Fix: new `_same_object` — sha256 direct (compat) / md5↔md5 (via `oci_client._md5_matches`, base64+hex tolerant) / size fallback; also fixed force-push `size=0`. ② **`new-version`/`merge` output files classified unclassified (self-contradiction)** — 0.3 relaxed branch names to arbitrary slugs (`b0`/`foo`), but the I17 D2 classifier only treats `strategies/**/vNN.yaml` as immutable, so a branch the tool itself produced (`b0.yaml`) was refused by `lyra push`. Fix: `_BRANCH_NAME_RE` tightened to `^v\d+$`; `merge` defaults to the next free `vNN` (no more `merge-vNN-vNN`). 4 new regression tests (2 realistic md5 listings + 2 vNN self-consistency). 287 green, pyflakes clean. |
+| 2026-11-10 | 0.5 | **Batch-2 adversarial review disposition** (`docs/reviews/对抗性review-2026-11-10-批次2.md` disposition record): 14 findings → **13 accepted / 1 held (M3) / 0 rejected**. Key fixes: ① **H1** push-strategy/push-direction silent no-op → stage a direction slice into canonical `strategies/<direction>/...` (`push-direction` also folds in its `runs/` slice), then push through the I17 classifier; ② **H2** size-equality skip without digest → removed the size fallback; when neither side has a verifiable digest it fails closed as a conflict (#89 R1); ③ **H3** PAR path-token leak → `redact_par_url` keeps only `scheme://host`; new `redact_in_message` scrubs exception text; ④ **H4** path escape / symlink upload → new `validate_ident` (direction/track/run_id single-component) + `plan_push` rejects symlinks and paths escaping the local root; ⑤ **H5** sibling/cross branch naming → `^v\d+[a-z]*$` (`v02a/v04ab`) unified across workflow and the I17 classifier; ⑥ **H6** context not self-contained / cross-track lessons bleed → `render_context` rewritten (full hypothesis+hash, feature listing, full YAML of each active branch, per-instrument run metrics); per-track lessons move to `tracks/<direction>/<track>.lessons.md`; ⑦ **H7** sibling run cross-talk / one instrument only → strict branch-identity match + keep all per_instrument; ⑧ **H8** push-runs unverified archive → validate `manifest.artifacts` presence + sha256 before upload, reject files outside the manifest, write a `run_provenance.json` sidecar; ⑨ **H9** backup misses default runs → `_push_all_roots` adds a second pass over `~/.lyra/runs` (conflict-safe); ⑩ **H10** mutable track index can't pass append-only → index is now a JSONL event log (create/activate/prune), a verbatim line-superset by construction; ⑪ **M1** frozen baseline uses the real `catalog.duckdb`; ⑫ **M2** backup defined as push-only and HLD §2.5 / 0007 wording synced; ⑬ **M4** within a run `manifest.json` is published last, and the docs no longer describe per-object PUT as a transaction. **M3 (SDK auth fallback) held**: it needs R10 real-bucket access to verify; the docs now state "currently supported = credential-free PAR read/write via a requests session; auth_file not implemented, pending R10." Full suite **302 green**, pyflakes clean. R10 real-OCI-bucket end-to-end read/write acceptance is still **not executed**; this turn is not 0007 final sign-off. |
 
 ---
 

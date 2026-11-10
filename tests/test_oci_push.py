@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import hashlib
 
 import pytest
@@ -338,7 +339,6 @@ def test_sha256_of_file_roundtrip(tmp_path):
 def test_push_runs_maps_to_direction_track_runid(tmp_path, monkeypatch):
     """`push-runs` maps the local 0006 layout `runs/<name>/<date>/<run_id>/`
     to the canonical OCI path `runs/<direction>/<track_id>/<run_id>/` (D7/O2)."""
-    import json as _json
 
     from typer.testing import CliRunner
 
@@ -349,14 +349,20 @@ def test_push_runs_maps_to_direction_track_runid(tmp_path, monkeypatch):
     run_id = "abcdef1234567890"
     run_dir = ws / "runs" / "myrun" / "20261110" / run_id
     run_dir.mkdir(parents=True)
+    import hashlib as _hashlib
+
+    metrics_bytes = b"{}"
     manifest = {
         "run_id": run_id,
         "direction": "fx-trend",
         "spec_id": "b0",
-        "artifacts": {},
+        "artifacts": {
+            "metrics.json": _hashlib.sha256(metrics_bytes).hexdigest(),
+            "trades.parquet": _hashlib.sha256(b"PAR1").hexdigest(),
+        },
     }
-    (run_dir / "manifest.json").write_text(_json.dumps(manifest), encoding="utf-8")
-    (run_dir / "metrics.json").write_text("{}", encoding="utf-8")
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (run_dir / "metrics.json").write_bytes(metrics_bytes)
     (run_dir / "trades.parquet").write_bytes(b"PAR1")
 
     cfg = tmp_path / "cfg.yml"
@@ -383,12 +389,11 @@ def test_push_runs_maps_to_direction_track_runid(tmp_path, monkeypatch):
     # canonical OCI path (0007 D7): runs/<direction>/<track_id>/<run_id>/
     rel = f"runs/fx-trend/alpha/{run_id}/manifest.json"
     assert rel in rec.objects, f"expected {rel} in {sorted(rec.objects)}"
-    assert rec.objects[rel] == _json.dumps(manifest).encode()
+    assert rec.objects[rel] == json.dumps(manifest).encode()
     assert f"runs/fx-trend/alpha/{run_id}/trades.parquet" in rec.objects
 
 
 def test_push_runs_direction_mismatch_fails(tmp_path, monkeypatch):
-    import json as _json
 
     from typer.testing import CliRunner
 
@@ -399,7 +404,7 @@ def test_push_runs_direction_mismatch_fails(tmp_path, monkeypatch):
     run_dir = ws / "runs" / "myrun" / "20261110" / run_id
     run_dir.mkdir(parents=True)
     (run_dir / "manifest.json").write_text(
-        _json.dumps({"run_id": run_id, "direction": "other-dir"}), encoding="utf-8"
+        json.dumps({"run_id": run_id, "direction": "other-dir"}), encoding="utf-8"
     )
     cfg = tmp_path / "cfg.yml"
     cfg.write_text(
@@ -454,3 +459,274 @@ def test_top_levels_filter_excludes_data(tmp_path):
     res2 = _push(t2, tmp_path, PREFIX)
     assert "data/market/x.parquet" in t2.objects
     assert res2.uploaded_bytes > res.uploaded_bytes
+
+
+# ---------------------------------------------------------------------------
+# 批次2 (adversarial review 2026-11-10) regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_h5_sibling_suffix_branches_classify_immutable():
+    """批次2-H5: sibling-suffix naming (v02a / v04ab per requirements.md)
+    must classify immutable, not unclassified."""
+    from lyra import oci_push
+
+    assert oci_push.classify_path("strategies/fx-trend/v02a.yaml") == "immutable"
+    assert oci_push.classify_path("strategies/fx-trend/v04ab.yaml") == "immutable"
+    assert oci_push.classify_path("strategies/fx-trend/v01.yaml") == "immutable"
+    # non-branch files stay unclassified
+    assert oci_push.classify_path("strategies/fx-trend/b0.yaml") == "unclassified"
+
+
+def test_h2_size_equality_alone_does_not_skip(tmp_path):
+    """批次2-H2 (#89 R1): size equality without a verifiable digest is NOT
+    proof of identity — the plan must not skip on size alone."""
+    from lyra.oci_push import _same_object
+
+    p = tmp_path / "x.yaml"
+    p.write_bytes(b"AAAA")
+    # same size, but listing carries no sha256 and no md5 → NOT same
+    assert _same_object(p, {"size": 4}) is False
+    # no meta at all → not same
+    assert _same_object(p, None) is False
+    # matching sha256 → same
+    assert _same_object(p, {"sha256": sha256(b"AAAA")}) is True
+    # different sha256 → not same
+    assert _same_object(p, {"sha256": sha256(b"BBBB")}) is False
+
+
+def test_h4_symlinks_and_escape_are_rejected(tmp_path):
+    """批次2-H4: a symlink or a path resolving outside the local root must be
+    a conflict, never uploaded."""
+    import os
+
+    from lyra.oci_push import plan_push
+
+    # a real file outside the root
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("secret", encoding="utf-8")
+
+    root = tmp_path / "local"
+    root.mkdir()
+    # in-scope real file (control)
+    (root / "strategies").mkdir()
+    (root / "strategies" / "d1").mkdir()
+    (root / "strategies" / "d1" / "lessons.md").write_bytes(b"ok\n")
+    # a symlink pointing outside the local root, inside a scoped dir
+    link = root / "strategies" / "d1" / "v99.yaml"
+    os.symlink(outside, link)
+
+    t = FakeParRW(objects={})
+    plan = plan_push(t, root, PREFIX, {})
+    assert "strategies/d1/lessons.md" in [u.rel_path for u in plan.uploads]
+    conflicted = [c.rel_path for c in plan.conflicts]
+    assert "strategies/d1/v99.yaml" in conflicted, f"expected symlink conflict, got {conflicted}"
+
+
+def test_h10jsonl_track_index_is_append_only(tmp_path):
+    """批次2-H10: the track index is now a JSONL event log; pushing it after a
+    fork must be an append-only *superset* (new lines appended), not a
+    rejected rewrite."""
+    from lyra import oci_push
+
+    seed_local(tmp_path, {
+        "strategies/d1/index/talpha.jsonl":
+            b'{"op": "create_track", "active": []}\n'
+            b'{"op": "activate", "branch": "v02", "at": "t1"}\n',
+    })
+    # classify: index JSONL is append_only
+    assert oci_push.classify_path("strategies/d1/index/talpha.jsonl") == "append_only"
+
+    t = FakeParRW(objects={})
+    push(t, tmp_path, PREFIX)
+    assert "strategies/d1/index/talpha.jsonl" in t.objects
+
+    # now append a second event (a fork) — must still be a superset → pushable
+    idx = tmp_path / "strategies" / "d1" / "index" / "talpha.jsonl"
+    idx.write_bytes(
+        idx.read_bytes() + b'{"op": "activate", "branch": "v03", "at": "t2"}\n'
+    )
+    t2 = FakeParRW(objects=dict(t.objects))
+    res = push(t2, tmp_path, PREFIX)
+    assert "strategies/d1/index/talpha.jsonl" in res.uploads
+
+
+
+def test_h8_push_runs_rejects_tampered_artifact(tmp_path, monkeypatch):
+    """批次2-H8: a manifest whose artifact sha no longer matches the on-disk
+    file must be REFUSED, not pushed."""
+    import hashlib as _hashlib
+
+    from typer.testing import CliRunner
+
+    from lyra import cli
+
+    ws = tmp_path / "ws"
+    run_id = "abcd1234abcd1234"
+    run_dir = ws / "runs" / "myrun" / "20261110" / run_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "metrics.json").write_bytes(b"{}")
+    (run_dir / "trades.parquet").write_bytes(b"PAR1")
+    manifest = {
+        "run_id": run_id, "direction": "fx-trend", "spec_id": "b0",
+        "artifacts": {
+            "metrics.json": _hashlib.sha256(b"{}").hexdigest(),
+            # WRONG hash: pretend trades.parquet is something else
+            "trades.parquet": _hashlib.sha256(b"TAMPERED").hexdigest(),
+        },
+    }
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"oci:\n  data_par_url: {PREFIX}\n  strategies_par_url: {PREFIX}\n"
+        "local:\n  workspace: ws\n  data: data\n", encoding="utf-8")
+    rec = FakeParRW(objects={})
+    monkeypatch.setattr(cli, "_push_transport", lambda: rec)
+    out = CliRunner().invoke(
+        cli.app,
+        ["push-runs", "fx-trend", "myrun", "--track", "alpha",
+         "--config", str(cfg), "--runs-root", str(ws / "runs")],
+    )
+    assert out.exit_code != 0, "tampered artifact must be refused"
+    assert "sha256 mismatch" in out.output
+    # nothing was uploaded
+    assert "runs/fx-trend/alpha/%s/trades.parquet" % run_id not in rec.objects
+
+
+def test_h8_push_runs_rejects_unexpected_extra_file(tmp_path, monkeypatch):
+    """批次2-H8: files in the run dir that are NOT manifest-listed are refused."""
+    import hashlib as _hashlib
+
+    from typer.testing import CliRunner
+
+    from lyra import cli
+
+    ws = tmp_path / "ws"
+    run_id = "ef01ef01ef01ef01"
+    run_dir = ws / "runs" / "myrun" / "20261110" / run_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "metrics.json").write_bytes(b"{}")
+    manifest = {
+        "run_id": run_id, "direction": "fx-trend",
+        "artifacts": {"metrics.json": _hashlib.sha256(b"{}").hexdigest()},
+    }
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (run_dir / "rogue.txt").write_bytes(b"secret")  # not in manifest
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"oci:\n  data_par_url: {PREFIX}\n  strategies_par_url: {PREFIX}\n"
+        "local:\n  workspace: ws\n  data: data\n", encoding="utf-8")
+    rec = FakeParRW(objects={})
+    monkeypatch.setattr(cli, "_push_transport", lambda: rec)
+    out = CliRunner().invoke(
+        cli.app,
+        ["push-runs", "fx-trend", "myrun", "--track", "alpha",
+         "--config", str(cfg), "--runs-root", str(ws / "runs")],
+    )
+    assert out.exit_code != 0
+    assert "unexpected files" in out.output
+
+
+def test_h1_push_strategy_actually_uploads(tmp_path, monkeypatch):
+    """批次2-H1: `push-strategy <direction>` must actually upload the
+    direction's strategy files. The pre-fix version planned from a
+    strategies/ root, so rel paths were `fx/...` and the I17 scope filter
+    silently dropped everything — the command printed success and pushed
+    nothing."""
+
+    from typer.testing import CliRunner
+
+    from lyra import cli
+
+    # workspace with a direction's strategy slice. The "workspace root" the
+    # push command uses is `resolve_data_root(...)` itself; strategies/ is a
+    # sibling of data/ *inside* it (B13 co-located layout: <root>/strategies,
+    # <root>/data).
+    ws = tmp_path / "ws"
+    (ws / "data").mkdir(parents=True)
+    d = ws / "strategies" / "fx-trend"
+    d.mkdir(parents=True)
+    (d / "v01.yaml").write_text("id: base\n", encoding="utf-8")
+    (d / "lessons.md").write_text("L1\n", encoding="utf-8")
+
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"oci:\n  data_par_url: {PREFIX}\n  strategies_par_url: {PREFIX}\n"
+        "local:\n  workspace: ws\n  data: data\n", encoding="utf-8")
+    # pin the data root under tmp so the workspace root is ws/ (not ~/)
+    monkeypatch.setenv("LYRA_DATA_ROOT", str(ws))
+    rec = FakeParRW(objects={})
+    monkeypatch.setattr(cli, "_push_transport", lambda: rec)
+    out = CliRunner().invoke(
+        cli.app,
+        ["push-strategy", "fx-trend", "--config", str(cfg)],
+    )
+    assert out.exit_code == 0, out.output
+    # the direction's files must now be on the fake bucket
+    assert "strategies/fx-trend/v01.yaml" in rec.objects
+    assert "strategies/fx-trend/lessons.md" in rec.objects
+
+
+def test_h9_push_covers_default_runs_root(tmp_path, monkeypatch):
+    """批次2-H9: the default ``~/.lyra/runs`` (``lyra run`` output root, NOT
+    under the workspace root) must be included by ``push``/``backup``."""
+    from typer.testing import CliRunner
+
+    from lyra import cli
+
+    # Real B13 layout: data root = <home>/.lyra/<ws>/<data>, so the
+    # workspace root is <home>/.lyra/<ws>; the default runs root is the
+    # SIBLING <home>/.lyra/runs (NOT under the workspace root).
+    home = tmp_path / "home"
+    data_root = home / ".lyra" / "myws" / "data"
+    data_root.mkdir(parents=True)
+    (data_root.parent / "strategies").mkdir(parents=True)
+    monkeypatch.setenv("LYRA_DATA_ROOT", str(data_root))
+
+    default_runs = home / ".lyra" / "runs"
+    run_dir = default_runs / "myrun" / "20261110" / "abcabcabcabc"
+    run_dir.mkdir(parents=True)
+    (run_dir / "metrics.json").write_bytes(b"{}")
+    monkeypatch.setenv("LYRA_RUNS_ROOT", str(default_runs))
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"oci:\n  data_par_url: {PREFIX}\n  strategies_par_url: {PREFIX}\n"
+        "local:\n  workspace: ws\n  data: data\n", encoding="utf-8")
+    rec = FakeParRW(objects={})
+    monkeypatch.setattr(cli, "_push_transport", lambda: rec)
+    out = CliRunner().invoke(cli.app, ["push", "--config", str(cfg)])
+    assert out.exit_code == 0, out.output
+    assert "runs/myrun/20261110/abcabcabcabc/metrics.json" in rec.objects
+
+
+def test_h9_default_runs_does_not_conflict_with_canonical(tmp_path, monkeypatch):
+    """批次2-H9 (conflict-safety): a run already present on the remote at the
+    same rel path must be skipped by the default-runs pass, not raised as an
+    immutable-sha conflict."""
+    from typer.testing import CliRunner
+
+    from lyra import cli
+
+    home = tmp_path / "home"
+    data_root = home / ".lyra" / "myws" / "data"
+    data_root.mkdir(parents=True)
+    (data_root.parent / "strategies").mkdir(parents=True)
+    monkeypatch.setenv("LYRA_DATA_ROOT", str(data_root))
+
+    default_runs = home / ".lyra" / "runs"
+    run_dir = default_runs / "myrun" / "20261110" / "abcabcabcabc"
+    run_dir.mkdir(parents=True)
+    (run_dir / "metrics.json").write_bytes(b"DIFFERENT-CONTENT")
+    monkeypatch.setenv("LYRA_RUNS_ROOT", str(default_runs))
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"oci:\n  data_par_url: {PREFIX}\n  strategies_par_url: {PREFIX}\n"
+        "local:\n  workspace: ws\n  data: data\n", encoding="utf-8")
+    rel = "runs/myrun/20261110/abcabcabcabc/metrics.json"
+    rec = FakeParRW(objects={rel: b"canonical-version"})  # already on remote
+    monkeypatch.setattr(cli, "_push_transport", lambda: rec)
+    out = CliRunner().invoke(cli.app, ["push", "--config", str(cfg)])
+    # must NOT fail with an immutable-sha conflict on the default-runs pass
+    assert out.exit_code == 0, out.output
+    # the canonical version on the remote is preserved (not overwritten)
+    assert rec.objects[rel] == b"canonical-version"

@@ -7,6 +7,9 @@ internal steps ``lyra pull`` runs, for inspection while developing.
 from __future__ import annotations
 
 
+import os
+import shutil
+import tempfile
 import typer
 
 from pathlib import Path
@@ -469,6 +472,63 @@ def _push_all_roots(
     for c in res.conflicts:
         typer.secho(f"  conflict: {c}", fg=typer.colors.YELLOW)
 
+    # H9 (batch2): the default ``~/.lyra/runs`` (``lyra run`` output root)
+    # is NOT under the workspace root, so the pass above never saw it.
+    # Push it second, mapped under the immutable ``runs/`` prefix.
+    #
+    # Conflict-safety: an object already present on the remote at the *same*
+    # rel path but with a different digest would raise an immutable-sha
+    # conflict that blocks the whole pass. So we only stage a default-runs
+    # file when its target rel path is NOT already in the remote map (a run
+    # that was pushed through the canonical 4-level path is already covered
+    # and is left alone here).
+    from .runner import _default_out
+
+    runs_root = Path(os.environ.get("LYRA_RUNS_ROOT", _default_out())).expanduser()
+    if runs_root.is_dir():
+        try:
+            ws_resolved = ws_root.resolve()
+        except OSError:
+            ws_resolved = ws_root
+        same_tree = (runs_root.resolve() == ws_resolved) or \
+            str(runs_root).startswith(str(ws_resolved) + "/")
+        if not same_tree:
+            remote = oci_push.list_remote_map(transport, url.rstrip("/"))
+            staging = Path(tempfile.mkdtemp(prefix=".lyra-push-runs-root-"))
+            staged = 0
+            for f in runs_root.rglob("*"):
+                if not f.is_file():
+                    continue
+                rel = "runs/" + f.relative_to(runs_root).as_posix()
+                if rel in remote:
+                    continue  # already covered by a canonical push; don't conflict
+                dest = staging / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, dest)
+                staged += 1
+            try:
+                if staged:
+                    res2 = oci_push.push(transport, staging, url,
+                                         force_push=force_push, dry_run=dry_run)
+                else:
+                    res2 = None
+            except oci_push.OciPushError as exc:
+                typer.secho(f"push(default runs): {exc}", fg=typer.colors.RED, err=True)
+                raise typer.Exit(code=1)
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
+            if res2 is not None:
+                typer.secho(
+                    f"default-runs: {len(res2.uploads)} upload, {len(res2.skips)} skip, "
+                    f"{len(res2.conflicts)} conflict  ({mode})",
+                    fg=typer.colors.GREEN,
+                )
+                for c in res2.conflicts:
+                    typer.secho(f"  conflict: {c}", fg=typer.colors.YELLOW)
+            else:
+                typer.secho("default-runs: already covered by canonical push",
+                            fg=typer.colors.GREEN)
+
 
 @app.command(name="push")
 def push(
@@ -500,6 +560,66 @@ def sync_alias(
     _push_all_roots(config, force_push=force_push, dry_run=dry_run)
 
 
+def _push_staging(
+    config: str,
+    staging_root: Path,
+    *,
+    force_push: bool,
+    dry_run: bool,
+    url: str | None = None,
+) -> None:
+    """Shared push path: push a staging dir through the I17-classifier push
+    (batch2 H1: the plan is built from a root whose top-level token is the
+    class key — `strategies/**` / `runs/**` — so scope never rejects
+    direction-prefixed paths)."""
+    from . import oci_push
+
+    if not url:
+        oci, _local = _cfg(config)
+        url = (oci.strategies_par_url or oci.data_par_url).rstrip("/")
+    if not url:
+        typer.secho("no push target configured (oci.*_par_url empty)",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    transport = _push_transport()
+    try:
+        res = oci_push.push(transport, staging_root, url.rstrip("/"),
+                            force_push=force_push, dry_run=dry_run)
+    except oci_push.OciPushError as exc:
+        typer.secho(f"push: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    mode = "dry-run" if dry_run else "push"
+    typer.secho(
+        f"{len(res.uploads)} upload, {len(res.skips)} skip, "
+        f"{len(res.conflicts)} conflict  ({mode})",
+        fg=typer.colors.GREEN,
+    )
+    for c in res.conflicts:
+        typer.secho(f"  conflict: {c.rel_path} ({c.reason})", fg=typer.colors.RED)
+
+
+def _staging_slice(source_root: Path, direction: str, *, include_runs: bool) -> Path:
+    """Copy one direction's strategies/ (+ runs/ when *include_runs*) slice
+    into a temp staging root, keeping the canonical top-level tokens."""
+
+    staging = Path(tempfile.mkdtemp(prefix=".lyra-push-dir-"))
+    dstrat = staging / "strategies" / direction
+    dstrat.mkdir(parents=True)
+    for f in (source_root / "strategies" / direction).iterdir():
+        if f.is_file():
+            shutil.copy2(f, dstrat / f.name)
+    if include_runs:
+        src_runs = source_root / "runs" / direction
+        if src_runs.is_dir():
+            for f in src_runs.rglob("*"):
+                if f.is_file():
+                    rel = f.relative_to(src_runs)
+                    dest = staging / "runs" / direction / rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(f, dest)
+    return staging
+
+
 @app.command(name="push-strategy")
 def push_strategy(
     direction: str = typer.Argument(..., help="Direction name, e.g. 'fx-trend'"),
@@ -508,6 +628,7 @@ def push_strategy(
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Push a single direction's strategy folder (strategies/<direction>/)."""
+    from . import workflow
     from .config import resolve_data_root
 
     oci, local = _cfg(config)
@@ -516,45 +637,17 @@ def push_strategy(
     if not local_root.is_dir():
         typer.secho(f"no strategies/{direction}/ at {local_root}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
-    # Only push this direction's slice: wrap in a temp copy?  Simpler: push
-    # the parent and filter uploads in the plan to this prefix.
-    from . import oci_push
-
-    url = oci.strategies_par_url
-    if not url:
-        typer.secho("no push target configured (oci.strategies_par_url empty)",
-                    fg=typer.colors.RED, err=True)
+    try:
+        workflow.validate_ident(direction, "direction")
+    except workflow.WorkflowError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
-    transport = _push_transport()
-    remote_map = oci_push.list_remote_map(transport, url)
-    plan = oci_push.plan_push(transport, root / "strategies", url, remote_map)
+    staging = _staging_slice(root, direction, include_runs=False)
+    try:
+        _push_staging(config, staging, force_push=force_push, dry_run=dry_run)
+    finally:
 
-    prefix = direction + "/"
-    plan.uploads = [i for i in plan.uploads if i.rel_path.startswith(prefix)]
-    plan.skips = [s for s in plan.skips if s.rel_path.startswith(prefix)]
-    plan.conflicts = [c for c in plan.conflicts if c.rel_path.startswith(prefix)]
-
-    if dry_run:
-        for k in ("upload", "skip", "conflict"):
-            for v in plan.to_report()[k]:
-                typer.echo(f"  {k}: {v}")
-        return
-    for c in plan.conflicts:
-        typer.secho(f"conflict: {c.rel_path} ({c.reason})", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-    for item in plan.uploads:
-        data = (root / "strategies" / item.rel_path).read_bytes()
-        full = url if url.endswith("/") else url + "/"
-        try:
-            resp = transport.put(full + item.rel_path, data=data, timeout=300)
-        except Exception as exc:  # noqa: BLE001
-            typer.secho(f"upload {item.rel_path} failed: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=1)
-        status = getattr(resp, "status_code", 200)
-        if status >= 400:
-            typer.secho(f"upload {item.rel_path}: HTTP {status}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=1)
-        typer.echo(f"  pushed: {item.rel_path}")
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 @app.command(name="push-direction")
@@ -564,8 +657,30 @@ def push_direction(
     force_push: bool = typer.Option(False, "--force-push"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    """Push an entire direction: its strategies/ + runs/ slices."""
-    push_strategy(direction, config=config, force_push=force_push, dry_run=dry_run)
+    """Push an entire direction: its strategies/ + runs/ slices (H1/H9)."""
+    from . import workflow
+    from .config import resolve_data_root
+
+    oci, local = _cfg(config)
+    root = resolve_data_root(local, None)
+    local_root = root / "strategies" / direction
+    if not local_root.is_dir():
+        typer.secho(f"no strategies/{direction}/ at {local_root}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    try:
+        workflow.validate_ident(direction, "direction")
+    except workflow.WorkflowError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    # also include the direction's runs when they live under the workspace
+    # root (co-located layout); ~/.lyra/runs is covered by push/backup.
+    has_runs = (root / "runs" / direction).is_dir()
+    staging = _staging_slice(root, direction, include_runs=has_runs)
+    try:
+        _push_staging(config, staging, force_push=force_push, dry_run=dry_run)
+    finally:
+
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 @app.command(name="push-runs")
@@ -586,23 +701,30 @@ def push_runs(
     direction comes from the 0006 manifest (validated against the argument);
     track_id is a 0007 research identity supplied via --track (the 0006
     manifest has no track — D7)."""
+    import hashlib as _hashlib
     import json as _json
 
-    from . import oci_push
+    from . import oci_push, workflow
 
     oci, _local = _cfg(config)
+    # identity tokens must be safe (H4: no `..`/absolute/separators in path)
+    for tok, label in ((direction, "direction"), (run, "run"), (track, "track")):
+        try:
+            workflow.validate_ident(tok, label)
+        except workflow.WorkflowError as exc:
+            typer.secho(str(exc), fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2)
+
     # 0006 `lyra run` defaults to ~/.lyra/runs (B13, no workspace in path);
     # --runs-root overrides for co-located setups.
     base = Path(runs_root).expanduser() if runs_root else Path.home() / ".lyra" / "runs"
     run_root = base / run
-    manifest = None
-    for m in sorted(run_root.glob("*/*/manifest.json")):  # <name>/<YYYYMMDD>/<run_id>/
-        manifest = m
-        break
-    if manifest is None or not manifest.exists():
+    manifests = sorted(run_root.glob("*/*/manifest.json"))  # <name>/<YYYYMMDD>/<run_id>/
+    if not manifests:
         typer.secho(f"no manifest.json under {run_root} — run the strategy first (0006)",
                     fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
+    manifest = manifests[0]
     mdata = _json.loads(manifest.read_text(encoding="utf-8"))
     mdir = mdata.get("direction")
     if mdir is not None and mdir != direction:
@@ -611,21 +733,65 @@ def push_runs(
             fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
     run_id = str(mdata.get("run_id", manifest.parent.name))
+    try:
+        workflow.validate_ident(run_id, "run_id (from manifest)")
+    except workflow.WorkflowError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
 
-    import shutil as _shutil
-    import tempfile
+    # H8 (batch2): the manifest's artifact set + sha256 MUST be verified
+    # before anything is staged — "push whatever files are there" is exactly
+    # the gap this review flagged (fake/partial artifact runs could upload).
+    artifacts = mdata.get("artifacts")
+    if not isinstance(artifacts, dict) or not artifacts:
+        typer.secho("manifest has no 'artifacts' sha map — refusing to push (H8)",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    run_dir = manifest.parent
+    for name, expect in sorted(artifacts.items()):
+        afile = run_dir / name
+        if not afile.is_file():
+            typer.secho(f"artifact '{name}' listed in manifest but missing on disk",
+                        fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2)
+        actual = _hashlib.sha256(afile.read_bytes()).hexdigest()
+        want = str(expect).strip().lower()
+        if actual != want:
+            typer.secho(
+                f"artifact '{name}' sha256 mismatch (manifest={want} actual={actual}) — "
+                f"refusing to push (H8)", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2)
+    # reject unexpected files: only manifest-listed artifacts + manifest.json
+    expected_files = set(artifacts) | {"manifest.json"}
+    extra = [f.name for f in run_dir.iterdir() if f.is_file() and f.name not in expected_files]
+    if extra:
+        typer.secho(f"unexpected files in run dir: {sorted(extra)} — refusing (H8)",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
 
     # staging layout must mirror the canonical OCI layout (0007 D7):
     #   runs/<direction>/<track_id>/<run_id>/<artifact>
     # because the I17 classifier treats the *top-level* token as the class
     # key (`runs/**` → immutable).
-    staging = Path(tempfile.mkdtemp(prefix=f".lyra-push-runs-{run_id[:12]}-"))
+    staging = Path(tempfile.mkdtemp(prefix=".lyra-push-runs-"))
     dest_dir = staging / "runs" / direction / track / run_id
     dest_dir.mkdir(parents=True, exist_ok=True)
     try:
-        for f in manifest.parent.iterdir():
-            if f.is_file():
-                _shutil.copy2(f, dest_dir / f.name)
+        for name in sorted(expected_files):
+            shutil.copy2(run_dir / name, dest_dir / name)
+        # H8: auditable provenance sidecar (track attribution is injected by
+        # the push, not by the 0006 manifest — make it an artifact too).
+        (dest_dir / "run_provenance.json").write_text(
+            _json.dumps({
+                "track_id": track,
+                "direction": direction,
+                "run_id": run_id,
+                "manifest_run_id": run_id,
+                "pushed_by": "lyra push-runs (0007 D7)",
+            }, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
         url = (oci.strategies_par_url or oci.data_par_url).rstrip("/")
         if not url:
@@ -640,7 +806,7 @@ def push_runs(
             typer.secho(f"push-runs: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
     finally:
-        _shutil.rmtree(staging, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
 
     mode = "dry-run" if dry_run else "push"
     typer.secho(f"push-runs: {len(res.uploads)} upload, {len(res.skips)} skip, "

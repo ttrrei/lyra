@@ -31,7 +31,6 @@ _DEFAULT_PAGE_SIZE = 1000
 _CHUNK = 64 * 1024
 _DOWNLOAD_TIMEOUT = 300
 _LIST_TIMEOUT = 60
-_REDACT_PATH_SEGMENTS = 2
 
 
 class Transport(Protocol):
@@ -53,16 +52,45 @@ class ParExpiredError(ParObjectError):
 
 
 def redact_par_url(url: str) -> str:
-    """Redact a PAR URL to ``scheme://host/<first two path segments>``.
+    """Redact a PAR URL to ``scheme://host`` — never keep a path segment.
 
-    Keeps just enough to identify the bucket/prefix for humans while
-    dropping the signed query string and the deep object path. (I19.)
+    OCI pre-authenticated request URLs are ``/p/<token>/n/<ns>/b/<bucket>/
+    <prefix>``: the **second segment IS the secret token**, so keeping the
+    first two segments (the old behavior) leaked credentials into logs and
+    error messages (批次2-H3, I19). The host + the fact that it is a PAR URL
+    are enough for humans; the query string (signed params) is always
+    dropped too.
     """
     parsed = urlparse(url)
-    segments = [s for s in parsed.path.split("/") if s]
-    keep = segments[:_REDACT_PATH_SEGMENTS]
-    path = "/" + "/".join(keep) if keep else "/"
-    return f"{parsed.scheme or 'https'}://{parsed.netloc}{path}"
+    return f"{parsed.scheme or 'https'}://{parsed.netloc}"
+
+
+def redact_in_message(message: str) -> str:
+    """Redact any PAR URL that a raw transport exception may embed (批次2-H3).
+
+    Exception text from HTTP clients often contains the full request URL
+    (with the path token and/or signed query string). Before an error is
+    surfaced, scrub every ``scheme://...`` occurrence through
+    :func:`redact_par_url`.
+    """
+    import re as _re
+
+    # two forms to scrub:
+    #  1. absolute URLs (scheme://host/path?query) → keep scheme://host only
+    #  2. bare PAR path tokens: ``/p/<token>`` (transport exceptions often
+    #     log ``url=/p/SECRET/...`` with no scheme) → drop from the token
+    #     onward, keeping the ``url=``-style prefix readable.
+    abs_url = r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"]*"
+    bare_par = r"(?<![\w/])\x2fp/[^\s'\"]*"
+
+    def _abs_m(mm: _re.Match[str]) -> str:
+        return redact_par_url(mm.group(0))
+
+    def _bare_m(mm: _re.Match[str]) -> str:
+        return "[par-path-redacted]"
+
+    out = _re.sub(abs_url, _abs_m, str(message))
+    return _re.sub(bare_par, _bare_m, out)
 
 
 def _md5_of_file(path: Path) -> bytes | None:

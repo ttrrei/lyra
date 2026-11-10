@@ -45,14 +45,19 @@ from .runner import _ENGINE_VERSION
 #: I21 (D6, O13): the ONLY machine gate 0007 introduces.
 MAX_ACTIVE_BRANCHES_PER_TRACK = 8
 
-_BRANCH_RE = re.compile(r"^v\d+$")
-_VNN_FILE_RE = re.compile(r"^v(\d+)\.yaml$")
+# requirements R12: version tree — v01, v02a, v02b (same-generation siblings),
+# v04ab (cross branch). Generation is v+number; sibling/cross suffixes are
+# lowercase letters. The I17 classifier (oci_push._VNN_RE) must accept the
+# same set, otherwise a branch the tool produces is unpushable (H5).
+_BRANCH_RE = re.compile(r"^v\d+[a-z]*$")
+_VNN_FILE_RE = re.compile(r"^v(\d+)[a-z]*\.yaml$")
 _TRACK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-# 0007 D2: 分支文件命名 = vNN.yaml（I17 immutable 分类依据）。new-version
-# 强制此格式，保证工具自己产出的分支文件可被 push 层分类为 immutable 并
-# 推送（非 vNN 命名的手写策略文件仍按 fail-closed 分类为 unclassified，
-# 需要作者自行归类，见 oci_push.classify_path 及 0007 决策稿 D2/D9）。
-_BRANCH_NAME_RE = re.compile(r"^v\d+$")
+_BRANCH_NAME_RE = re.compile(r"^v\d+[a-z]*$")
+# direction/track/branch/run identifiers are single path components: no
+# separators, no dot segments (H4 — a "../x" direction would escape the
+# workspace root).
+_IDENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_IDENT_BAD = ("..", ".")
 
 
 class WorkflowError(RuntimeError):
@@ -97,14 +102,34 @@ def _baseline_for_direction(workspace: Path, direction: str) -> dict[str, Any]:
     else:
         baseline["hypothesis_sha256"] = None
 
-    catalog = workspace / "data" / "features" / "catalog.json"
-    if catalog.exists():
-        c = _load_json(catalog)
-        baseline["feature_catalog_sha256"] = hashlib.sha256(catalog.read_bytes()).hexdigest()
-        baseline["feature_catalog_entry"] = c if isinstance(c, (dict, list)) else None
+    # M1 (batch2): the real feature catalog is the DuckDB file under the data
+    # root (``lyra/catalog.py`` → ``<data_dir>/catalog.duckdb``), NOT the
+    # ``data/features/catalog.json`` that the first draft referenced. Prefer
+    # the real catalog; fall back to the (rare) JSON form.
+    # M1 (batch2): the real feature catalog is the DuckDB file under the data
+    # root (``lyra/catalog.py`` → ``<data_dir>/catalog.duckdb``), NOT the
+    # ``data/features/catalog.json`` that the first draft referenced. Prefer
+    # the real catalog; fall back to the (rare) JSON form.
+    real_catalog = None
+    from .catalog import default_catalog_path
+
+    for _dd in (workspace / "data", workspace):
+        _cp = default_catalog_path(_dd)
+        if _cp.is_file():
+            real_catalog = _cp
+            break
+    if real_catalog is not None:
+        baseline["feature_catalog_sha256"] = hashlib.sha256(real_catalog.read_bytes()).hexdigest()
+        baseline["feature_catalog_entry"] = str(real_catalog)
     else:
-        baseline["feature_catalog_sha256"] = None
-        baseline["feature_catalog_entry"] = None
+        legacy = workspace / "data" / "features" / "catalog.json"
+        if legacy.exists():
+            c = _load_json(legacy)
+            baseline["feature_catalog_sha256"] = hashlib.sha256(legacy.read_bytes()).hexdigest()
+            baseline["feature_catalog_entry"] = c if isinstance(c, (dict, list)) else None
+        else:
+            baseline["feature_catalog_sha256"] = None
+            baseline["feature_catalog_entry"] = None
     baseline["feature_version"] = FEATURE_VERSION
 
     # Execution-rule versions (D5 attribution).
@@ -123,7 +148,52 @@ def track_path(workspace: Path, direction: str, track_id: str) -> Path:
 
 
 def track_index_path(workspace: Path, direction: str, track_id: str) -> Path:
-    return workspace / "strategies" / direction / "index" / f"t{track_id}.json"
+    """Track event log (JSONL, append-only under I17).
+
+    Each line is an independent event record. State transitions (activate /
+    prune) APPEND a new line — never rewrite earlier lines — so the file is
+    a verbatim line-superset of every previous version and therefore pushable
+    (批次2-H10: the old mutable ``{"active": [...]}`` snapshot broke the
+    append-only gate on the first fork/prune).
+    """
+    return workspace / "strategies" / direction / "index" / f"t{track_id}.jsonl"
+
+
+def read_index_events(workspace: Path, direction: str, track_id: str) -> list[dict[str, Any]]:
+    """Parse the track event log; [] if absent or unreadable."""
+    p = track_index_path(workspace, direction, track_id)
+    if not p.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for ln in p.read_text(encoding="utf-8").splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            rec = json.loads(ln)
+            if isinstance(rec, dict):
+                out.append(rec)
+        except Exception:  # tolerate a truncated final line, never crash
+            continue
+    return out
+
+
+def active_branches_of(events: list[dict[str, Any]]) -> list[str]:
+    """Replay activate/prune events in order → current active branch list."""
+    active: list[str] = []
+    for e in events:
+        op = e.get("op")
+        if op == "create_track":
+            active = list(e.get("active", []))  # seed (normally empty)
+        elif op == "activate":
+            b = e.get("branch")
+            if b and b not in active:
+                active.append(b)
+        elif op == "prune":
+            b = e.get("branch")
+            if b in active:
+                active.remove(b)
+    return active
 
 
 def _validate_track_id(track_id: str) -> None:
@@ -133,12 +203,27 @@ def _validate_track_id(track_id: str) -> None:
         )
 
 
+def validate_ident(ident: str, what: str = "identifier") -> None:
+    """Single-path-component check for direction/track/branch/run ids (H4).
+
+    Rejects separators, dot segments and empty names so a value like
+    ``../outside`` or ``a/b`` can never escape the workspace root when
+    joined into a file path.
+    """
+    if not isinstance(ident, str) or not _IDENT_RE.match(ident) or ident in _IDENT_BAD:
+        raise WorkflowError(
+            f"invalid {what} {ident!r} — use a single path component "
+            f"(alnum/_/-, no separators, no '.') "
+        )
+
+
 def create_track(workspace: Path, direction: str, track_id: str) -> dict[str, Any]:
     """Create a track and freeze its baseline (I18).
 
     Duplicate IDs fail fast — never overwrite, never auto-rename (D9 /
     综合稿 §9).
     """
+    validate_ident(direction, "direction")
     _validate_track_id(track_id)
     tp = track_path(workspace, direction, track_id)
     if tp.exists():
@@ -155,15 +240,27 @@ def create_track(workspace: Path, direction: str, track_id: str) -> dict[str, An
         "baseline": baseline,
     }
     _write_json(tp, record)
-    # Track branch index (append-only class per I17).
+    # Track event log (JSONL, append-only class per I17 — H10: a JSONL of
+    # independent event lines is a verbatim line-superset of its prior
+    # versions, so re-pushing after new events is always allowed).
     idx = track_index_path(workspace, direction, track_id)
     if idx.exists():
         raise WorkflowError(
             f"track index already exists for {direction}/{track_id} — "
             f"inconsistent state, refusing to clobber (I18 fail-fast)"
         )
-    _write_json(idx, {"direction": direction, "track_id": track_id, "active": []})
+    _append_index_event(workspace, direction, track_id,
+                        {"op": "create_track", "direction": direction,
+                         "track_id": track_id, "at": _now_iso()})
     return record
+
+
+def _append_index_event(workspace: Path, direction: str, track_id: str,
+                        event: dict[str, Any]) -> None:
+    idx = track_index_path(workspace, direction, track_id)
+    idx.parent.mkdir(parents=True, exist_ok=True)
+    with idx.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def list_tracks(workspace: Path, direction: str) -> list[dict[str, Any]]:
@@ -185,10 +282,7 @@ def get_track(workspace: Path, direction: str, track_id: str) -> dict[str, Any]:
 
 
 def _track_active(workspace: Path, direction: str, track_id: str) -> list[str]:
-    idx = track_index_path(workspace, direction, track_id)
-    if not idx.exists():
-        return []
-    return list(_load_json(idx).get("active", []))
+    return active_branches_of(read_index_events(workspace, direction, track_id))
 
 
 # ---------------------------------------------------------------------------
@@ -212,18 +306,17 @@ def enforce_branch_cap(workspace: Path, direction: str, track_id: str) -> None:
 
 
 def prune_branch(workspace: Path, direction: str, track_id: str, branch: str) -> None:
-    """Explicitly drop a branch from the track's active list (cap relief)."""
-    idx = track_index_path(workspace, direction, track_id)
-    if not idx.exists():
-        raise WorkflowError(f"no track index for {direction}/{track_id}")
-    data = _load_json(idx)
-    active = data.get("active", [])
-    if branch not in active:
+    """Explicitly drop a branch from the track's active list (cap relief).
+
+    H10: appends a prune EVENT — earlier lines are never rewritten, so the
+    JSONL stays a verbatim line-superset (I17 append-only) and the prune is
+    pushable (the old snapshot rewrite was rejected by the gate).
+    """
+    validate_ident(branch, "branch")
+    if branch not in _track_active(workspace, direction, track_id):
         raise WorkflowError(f"branch {branch!r} is not active on track {track_id}")
-    data["active"] = [b for b in active if b != branch]
-    data["pruned"] = data.get("pruned", [])
-    data["pruned"].append(branch)
-    _write_json(idx, data)
+    _append_index_event(workspace, direction, track_id,
+                        {"op": "prune", "branch": branch, "at": _now_iso()})
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +355,10 @@ def new_version(
     """
     if not _BRANCH_NAME_RE.match(branch):
         raise WorkflowError(
-            f"invalid branch name {branch!r} — use lowercase alnum/_/- (fail-fast)"
+            f"invalid branch name {branch!r} — branches are vNN with optional "
+            f"lowercase sibling/cross suffix (v02a, v04ab) per requirements R12"
         )
+    validate_ident(direction, "direction")
     get_track(workspace, direction, track)  # must exist (I18 identity)
     if branch in _track_active(workspace, direction, track):
         raise WorkflowError(
@@ -315,22 +410,14 @@ def new_version(
         template_lines.append("driven_by_lesson: <TODO: which lesson drove this branch>")
     target.write_text("\n".join(template_lines) + "\n", encoding="utf-8")
 
-    # Register as active on the track (per-track index).
-    idx = track_index_path(workspace, direction, track)
-    data = _load_json(idx)
-    active = data.get("active", [])
-    if slug in active:
-        raise WorkflowError(
-            f"branch {slug!r} already active on track {track} — duplicate id "
-            f"(I18 fail-fast)"
-        )
-    active.append(slug)
-    data["active"] = active
-    data.setdefault("created", []).append(
-        {"branch": slug, "file": target.name, "parent": parent_slug,
-         "driven_by_lesson": driven_by_lesson, "created_at": _now_iso()}
-    )
-    _write_json(idx, data)
+    # Register as active on the track: append ONE event line (H10 — the
+    # JSONL keeps every earlier line verbatim, so it remains an I17
+    # append-only file after every fork).
+    _append_index_event(workspace, direction, track, {
+        "op": "activate", "branch": slug, "file": target.name,
+        "parent": parent_slug, "driven_by_lesson": driven_by_lesson,
+        "at": _now_iso(),
+    })
 
     # Reflect in the track record as well (single source for context/synthesis).
     tp = track_path(workspace, direction, track)
@@ -349,6 +436,28 @@ def new_version(
 # ---------------------------------------------------------------------------
 
 
+def track_lessons_path(workspace: Path, direction: str, track_id: str) -> Path:
+    """Per-track lessons file (H6/I18: track A's context never reads track
+    B's lessons; a shared direction-level lessons.md remains readable but is
+    clearly labelled as shared)."""
+    return workspace / "tracks" / direction / f"{track_id}.lessons.md"
+
+
+def _branch_file(workspace: Path, direction: str, branch: str) -> Path | None:
+    d = workspace / "strategies" / direction
+    cand = d / f"{branch}.yaml"
+    if cand.exists():
+        return cand
+    m = _VNN_FILE_RE.match(branch + ".yaml")
+    if m:
+        # legacy zero-padding variant (v1 -> v01.yaml)
+        for p in d.glob("*.yaml"):
+            pm = _VNN_FILE_RE.match(p.name)
+            if pm and int(pm.group(1)) == int(m.group(1)):
+                return p
+    return None
+
+
 def render_context(
     workspace: Path,
     direction: str,
@@ -356,31 +465,39 @@ def render_context(
     track: str | None = None,
     n_lessons: int = 5,
 ) -> str:
-    """Render the single-file context package (R12).
+    """Render the single-file context package (R12, self-contained per H6).
 
-    ``track`` given → strictly that track's hypothesis ref / lessons /
-    active branches + *sibling* branch run summaries (read-only). Track A's
-    context never reads track B's drafts/lessons (I18).
+    The file must be enough for an AI to work on this track **without**
+    opening anything else: full hypothesis text, the frozen baseline
+    snapshot (feature version + catalog hash + engine/compiler versions),
+    the feature list, every active branch's **full YAML**, per-track
+    lessons (with the shared direction lessons clearly labelled), and the
+    sibling run comparison. Track A's context never reads track B's
+    drafts/lessons (I18).
     """
+    validate_ident(direction, "direction")
     out: list[str] = [f"# context — {direction}"]
+    out.append(f"generated_at: {_now_iso()}  (informational; context is not a push artifact)")
     d = workspace / "strategies" / direction
 
+    # --- hypothesis: FULL text (not just a path/hash) + its hash ----------
     hyp = d / "hypothesis.md"
+    out.append("\n## hypothesis")
     if hyp.exists():
         h = hashlib.sha256(hyp.read_bytes()).hexdigest()
-        out.append(f"\n## hypothesis\n{hyp}  (sha256 {h[:16]}…)\n")
-    else:
-        out.append("\n## hypothesis\n(none)\n")
-
-    lessons = d / "lessons.md"
-    out.append(f"\n## lessons (last {n_lessons})")
-    if lessons.exists():
-        lines = [ln for ln in lessons.read_text(encoding="utf-8").splitlines()
-                 if ln.strip()]
-        for ln in lines[-max(1, n_lessons):]:
-            out.append(f"- {ln}")
+        out.append(f"(sha256 {h[:16]}…)")
+        out.append("```")
+        out.append(hyp.read_text(encoding="utf-8").rstrip("\n"))
+        out.append("```")
     else:
         out.append("(none)")
+
+    # --- feature list (R12: context includes the feature list) ------------
+    out.append("\n## features")
+    from .features import build_registry
+    feats = build_registry().names()
+    out.append(f"FEATURE_VERSION={FEATURE_VERSION}; {len(feats)} registered features:")
+    out.append(", ".join(feats))
 
     tracks = list_tracks(workspace, direction)
     if track is not None:
@@ -388,33 +505,58 @@ def render_context(
         if not tracks:
             raise WorkflowError(f"unknown track: {direction}/{track}")
 
+    shared_lessons = d / "lessons.md"
     for t in tracks:
         tid = t["track_id"]
         out.append(f"\n## track {tid}")
-        active = _track_active(workspace, direction, tid)
-        out.append(f"active branches: {', '.join(active) if active else '(none)'}")
         bl = t.get("baseline", {})
-        if bl.get("feature_version") is not None:
-            out.append(f"baseline: feature_version={bl.get('feature_version')}, "
-                       f"engine={bl.get('engine_version')}")
+        out.append(
+            "baseline (frozen at track creation): "
+            f"hypothesis_sha256={str(bl.get('hypothesis_sha256'))[:16]}…, "
+            f"feature_version={bl.get('feature_version')}, "
+            f"feature_catalog_sha256={str(bl.get('feature_catalog_sha256'))[:16]}…, "
+            f"engine={bl.get('engine_version')}, compiler={bl.get('compiler_version')}"
+        )
+
+        # per-track lessons (H6/I18 isolation)
+        t_lessons = track_lessons_path(workspace, direction, tid)
+        out.append(f"\n### lessons (track {tid}, last {n_lessons})")
+        if t_lessons.exists():
+            lines = [ln for ln in t_lessons.read_text(encoding="utf-8").splitlines()
+                     if ln.strip()]
+            for ln in lines[-max(1, n_lessons):]:
+                out.append(f"- {ln}")
+        else:
+            out.append("(none)")
+        if shared_lessons.exists():
+            out.append("\n### lessons (shared direction-level, labelled)")
+            lines = [ln for ln in shared_lessons.read_text(encoding="utf-8").splitlines()
+                     if ln.strip()]
+            for ln in lines[-max(1, n_lessons):]:
+                out.append(f"- {ln}")
+
+        active = _track_active(workspace, direction, tid)
+        out.append(f"\n### active branches: {', '.join(active) if active else '(none)'}")
         for b in active:
-            bfile = d / f"{b}.yaml"
-            if not bfile.exists():
-                m = _VNN_FILE_RE.match(b + ".yaml")
-                if m:
-                    bfile = d / f"v{int(m.group(1)):02d}.yaml"
-            if bfile.exists():
-                y = bfile.read_text(encoding="utf-8")
-                par = re.search(r"^parent:\s*(\S+)", y, flags=re.M)
-                out.append(f"  - {b} → {bfile.name}"
-                           + (f"  (parent: {par.group(1)})" if par else ""))
-            # sibling/own run summaries from 0006 metrics (read-only)
+            bfile = _branch_file(workspace, direction, b)
+            if bfile is None:
+                out.append(f"  - {b} (YAML missing)")
+                continue
+            # full YAML text (H6: not just the file name)
+            out.append(f"#### {bfile.name}")
+            out.append("```yaml")
+            out.append(bfile.read_text(encoding="utf-8").rstrip("\n"))
+            out.append("```")
             runs = _runs_for_branch(workspace, direction, b)
             for r in runs:
-                out.append(f"    run {r['run_id'][:12]}  trades={r['trades']} "
-                           f"ann={r.get('annualized')}  win={r.get('win_rate')}")
+                parts = "  ".join(
+                    f"{i['instrument']}: trades={i['trade_count']} ann={i['annualized']} "
+                    f"win={i['win_rate']} net={i['net_return']}"
+                    for i in r.get("instruments", [])
+                )
+                out.append(f"  run {r['run_id'][:12]}  {parts or '(no per-instrument data)'}")
             if not runs:
-                out.append("    (no runs yet)")
+                out.append("  (no runs yet)")
     return "\n".join(out) + "\n"
 
 
@@ -429,19 +571,24 @@ def _runs_for_branch(workspace: Path, direction: str, branch: str) -> list[dict[
             m = _load_json(mf)
         except Exception:
             continue
+        # exact branch identity only (H7: "v1" must not match spec v10)
         spec = str(m.get("spec_id", ""))
-        if spec != branch and not spec.endswith(f"/{branch}") and branch not in spec:
+        if spec != branch and not spec.endswith(f"/{branch}") and not spec.endswith(f"/{branch}.yaml"):
             continue
         per = m.get("per_instrument", {})
         if not per:
             continue
-        first = next(iter(per.values()))
+        per_list = [
+            {"instrument": inst,
+             "trade_count": v.get("trade_count"),
+             "annualized": v.get("annualized"),
+             "win_rate": v.get("win_rate"),
+             "net_return": v.get("net_return")}
+            for inst, v in sorted(per.items()) if isinstance(v, dict)
+        ]
         out.append({
             "run_id": m.get("run_id", mf.parent.name),
-            "trades": first.get("trade_count"),
-            "annualized": first.get("annualized"),
-            "win_rate": first.get("win_rate"),
-            "net_return": first.get("net_return"),
+            "instruments": per_list,
         })
     return out
 
@@ -461,10 +608,12 @@ def compare_siblings(workspace: Path, direction: str, branches: list[str]) -> di
     rows = []
     for b in branches:
         runs = _runs_for_branch(workspace, direction, b)
+        # best = highest per-instrument net_return across the run's instruments
         best = None
         for r in runs:
-            if best is None or (r.get("net_return") or -1) > (best.get("net_return") or -1):
-                best = r
+            for inst in r.get("instruments", []):
+                if best is None or (inst.get("net_return") or -1) > (best.get("net_return") or -1):
+                    best = inst
         rows.append({"branch": b, "runs": runs, "best": best})
     return {"direction": direction, "siblings": rows}
 
@@ -485,6 +634,9 @@ def merge(
     """
     if len(parents) < 2:
         raise WorkflowError("merge needs at least two parents (cross/synthesis)")
+    validate_ident(direction, "direction")
+    for p in parents:
+        validate_ident(p, "parent branch")
     parent_shas: dict[str, str] = {}
     for p in parents:
         pfile = _parent_file(workspace, direction, p)  # fail fast if missing
@@ -509,7 +661,10 @@ def merge(
         name = f"v{n:02d}"
     slug = name
     if not _BRANCH_NAME_RE.match(slug):
-        raise WorkflowError(f"invalid merge name {slug!r} — branches are vNN (0007 D2)")
+        raise WorkflowError(
+            f"invalid merge name {slug!r} — branches are vNN with optional "
+            f"lowercase suffix (requirements R12)"
+        )
     get_track(workspace, direction, track)  # must exist (I18 identity)
     enforce_branch_cap(workspace, direction, track)
 
@@ -533,14 +688,12 @@ def merge(
     lines.append("driven_by_lesson: <TODO: lesson(s) motivating this merge>")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    idx = track_index_path(workspace, direction, track)
-    data = _load_json(idx)
-    active = data.get("active", [])
-    if slug in active:
-        raise WorkflowError(f"branch {slug!r} already active (I18 fail-fast)")
-    active.append(slug)
-    data["active"] = active
-    _write_json(idx, data)
+    # Register: append one event line (H10 — keeps the JSONL append-only).
+    _append_index_event(workspace, direction, track, {
+        "op": "activate", "branch": slug, "file": target.name,
+        "parent": None, "parents": list(parents),
+        "driven_by_lesson": None, "at": _now_iso(),
+    })
     return target
 
 
@@ -565,11 +718,12 @@ def synthesize(workspace: Path, direction: str) -> Path:
         for b in active:
             runs = _runs_for_branch(workspace, direction, b)
             for r in runs:
-                lines.append(
-                    f"- {b}: run {r['run_id'][:12]} trades={r['trades']} "
-                    f"ann={r.get('annualized')} win={r.get('win_rate')} "
-                    f"net={r.get('net_return')}"
-                )
+                for i in r.get("instruments", []):
+                    lines.append(
+                        f"- {b}: run {r['run_id'][:12]} {i['instrument']} "
+                        f"trades={i['trade_count']} ann={i['annualized']} "
+                        f"win={i['win_rate']} net={i['net_return']}"
+                    )
             if not runs:
                 lines.append(f"- {b}: (no runs)")
     out = workspace / "reviews"

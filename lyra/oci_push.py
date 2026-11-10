@@ -35,7 +35,10 @@ from .oci_client import list_objects, redact_par_url
 
 _CHUNK = 1 << 20
 
-_VNN_RE = re.compile(r"^v\d+\.yaml$")
+# H5 (batch2): sibling-suffix naming per requirements.md §0.2
+# (v02a / v02b / v04ab) — the class key is still "immutable file"; only the
+# allowed branch slug set widens from plain vNN to vNN[a-z]*.
+_VNN_RE = re.compile(r"^v\d+[a-z]*\.yaml$")
 
 
 class PushTransport(Protocol):
@@ -77,7 +80,10 @@ def classify_path(rel_path: str) -> str:
             fname = parts[-1]
             if fname in ("hypothesis.md", "lessons.md"):
                 return "append_only"
-            if len(parts) >= 4 and parts[-2] == "index" and fname.endswith(".json"):
+            # 0007 track index (H10 batch2): JSONL event log under index/
+            if len(parts) >= 4 and parts[-2] == "index" and (
+                fname.endswith(".json") or fname.endswith(".jsonl")
+            ):
                 return "append_only"
             if _VNN_RE.match(fname):
                 return "immutable"
@@ -217,9 +223,9 @@ def _same_object(local_path: Path, meta: Mapping[str, Any] | None) -> bool:
     """True iff the local file is byte-identical to the remote object.
 
     Uses sha256 when the listing carries one; otherwise compares md5 to
-    md5 (base64/hex tolerant, via oci_client._md5_matches). Falls back to
-    a size comparison when neither digest is available (I20, same policy
-    as oci_client.pull).
+    md5 (base64/hex tolerant, via oci_client._md5_matches). When neither
+    side has a verifiable digest this returns False — #89 R1: "size is
+    not content proof" (I20 batch2: size equality must fail closed).
     """
     if not meta:
         return False
@@ -231,9 +237,7 @@ def _same_object(local_path: Path, meta: Mapping[str, Any] | None) -> bool:
         from .oci_client import _md5_matches
 
         return _md5_matches(local_path, rmd5)
-    local_size = local_path.stat().st_size
-    rsize = meta.get("size")
-    return rsize is not None and int(rsize) == local_size
+    return False
 
 
 def _download_remote_text(
@@ -318,13 +322,29 @@ def push(
             f"{conflict.rel_path}: {conflict.reason} — {conflict.detail}"
         )
 
-    for item in plan.uploads:
+    # M4 (batch2): upload manifest.json LAST within a run directory so a
+    # mid-push failure never leaves a manifest that advertises artifacts
+    # which are missing on the remote. (0007 does not claim transactions —
+    # this is best-effort ordering, documented in the 0007 revlog.)
+    def _sort_key(rel_path: str):
+        parts = rel_path.split("/")
+        is_manifest = parts[-1] == "manifest.json"
+        return (is_manifest, rel_path)
+
+    for item in sorted(plan.uploads, key=lambda u: _sort_key(u.rel_path)):
         data = (Path(local_root) / item.rel_path).read_bytes()
         url = _url_for(par_url, item.rel_path)
         try:
             resp = transport.put(url, data=data, timeout=300)
         except Exception as exc:  # noqa: BLE001
-            raise OciPushError(f"upload of {item.rel_path} to {redact_par_url(par_url)} failed: {exc}") from exc
+            # H3 (batch2): scrub URLs (which may carry tokens) from raw
+            # exception text before it surfaces in logs/messages.
+            from .oci_client import redact_in_message
+
+            raise OciPushError(
+                f"upload of {item.rel_path} to {redact_par_url(par_url)} failed: "
+                f"{redact_in_message(str(exc))}"
+            ) from exc
         status = getattr(resp, "status_code", 200)
         if status >= 400:
             raise OciPushError(
@@ -356,8 +376,21 @@ def plan_push(
     if not local_root.is_dir():
         return plan
 
+    # H4 (batch2): symlinks and paths escaping the local root must never be
+    # uploaded — the local path is the only content boundary we control.
+    try:
+        root_resolved = local_root.resolve()
+    except OSError:
+        root_resolved = local_root
+
     for path in sorted(p for p in local_root.rglob("*") if p.is_file()):
         rel = path.relative_to(local_root).as_posix()
+        if path.is_symlink() or not path.is_relative_to(root_resolved):
+            plan.conflicts.append(
+                ConflictItem(rel, "untrusted-path",
+                             "symlink or path outside local root (refusing to upload)")
+            )
+            continue
         # Top-level directories outside I17 scope (e.g. local research
         # workspace files) are silently out of the push scope; the fail-closed
         # rule applies to unclassified *files inside* a scoped directory.

@@ -118,17 +118,33 @@ def test_par_expiry_diagnostic(tmp_path):
 
 
 def test_par_url_redacted_in_logs():
-    """I19: host + first two path segments only, query string dropped."""
+    """I19: host only — the OCI path token is the SECOND segment, so it must
+    never be kept (批次2-H3). Signed query string dropped too."""
     url = (
         "https://objectstorage.ap-x.oraclecloud.com/p/abc123/n/lyra/b/bkt/o/data/"
         "XAU_USD.zip?Expires=123&Signature=SECRET-SIG"
     )
     redacted = oci_client.redact_par_url(url)
-    # I19: host + first two path segments; signed query and deep path dropped.
-    assert redacted == "https://objectstorage.ap-x.oraclecloud.com/p/abc123"
-    assert "SECRET-SIG" not in redacted
+    assert redacted == "https://objectstorage.ap-x.oraclecloud.com"
+    assert "abc123" not in redacted          # path token (the real secret)
+    assert "SECRET-SIG" not in redacted     # signed query
     assert "XAU_USD" not in redacted
-    assert "Expires" not in redacted
+
+
+def test_redact_in_message_scrubs_urls_from_exceptions():
+    """批次2-H3: transport exceptions embed full request URLs; scrub them
+    before surfacing (path token AND query signature)."""
+    msg = (
+        "HTTPConnectionPool(host='objectstorage.example', port=443): "
+        "Read timed out. url=/p/SECRET-TOKEN/n/ns/b/bkt/x/"
+        "?X-Oracle-Signature=BIGSECRET"
+    )
+    out = oci_client.redact_in_message(msg)
+    assert "SECRET-TOKEN" not in out
+    assert "BIGSECRET" not in out
+    assert "objectstorage.example" in out
+    # plain text without URLs is untouched
+    assert oci_client.redact_in_message("no urls here") == "no urls here"
 
 
 def test_sync_par_skips_directory_markers(fake_par, tmp_path):

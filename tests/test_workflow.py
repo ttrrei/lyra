@@ -24,9 +24,11 @@ def _mk_direction(ws, direction="fx-trend"):
 
 
 def _mk_catalog(ws):
-    c = ws / "data" / "features"
+    """M1 (batch2): the real feature catalog is the DuckDB file
+    ``<data_dir>/catalog.duckdb`` — create that, not a catalog.json."""
+    c = ws / "data"
     c.mkdir(parents=True, exist_ok=True)
-    (c / "catalog.json").write_text(json.dumps({"features": ["sma"]}), encoding="utf-8")
+    (c / "catalog.duckdb").write_bytes(b"FAKE-DUCKDB-CATALOG-BYTES")
 
 
 def _mk_run(ws, branch, *, trades=5, net=0.012, ann=0.10, win=0.6):
@@ -219,6 +221,7 @@ def test_context_contains_siblings_runs(tmp_path):
     assert "r123456789" in ctx  # run id surfaced
     assert "trades=7" in ctx
     assert "ann=0.15" in ctx
+    assert "EURUSD:" in ctx  # per-instrument, not first-instrument-only
     # hypothesis + lessons included
     assert "hypothesis" in ctx
     assert "volume filter helped" in ctx
@@ -330,3 +333,102 @@ def test_synthesize_no_tracks_fails(tmp_path):
     _mk_direction(tmp_path)
     with pytest.raises(wf.WorkflowError, match="no tracks"):
         wf.synthesize(tmp_path, "fx-trend")
+
+
+# ---------------------------------------------------------------------------
+# 批次2 (adversarial review 2026-11-10) regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_h7_spec_match_is_exact_not_substring(tmp_path):
+    """批次2-H7: querying branch v1 must not match a run whose spec_id is v10
+    (the old ``branch in spec`` substring matched across boundaries)."""
+    import json as _json
+
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    # a run for branch v10 and one for v1
+    r10 = tmp_path / "runs" / "r-v10" / "20261110" / "aaa111"
+    r10.mkdir(parents=True)
+    (r10 / "metrics.json").write_text(_json.dumps({
+        "spec_id": "v10", "run_id": "aaa111",
+        "per_instrument": {"X": {"trade_count": 99, "annualized": 0.9,
+                                  "win_rate": 0.9, "net_return": 0.9}}}),
+        encoding="utf-8")
+    r1 = tmp_path / "runs" / "r-v1" / "20261110" / "bbb222"
+    r1.mkdir(parents=True)
+    (r1 / "metrics.json").write_text(_json.dumps({
+        "spec_id": "v1", "run_id": "bbb222",
+        "per_instrument": {"Y": {"trade_count": 1, "annualized": 0.01,
+                                  "win_rate": 0.1, "net_return": 0.01}}}),
+        encoding="utf-8")
+    # v1 must ONLY see its own run
+    got_v1 = wf._runs_for_branch(tmp_path, "fx-trend", "v1")
+    assert [r["run_id"] for r in got_v1] == ["bbb222"]
+    # v10 must ONLY see its own run
+    got_v10 = wf._runs_for_branch(tmp_path, "fx-trend", "v10")
+    assert [r["run_id"] for r in got_v10] == ["aaa111"]
+
+
+def test_h7_all_instruments_carried_not_first_only(tmp_path):
+    """批次2-H7: every per-instrument result is carried, not just the first."""
+    import json as _json
+
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    r = tmp_path / "runs" / "r-x" / "20261110" / "ccc333"
+    r.mkdir(parents=True)
+    (r / "metrics.json").write_text(_json.dumps({
+        "spec_id": "v05", "run_id": "ccc333",
+        "per_instrument": {
+            "EURUSD": {"trade_count": 5, "annualized": 0.05,
+                        "win_rate": 0.5, "net_return": 0.05},
+            "XAUUSD": {"trade_count": 12, "annualized": 0.12,
+                        "win_rate": 0.7, "net_return": 0.12},
+        }}), encoding="utf-8")
+    runs = wf._runs_for_branch(tmp_path, "fx-trend", "v05")
+    assert len(runs) == 1
+    insts = {i["instrument"] for i in runs[0]["instruments"]}
+    assert insts == {"EURUSD", "XAUUSD"}
+    # compare_siblings.best = the max per-instrument, i.e. XAUUSD here
+    comp = wf.compare_siblings(tmp_path, "fx-trend", ["v05"])
+    assert comp["siblings"][0]["best"]["instrument"] == "XAUUSD"
+
+
+def test_h5_sibling_suffix_new_version_accepted(tmp_path):
+    """批次2-H5: sibling-suffix branch names (v02a) are legal per
+    requirements.md §0.2 and must be creatable + pushable."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    wf.new_version(tmp_path, "fx-trend", "v02a", track="alpha")
+    from lyra import oci_push
+
+    assert oci_push.classify_path("strategies/fx-trend/v02a.yaml") == "immutable"
+    assert (tmp_path / "strategies" / "fx-trend" / "v02a.yaml").exists()
+
+
+def test_h4_validate_ident_rejects_traversal(tmp_path):
+    """批次2-H4: direction/track/branch ids must be single path components."""
+    for bad in ("../outside", "a/b", "..", ".", "", "a\\b"):
+        with pytest.raises(wf.WorkflowError):
+            wf.validate_ident(bad, "direction")
+    for good in ("fx-trend", "alpha", "v02a", "track-1"):
+        wf.validate_ident(good, "direction")
+
+
+def test_h10_track_index_is_jsonl_append_only(tmp_path):
+    """批次2-H10: the track index is a JSONL event log; a fork appends a new
+    line, so the file stays a verbatim line-superset of the earlier version
+    (pushable under the append-only gate)."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    idx = wf.track_index_path(tmp_path, "fx-trend", "alpha")
+    assert idx.suffix == ".jsonl"
+    v1 = idx.read_text(encoding="utf-8")
+    wf.new_version(tmp_path, "fx-trend", "v02", track="alpha")
+    v2 = idx.read_text(encoding="utf-8")
+    # append-only: v1 lines are a prefix (verbatim) of v2
+    assert v2.startswith(v1), "event log must be append-only (v1 is a prefix of v2)"
+    # replay still yields the right active set
+    events = wf.read_index_events(tmp_path, "fx-trend", "alpha")
+    assert "v02" in wf.active_branches_of(events)
