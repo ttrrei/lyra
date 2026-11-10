@@ -1,6 +1,6 @@
 """Fixtures for 0004 compiler tests (0004 §5 test matrix).
 
-All strategies use registered features only (the 134-feature core registry).
+All strategies use registered features only (the 143-feature core registry).
 Built as Python dicts and serialized to YAML so the parser's YAML path is
 exercised exactly as in production.
 """

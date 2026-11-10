@@ -70,7 +70,7 @@ def kama(c: np.ndarray, n: int) -> np.ndarray:
 
 
 def atr(h: np.ndarray, l: np.ndarray, c: np.ndarray, n: int) -> np.ndarray:
-    """Wilder-smoothed ATR (the K6 normalization basis is ``atr_24``)."""
+    """Wilder-smoothed ATR (the K6 normalization basis is ``atr_12`` since v1.5)."""
     return talib.ATR(h, l, c, timeperiod=n)
 
 

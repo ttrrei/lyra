@@ -19,8 +19,10 @@ Design decisions it enforces:
   gate); anything else after warm-up is a bug (Gate 4 intercepts).
 * **K5** — the same algorithm + parameters run for all 21 instruments; only
   the NULL warm-up length may differ (K5).
-* **K6** — every ATR-normalized feature divides by ``atr_24`` (never a
-  mixed basis, the nova anti-pattern).
+* **K6** — every ATR-normalized feature divides by ``atr_12`` (single
+  uniform basis, the nova anti-pattern is mixed bases; v1.5: basis
+  rebased 24→12 per #99 user ruling, replacing the corpus' off-grid
+  ATR(14)).
 * **D5** — the pipeline loops instrument-by-instrument; each round fetches
   only that instrument's rows, computes, writes, and releases (never loads
   all 21 into one DataFrame — OOM guard).
@@ -49,13 +51,16 @@ from .registry import FeatureKind, Registry, RegistryError
 # I13: any change to a registered feature's computation or parameters must
 # bump this. 0003 shipped v0.8 (+1 over the v0.7 baseline) and v0.9 (+1), so
 # the first implementation baseline is 2.
-FEATURE_VERSION = 4
+FEATURE_VERSION = 5
 
 #: The K8 window grid (0003 K8, aligned to moneta ``catalogue.py``).
 GRID = (6, 12, 24, 60, 120)
 
 #: K6 — the single, uniform ATR-normalization denominator.
-ATR_NORM = 24
+#: v1.5 (#99 user ruling 2026-11-11): ATR(14)→ATR(12) — the corpus
+#: normalizes by ATR(14) (nova) which is off-grid; the user ruled to
+#: substitute the in-grid ATR(12) instead of adding an off-grid window.
+ATR_NORM = 12
 
 
 @dataclass
@@ -75,7 +80,8 @@ class Ctx:
     n: int
 
     @property
-    def atr24(self) -> np.ndarray:
+    def atr_norm(self) -> np.ndarray:
+        """The single K6 ATR-normalization denominator (ATR(12) since v1.5)."""
         return indicators.atr(self.h, self.l, self.c, ATR_NORM)
 
 
@@ -299,35 +305,77 @@ def build_registry() -> Registry:
         reg_value(f"prior{n}_high", "structural", n, {"n": n}, (n,), lambda ctx, sp: _prior_high(ctx, sp.params["n"]), unit="price")
         reg_value(f"prior{n}_low", "structural", n, {"n": n}, (n,), lambda ctx, sp: _prior_low(ctx, sp.params["n"]), unit="price")
         reg_value(f"prior{n}_range", "structural", n, {"n": n}, (n,), lambda ctx, sp: _prior_range(ctx, sp.params["n"]), unit="price")
-    reg_value("prior24_range_pos", "structural", 24, {"n": 24}, (24,), lambda ctx, s: _prior_range_pos(ctx, 24), unit="ratio[0,1]")
-    reg_value("prior24_width", "structural", 24, {"n": 24}, (24,), lambda ctx, s: _prior_width_atr(ctx, 24), unit="atr")
+    # --- 0008(#99) name alignment: registered under the nova-canonical names
+    # (user ruling: one name set, nova preferred; moneta names not mapped).
+    reg_value("range_position_24", "structural", 24, {"n": 24}, (24,), lambda ctx, s: _prior_range_pos(ctx, 24), unit="ratio[0,1]")
+    reg_value("range_width_atr_24", "structural", 24, {"n": 24}, (24,), lambda ctx, s: _prior_width_atr(ctx, 24), unit="atr")
     reg.register(
-        "breakout_up", lambda ctx, s: _breakout(ctx, +1, 24),
+        "breakout_up_24", lambda ctx, s: _breakout(ctx, +1, 24),
         kind=FeatureKind.EVENT, unit="event", warmup_bars=24, family="structural",
         params={"n": 24}, window_params=(24,),
     )
     reg.register(
-        "breakout_down", lambda ctx, s: _breakout(ctx, -1, 24),
+        "breakout_down_24", lambda ctx, s: _breakout(ctx, -1, 24),
         kind=FeatureKind.EVENT, unit="event", warmup_bars=24, family="structural",
         params={"n": 24}, window_params=(24,),
     )
     reg.register(
-        "failed_breakout_up", lambda ctx, s: _failed_breakout(ctx, +1, 24),
+        "failed_breakout_up_24", lambda ctx, s: _failed_breakout(ctx, +1, 24),
         kind=FeatureKind.EVENT, unit="event", warmup_bars=24, family="structural",
         params={"n": 24}, window_params=(24,),
     )
     reg.register(
-        "failed_breakout_down", lambda ctx, s: _failed_breakout(ctx, -1, 24),
+        "failed_breakout_down_24", lambda ctx, s: _failed_breakout(ctx, -1, 24),
         kind=FeatureKind.EVENT, unit="event", warmup_bars=24, family="structural",
         params={"n": 24}, window_params=(24,),
     )
-    reg_value("shift6_atr", "structural", ATR_NORM, {"n": 6, "denom": "atr_24"}, (6,), lambda ctx, s: _shift6_atr(ctx), unit="atr")
-    reg_value("bar_range_atr", "structural", ATR_NORM, {"denom": "atr_24"}, (ATR_NORM,), lambda ctx, s: _bar_range_atr(ctx), unit="atr")
-    reg_value("rel_quote_activity", "structural", 24, {"n": 24}, (24,), lambda ctx, s: _rel_quote_activity(ctx, 24), unit="ratio")
+    reg_value("return_6_atr", "structural", ATR_NORM, {"n": 6, "denom": "atr_12"}, (6,), lambda ctx, s: _shift6_atr(ctx), unit="atr")
+    reg_value("range_atr", "structural", ATR_NORM, {"denom": "atr_12"}, (ATR_NORM,), lambda ctx, s: _bar_range_atr(ctx), unit="atr")
+    reg_value("relative_volume_24", "structural", 24, {"n": 24}, (24,), lambda ctx, s: _rel_quote_activity(ctx, 24), unit="ratio")
     reg.register("utc_hour", lambda ctx, s: _utc_hour(ctx), kind=FeatureKind.VALUE,
                  unit="utc_hour[0,23]", warmup_bars=0, family="structural", params={}, window_params=())
     for n in (24, 60):
-        reg_value(f"path_eff_{n}", "structural", n, {"n": n}, (n,), lambda ctx, sp: _path_eff(ctx, sp.params["n"]), unit="ratio[0,1]")
+        reg_value(f"efficiency_{n}", "structural", n, {"n": n}, (n,), lambda ctx, sp: _path_eff(ctx, sp.params["n"]), unit="ratio[0,1]")
+
+    # --- 0008(#99) C-class corpus fills (nova reference contract, ATR(12) basis) -
+    reg.register(
+        "psar_direction", lambda ctx, s: _psar_direction(ctx),
+        kind=FeatureKind.STATE, unit="state{-1,1}", warmup_bars=3, family="psar",
+        params={"af": 0.02, "maximum": 0.2}, window_params=(),
+    )
+    reg.register(
+        "supertrend_direction", lambda ctx, s: _supertrend_direction(ctx),
+        kind=FeatureKind.STATE, unit="state{-1,1}", warmup_bars=24, family="supertrend",
+        params={"atr_window": 24, "multiplier": 3.0}, window_params=(24,),
+    )
+    reg.register(
+        "psar_flip_up", lambda ctx, s: _direction_flip(ctx, _psar_direction, +1),
+        kind=FeatureKind.EVENT, unit="event", warmup_bars=4, family="psar",
+        params={"af": 0.02, "maximum": 0.2}, window_params=(),
+    )
+    reg.register(
+        "psar_flip_down", lambda ctx, s: _direction_flip(ctx, _psar_direction, -1),
+        kind=FeatureKind.EVENT, unit="event", warmup_bars=4, family="psar",
+        params={"af": 0.02, "maximum": 0.2}, window_params=(),
+    )
+    reg.register(
+        "supertrend_flip_up", lambda ctx, s: _direction_flip(ctx, _supertrend_direction, +1),
+        kind=FeatureKind.EVENT, unit="event", warmup_bars=25, family="supertrend",
+        params={"atr_window": 24, "multiplier": 3.0}, window_params=(24,),
+    )
+    reg.register(
+        "supertrend_flip_down", lambda ctx, s: _direction_flip(ctx, _supertrend_direction, -1),
+        kind=FeatureKind.EVENT, unit="event", warmup_bars=25, family="supertrend",
+        params={"atr_window": 24, "multiplier": 3.0}, window_params=(24,),
+    )
+    reg_value("ema_alignment_6_24", "semantic", 24, {"fast": 6, "slow": 24}, (6, 24),
+              lambda ctx, s: _alignment(ctx, 6, 24), unit="state{-1,0,1}")
+    # K6 ATR-normalized distances: single uniform basis = ATR(12) (v1.5 ruling;
+    # nova's off-grid ATR(14) basis is deliberately NOT adopted).
+    reg_value("close_ema60_distance_atr", "semantic", 60, {"ema": 60, "denom": "atr_12"}, (60,),
+              lambda ctx, s: _dist_atr(ctx, _ema, 60), unit="atr")
+    reg_value("close_sma24_distance_atr", "semantic", 24, {"sma": 24, "denom": "atr_12"}, (24,),
+              lambda ctx, s: _dist_atr(ctx, _sma, 24), unit="atr")
 
     return reg
 
@@ -344,6 +392,69 @@ def _psar_dir(ctx: Ctx, sign: int) -> np.ndarray:
     d = indicators.sar_direction(ctx.h, ctx.l, sar)  # +1 up / -1 down / NaN
     out = np.where(d == sign, 1.0, 0.0)
     out[~np.isfinite(d)] = np.nan
+    return out
+
+
+def _psar_direction(ctx: Ctx) -> np.ndarray:
+    """PSAR direction ±1 (nova `psar_direction`): +1 when close > SAR else −1.
+
+    NaN while the SAR line is warming up (K4). Distinct from the
+    0/1-regime flags ``psar_bullish`` / ``psar_bearish``."""
+    sar = indicators.sar(ctx.h, ctx.l)
+    c = ctx.c
+    d = np.where(np.isfinite(sar), np.where(c > sar, 1.0, -1.0), np.nan)
+    return d
+
+
+def _supertrend_direction(ctx: Ctx) -> np.ndarray:
+    """Supertrend direction ±1 (nova `supertrend_direction`), NaN warm-up.
+
+    ``talib.SUPERTREND`` returns 0 (not NaN) for the trend during warm-up;
+    the warm-up bars are those where the *line* is NaN.  Use that as the
+    mask and map trend>0 → +1, trend<=0 (after warm-up) → −1."""
+    line, trend = indicators.talib.SUPERTREND(
+        ctx.h, ctx.l, ctx.c, timeperiod=24, multiplier=3.0)
+    t = np.asarray(trend, dtype=np.float64)
+    ln = np.asarray(line, dtype=np.float64)
+    out = np.full(t.shape, np.nan)
+    m = np.isfinite(ln)          # True only after warm-up
+    out[m] = np.where(t[m] > 0, 1.0, -1.0)
+    return out
+
+
+def _direction_flip(ctx: Ctx, direction_fn, sign: int) -> np.ndarray:
+    """Event: ``direction`` hit ``sign`` while the prior bar was ``−sign``.
+
+    Nova flip contract: ``dir == ±1 & prior == ∓1`` (a flip from the
+    opposite regime only, not a re-assertion of the same regime).
+    NaN wherever either bar's direction is NaN."""
+    d = direction_fn(ctx)
+    prior = np.concatenate(([np.nan], d[:-1]))
+    valid = np.isfinite(d) & np.isfinite(prior)
+    hit = valid & (d == sign) & (prior == -sign)
+    out = np.full(d.shape, np.nan)
+    out[hit] = 1.0
+    out[valid & ~hit] = 0.0
+    return out
+
+
+def _alignment(ctx: Ctx, fast_n: int, slow_n: int) -> np.ndarray:
+    """sign(fast − slow) over EMA (nova `ema_alignment_6_24`)."""
+    fast = _ema(ctx.c, fast_n)
+    slow = _ema(ctx.c, slow_n)
+    out = np.sign(fast - slow)
+    out[~np.isfinite(fast) | ~np.isfinite(slow)] = np.nan
+    return out
+
+
+def _dist_atr(ctx: Ctx, ma_fn, n: int) -> np.ndarray:
+    """(close − MA(n)) / ATR(12) — K6 uniform basis, D4 zero-denom → NaN."""
+    ma = ma_fn(ctx.c, n)
+    atr = ctx.atr_norm
+    diff = ctx.c - ma
+    out = np.full(ctx.n, np.nan)
+    valid = np.isfinite(diff) & np.isfinite(atr) & (atr > 0)
+    out[valid] = diff[valid] / atr[valid]
     return out
 
 
@@ -420,9 +531,9 @@ def _prior_range_pos(ctx: Ctx, n: int) -> np.ndarray:
 
 
 def _prior_width_atr(ctx: Ctx, n: int) -> np.ndarray:
-    """prior_range / atr_24 (K6 normalization basis)."""
+    """prior_range / atr_norm (K6 normalization basis)."""
     w = _prior_range(ctx, n)
-    atr = ctx.atr24
+    atr = ctx.atr_norm
     out = np.full_like(ctx.c, np.nan)
     valid = np.isfinite(atr) & (atr > 0)
     out[valid] = w[valid] / atr[valid]
@@ -457,10 +568,10 @@ def _failed_breakout(ctx: Ctx, sign: int, n: int) -> np.ndarray:
 
 
 def _shift6_atr(ctx: Ctx) -> np.ndarray:
-    """|close - close.shift(6)| / atr_24 (K6); denominator 0 -> NaN (D4)."""
+    """|close - close.shift(6)| / atr_norm (K6); denominator 0 -> NaN (D4)."""
     diff = np.full_like(ctx.c, np.nan)
     diff[6:] = np.abs(ctx.c[6:] - ctx.c[:-6])
-    atr = ctx.atr24
+    atr = ctx.atr_norm
     out = np.full_like(ctx.c, np.nan)
     valid = np.isfinite(atr) & (atr > 0)
     out[valid] = diff[valid] / atr[valid]
@@ -468,8 +579,8 @@ def _shift6_atr(ctx: Ctx) -> np.ndarray:
 
 
 def _bar_range_atr(ctx: Ctx) -> np.ndarray:
-    """(high - low) / atr_24 (K6); denominator 0 -> NaN (D4)."""
-    atr = ctx.atr24
+    """(high - low) / atr_norm (K6); denominator 0 -> NaN (D4)."""
+    atr = ctx.atr_norm
     out = np.full_like(ctx.c, np.nan)
     valid = np.isfinite(atr) & (atr > 0)
     out[valid] = (ctx.h[valid] - ctx.l[valid]) / atr[valid]

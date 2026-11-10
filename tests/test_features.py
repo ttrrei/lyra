@@ -50,18 +50,18 @@ def test_prior60_path_eff60_known(ctx, data):
         assert cols["prior60_high"][t] == h[t - 60 : t].max()
         assert cols["prior60_low"][t] == l[t - 60 : t].min()
         assert cols["prior60_range"][t] == h[t - 60 : t].max() - l[t - 60 : t].min()
-    # path_eff_60[t] = |c[t]-c[t-60]| / sum(|c[i]-c[i-1]|, i=t-59..t)
+    # efficiency_60[t] = |c[t]-c[t-60]| / sum(|c[i]-c[i-1]|, i=t-59..t)
     for t in (100, 200):
         num = abs(c[t] - c[t - 60])
         den = sum(abs(c[i] - c[i - 1]) for i in range(t - 59, t + 1))
-        assert cols["path_eff_60"][t] == pytest.approx(num / den, rel=1e-12)
+        assert cols["efficiency_60"][t] == pytest.approx(num / den, rel=1e-12)
     # zero denominator (flat) → NaN (D4)
     flat = features.Ctx(o=np.full(80, 5.0), h=np.full(80, 5.0), l=np.full(80, 5.0),
                         c=np.full(80, 5.0), v=np.full(80, 1.0),
                         t=np.datetime64("2020-01-01","us")+np.arange(80,dtype=np.int64)*np.timedelta64(1,"h"), n=80)
     _, cflat = _compute(flat)
-    assert np.all(np.isnan(cflat["path_eff_60"]))
-    assert np.all(np.isnan(cflat["prior24_range_pos"]))
+    assert np.all(np.isnan(cflat["efficiency_60"]))
+    assert np.all(np.isnan(cflat["range_position_24"]))
 
 
 def test_grid_only_windows():
@@ -80,7 +80,7 @@ def test_grid_only_windows():
 def test_feature_count_matches_r31(ctx, data):
     reg, cols = _compute(ctx)
     # R3.1 / §3.4 fixed list — 116 features (F1 drift guard)
-    assert len(reg) == 134
+    assert len(reg) == 143   # 134 core + 9 corpus fills (0008/#99)
     # and every computed column is present in the wide table
     assert set(cols) == set(reg.names())
 
@@ -352,7 +352,7 @@ def test_wide_table_self_sufficient(ctx, data):
     names = set(table.column_names)
     for req in ("mid_o", "mid_h", "mid_l", "mid_c", "volume", "n_bars", "time"):
         assert req in names
-    assert len(table.column_names) == 134 + 8
+    assert len(table.column_names) == 143 + 8
 
 
 def _input_dict(data):
@@ -395,7 +395,7 @@ def test_per_instrument_streaming(ctx, data):
     built = features.build_instrument(_fake_con(data), "TEST", 60, reg)
     # the built working set holds exactly one instrument's row count
     assert built["n"] == data["n"]
-    assert len(built["cols"]) == 134
+    assert len(built["cols"]) == 143
 
 
 def _fake_con(data):
@@ -426,7 +426,7 @@ def test_universal_21_instruments(data):
     reg = features.build_registry()
     # every instrument runs against this one registry — no per-instrument
     # algorithm/parameter fork exists in the code path (D5 loop is uniform).
-    assert len(reg) == 134
+    assert len(reg) == 143   # 134 core + 9 corpus fills (0008/#99)
     # and the compute functions are pure (same input → same output), so
     # instrument A and B differ only in their input data, never in the math.
     a = features.Ctx(o=np.full(50, 1.0), h=np.full(50, 1.0), l=np.full(50, 1.0),
@@ -469,31 +469,91 @@ def test_gate4_zero_amplitude_no_crash():
         col = cols[name]
         assert not np.isinf(col).any(), f"{name}: Inf leaked on zero-amplitude input"
     # division features must be NaN (D4 defined-NULL), never 0/Inf
-    for name in ("path_eff_24", "prior24_range_pos", "shift6_atr",
-                 "bar_range_atr", "rel_quote_activity", "zscore_24",
+    for name in ("efficiency_24", "range_position_24", "return_6_atr",
+                 "range_atr", "relative_volume_24", "zscore_24",
                  "natr_24", "bband_pctb_24", "bband_bw_24"):
         post = cols[name][max(reg.get(name).warmup_bars, 30):]
         assert np.all(np.isnan(post) | np.isfinite(post)), name
         assert not np.isinf(post).any(), f"{name}: Inf on flat input"
 
 
-def test_atr_normalization_basis_atr24(ctx, data):
-    """K6: every ATR-normalized feature divides by atr_24 (never a mixed basis)."""
+def test_atr_normalization_basis_atr12(ctx, data):
+    """K6 (v1.5/#99): every ATR-normalized feature divides by atr_12.
+
+    Single uniform basis — the corpus' ATR(14) was rebased to the in-grid
+    ATR(12) per the 2026-11-11 user ruling (no off-grid 14 allowed)."""
     reg, cols = _compute(ctx)
-    atr24 = cols["atr_24"]
-    # bar_range_atr = (h-l)/atr_24
-    m = np.isfinite(atr24) & (atr24 > 0)
-    assert np.allclose(cols["bar_range_atr"][m], (data["h"][m] - data["l"][m]) / atr24[m],
+    atr = cols["atr_12"]
+    # range_atr = (h-l)/atr_12
+    m = np.isfinite(atr) & (atr > 0)
+    assert np.allclose(cols["range_atr"][m], (data["h"][m] - data["l"][m]) / atr[m],
                        rtol=0, atol=1e-12)
-    # prior24_width = prior24_range / atr_24
-    m2 = np.isfinite(atr24) & (atr24 > 0) & np.isfinite(cols["prior24_width"])
-    assert np.allclose(cols["prior24_width"][m2], cols["prior24_range"][m2] / atr24[m2],
+    # range_width_atr_24 = prior24_range / atr_12
+    m2 = np.isfinite(atr) & (atr > 0) & np.isfinite(cols["range_width_atr_24"])
+    assert np.allclose(cols["range_width_atr_24"][m2], cols["prior24_range"][m2] / atr[m2],
                        rtol=0, atol=1e-12)
-    # shift6_atr = |c - c.shift(6)| / atr_24
-    m3 = np.isfinite(atr24) & (atr24 > 0) & np.isfinite(cols["shift6_atr"])
+    # return_6_atr = |c - c.shift(6)| / atr_12
+    m3 = np.isfinite(atr) & (atr > 0) & np.isfinite(cols["return_6_atr"])
     c = data["c"]
-    ref = np.abs(c[m3] - c[np.where(m3)[0] - 6]) / atr24[m3]
-    assert np.allclose(cols["shift6_atr"][m3], ref, rtol=0, atol=1e-12)
+    ref = np.abs(c[m3] - c[np.where(m3)[0] - 6]) / atr[m3]
+    assert np.allclose(cols["return_6_atr"][m3], ref, rtol=0, atol=1e-12)
+    # corpus fills (v1.5): distance features use the same ATR(12) basis
+    m4 = m & np.isfinite(cols["close_sma24_distance_atr"])
+    assert m4.any()
+    sma24 = talib.SMA(data["c"], timeperiod=24)
+    assert np.allclose(cols["close_sma24_distance_atr"][m4],
+                       (data["c"] - sma24)[m4] / atr[m4], rtol=1e-10)
+    m5 = m & np.isfinite(cols["close_ema60_distance_atr"])
+    assert m5.any()
+    ema60 = talib.EMA(data["c"], timeperiod=60)
+    assert np.allclose(cols["close_ema60_distance_atr"][m5],
+                       (data["c"] - ema60)[m5] / atr[m5], rtol=1e-10)
+
+
+def test_psar_direction_and_flips(ctx, data):
+    """v1.5 corpus fills: psar_direction ±1 and nova flip contract (±1→∓1)."""
+    reg, cols = _compute(ctx)
+    d = cols["psar_direction"]
+    sar = talib.SAR(data["h"], data["l"], acceleration=0.02, maximum=0.2)
+    m = np.isfinite(sar)
+    assert np.all((d[m] == 1.0) | (d[m] == -1.0))
+    assert np.all(d[m & (data["c"] > sar)] == 1.0)
+    assert np.all(d[m & (data["c"] <= sar)] == -1.0)
+    assert np.all(np.isnan(d[~m]))
+    prior = np.full_like(d, np.nan); prior[1:] = d[:-1]
+    for up, dn in (("psar_flip_up", "psar_flip_down"),):
+        valid = np.isfinite(d) & np.isfinite(prior)
+        expect_up = (d == 1) & (prior == -1)
+        expect_dn = (d == -1) & (prior == 1)
+        assert np.allclose(cols[up][valid], expect_up[valid].astype(float), rtol=0)
+        assert np.allclose(cols[dn][valid], expect_dn[valid].astype(float), rtol=0)
+        assert np.all(np.isnan(cols[up][~valid]))
+
+
+def test_supertrend_direction_and_flips(ctx, data):
+    """v1.5 corpus fills: supertrend_direction ±1 consistent with bull/bear."""
+    reg, cols = _compute(ctx)
+    d = cols["supertrend_direction"]
+    bull, bear = cols["supertrend_bullish"], cols["supertrend_bearish"]
+    m = np.isfinite(d)
+    assert np.all(d[m & (bull == 1)] == 1.0)
+    assert np.all(d[m & (bear == 1)] == -1.0)
+    valid = np.isfinite(d) & np.isfinite(np.r_[np.nan, d[:-1]])
+    prior = np.full_like(d, np.nan); prior[1:] = d[:-1]
+    valid = np.isfinite(d) & np.isfinite(prior)
+    assert np.allclose(cols["supertrend_flip_up"][valid],
+                       ((d == 1) & (prior == -1))[valid].astype(float), rtol=0)
+    assert np.allclose(cols["supertrend_flip_down"][valid],
+                       ((d == -1) & (prior == 1))[valid].astype(float), rtol=0)
+
+
+def test_ema_alignment_6_24(ctx, data):
+    """v1.5 corpus fill: sign(ema6 − ema24), NaN where either is NaN."""
+    reg, cols = _compute(ctx)
+    e6, e24 = talib.EMA(data["c"], timeperiod=6), talib.EMA(data["c"], timeperiod=24)
+    m = np.isfinite(e6) & np.isfinite(e24)
+    assert np.allclose(cols["ema_alignment_6_24"][m], np.sign(e6[m] - e24[m]), rtol=0)
+    assert np.all(np.isnan(cols["ema_alignment_6_24"][:20]))
 
 
 # --- real-data end-to-end (5m/1h layers present) ----------------------------
@@ -511,5 +571,5 @@ def test_real_data_one_instrument(tmp_path):
     res = features.run_features(root, 60, reg, instruments=["SPX500_USD"])
     assert res.total_rows > 0
     t = pq.read_table(res.paths[0])
-    assert len(t.column_names) == 142   # 134 + 8
+    assert len(t.column_names) == 151   # 143 + 8
     assert t.schema.metadata[b"feature_version"] == str(features.FEATURE_VERSION).encode()

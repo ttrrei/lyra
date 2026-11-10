@@ -2,8 +2,9 @@
 
 > **English**: [0008-migration-and-regression.en.md](./0008-migration-and-regression.en.md)
 >
-> 状态：**待写 → 范围修订稿 v0.1（2026-11-10，per ACTION_LOG #99）**
-> 上一版范围（"332 策略迁移"）已被勘误取代，见 §1。
+> 状态：**v0.2 最终裁决稿（2026-11-11，用户三裁决落地，per ACTION_LOG #100）**
+> v0.1 的三条推荐裁决（alias 表 / rsi_14 新增 / ATR 基分歧记录）
+> **全部被用户 2026-11-11 最终裁决取代**（§2），见 §6 修订记录。
 
 ## 1. 范围勘误（为什么重写本文档）
 
@@ -29,60 +30,64 @@
 163 个真实策略 YAML（17 手写 + 146 campaign）中出现的全部 feature 名
 （24 个不同名，其中 20 个未注册）。
 
-### D 表：逐条裁决（本稿按推荐预填，实现前需用户最终确认）
+### D 表：逐条裁决（**用户 2026-11-11 三裁决，最终版**）
 
-**B 类（10）— 同物异名，alias 表映射，不改已注册名**：
+**裁决 1 — B 类（10）不再做 alias 表，直接改名注册（nova 名为唯一规范名）**：
+用户裁决"保留 1 套语料库，优先 nova 名；moneta decom 时 mapping 一起
+decom，不做映射表"。即 lyra 的 10 个旧注册名**删除**，改按 nova 语料名
+注册（语义核验同 v0.1 表，全部一致）：
 
-| 语料名（nova） | lyra 现名 | 语义核验 |
+| lyra 旧名（删除） | 注册名（nova 规范） |
+|---|---|
+| `breakout_up` | `breakout_up_24` |
+| `breakout_down` | `breakout_down_24` |
+| `failed_breakout_up` | `failed_breakout_up_24` |
+| `failed_breakout_down` | `failed_breakout_down_24` |
+| `prior24_range_pos` | `range_position_24` |
+| `path_eff_24` / `path_eff_60` | `efficiency_24` / `efficiency_60` |
+| `rel_quote_activity` | `relative_volume_24` |
+| `bar_range_atr` | `range_atr` |
+| `prior24_width` | `range_width_atr_24` |
+| `shift6_atr` | `return_6_atr` |
+
+落地：`features.py` registry 改名（无 alias 层）；134→134 改名，
++9 新增 = **143**；`strategy_schema` / 编译器不动（名字直接查
+registry）；moneta 语料名（若有差异）**不做**映射——moneta 在 decom。
+
+**裁决 2 — `rsi_14` 不新增；受影响策略改写为 `rsi_12` 重跑（TODO）**：
+用户裁决"rsi14 不新增，留 todo：mean_reversion 用 rsi12 重跑"。
+`rsi_12` 已在 K8 网格内注册，零成本。受影响 nova 方向文件（TODO，
+迁移 §3 时逐字改写 rsi_14→rsi_12 后重跑）：
+`momentum_exhaustion.yaml`（8 处）、`pullback_reentry.yaml`（4 处）、`session_temporal.yaml`（2 处）。注：根级手写文件 `nova/strategies/ema_pullback.yaml`（4 处 rsi_14）不属 12 方向正式库、不在 0008 迁移范围，如需保留同样按 rsi_12 改写。temp/ 中含 rsi_14 的 24 条（实测 validate 失败集）等 0010 triage 时一并处理。
+
+**裁决 3 — ATR 归一化基统一重定基：ATR(14)→ATR(12)（K6 基变更）**：
+用户裁决"ATR 参数 14 应按 12 替代，相关策略可重跑"。落地：
+- `features.py`：`ATR_NORM 24 → 12`（12 在 K8 网格内；14 在网格外，
+  不为语料破格加网格）；
+- 受影响 K6 特征（`range_atr` / `range_width_atr_24` / `return_6_atr`）
+  分母随之改为 ATR(12)；
+- **C 类新特征 `close_ema60_distance_atr` / `close_sma24_distance_atr`
+  也统一用 ATR(12) 分母**（nova 原始 ATR(14)/SMA(TR,14) 分母不采用；
+  单一基 K6 优先——v0.1 的"已知分歧"注作废）；
+- nova 受影响策略（用 ATR-14 系特征的阈值比较）在 §3 迁移重跑后，
+  结果漂移属**预期**，记录进 cross-check 报告即可。
+
+**C 类（9）— 真新增，0003 v1.5**：
+
+| 新特征名 | 定义（对齐 nova `features.py` L50-87，分母按裁决 3 统一 ATR(12)） | 类型 |
 |---|---|---|
-| `breakout_up_24` | `breakout_up` | close > prior24 high，一致 |
-| `breakout_down_24` | `breakout_down` | close < prior24 low，一致 |
-| `failed_breakout_up_24` | `failed_breakout_up` | wick 穿 prior high 收盘回内，一致 |
-| `failed_breakout_down_24` | `failed_breakout_down` | 一致 |
-| `range_position_24` | `prior24_range_pos` | (close−prior_low)/prior_range，一致 |
-| `efficiency_24` | `path_eff_24` | \|Δc\|/Σ\|Δc\|，一致（lyra 注释即 nova efficiency 契约） |
-| `relative_volume_24` | `rel_quote_activity` | volume/SMA(volume,24)，一致 |
-| `range_atr` † | `bar_range_atr` | 公式同 (h−l)/ATR，但 **ATR 基不同**（†） |
-| `range_width_atr_24` † | `prior24_width` | 公式同 prior_range/ATR，**ATR 基不同**（†） |
-| `return_6_atr` † | `shift6_atr` | 公式同 \|c−c₋₆\|/ATR，**ATR 基不同**（†） |
-
-† **ATR 归一化基分歧（已知，记录在案）**：nova 用 **ATR(14)**
-（`close_sma24_distance_atr` 甚至用 SMA(TR,14)），lyra 按 K6 用
-**ATR(24)**。三行 † 特征的数值域因此**不逐点相等**——策略里的阈值
-比较（如 `range_atr < 1.5`）行为会轻微漂移，属 O-0005-1 同类"已知
-分歧"，随 cross-check 记录，**不**视为 alias 错误。若 0010 triage
-发现某策略结果对该分歧敏感，再决定是否注册 ATR-14 变体（默认不）。
-
-B 类落地方式：在 `strategy_schema.py` 增加 **alias 表**（语料名 →
-注册名），编译器先查 alias 再查 registry；**不**改 134 个已注册名
-（R11：17 个已注册 feature 名不变）。
-
-**C 类（10）— 真新增，0003 v1.5**：
-
-| 新特征名 | 定义（对齐 nova `features.py` L50-87） | 类型 |
-|---|---|---|
-| `psar_direction` | close > SAR ? +1 : −1（SAR 无效处 NaN）；lyra 的 bullish/bearish 是 {1,0}×2，值域不等价 | STATE |
-| `supertrend_direction` | supertrend 方向 ±1（同上，不等价于 bullish/bearish） | STATE |
+| `psar_direction` | close > SAR ? +1 : −1（SAR 无效处 NaN）；与 {1,0}×2 的 bullish/bearish 值域不等价，**并存** | STATE |
+| `supertrend_direction` | supertrend 方向 ±1（同上） | STATE |
 | `psar_flip_up` | dir==+1 & dir₋₁==−1（事件布尔，warmup NaN） | EVENT |
 | `psar_flip_down` | dir==−1 & dir₋₁==+1 | EVENT |
 | `supertrend_flip_up` | 同 flip 语义，supertrend 方向序列 | EVENT |
 | `supertrend_flip_down` | 同 flip 语义 | EVENT |
 | `ema_alignment_6_24` | sign(ema6−ema24) ∈ {+1,−1,0} | STATE |
-| `close_ema60_distance_atr` † | (close−ema60)/ATR(14)（nova L69；† ATR 基同 B 类注） | VALUE |
-| `close_sma24_distance_atr` † | (close−sma24)/SMA(TR,14)（nova L66-68，分母是 TR 均值非 ATR） | VALUE |
-| `rsi_14` | RSI(14)（TA-Lib，K8 网格外特例：语料兼容） | VALUE |
+| `close_ema60_distance_atr` | (close−ema60)/**ATR(12)** | VALUE |
+| `close_sma24_distance_atr` | (close−sma24)/**ATR(12)** | VALUE |
 
-共 **10 个新注册特征** → `FEATURE_VERSION` 4→5（I13）。
-`close_*_distance_atr` 按 nova 原始分母实现（ATR-14 / SMA(TR,14)），
-不套 lyra 的 atr_24 基——它们是 C 类新特征，有完整实现自由度，
-**不做**归一化基替换。
-`ema_alignment_6_24` 与 `rsi_14` 在 B/C 边界：**按真新增处理**（lyra
-没有对应物）。
-
-> 注：`rsi_14` 是 K8 网格（6/12/24/60/120）外的参数值。裁决依据：
-> 语料兼容优先；若用户拒绝破格，改为 alias `rsi_14 → rsi_12` 不可行
-> （参数语义不同），则该策略 YAML 需改写——0010 triage 时按 drop 处理。
-> **默认：新增 rsi_14。**
+共 **9 个新注册特征 + 10 个改名** → `FEATURE_VERSION` 4→5（I13）。
+`rsi_14` 按裁决 2 **不在**本表（不新增）。
 
 ## 3. 12 方向正式库迁移
 
@@ -93,7 +98,8 @@ strategies/directions/<family>/v01.yaml   # 从 nova/strategies/directions/*.yam
 ```
 
 回归门禁：
-1. `lyra validate` 12/12 通过（B 类 alias + C 类新特征就绪后）
+1. `lyra validate` 12/12 通过（B 类改名 + C 类新特征就绪后；rsi_14 文件
+   按裁决 2 改写为 rsi_12）
 2. `lyra run` 12 方向 × 21 标的 × 1h，报告可审（R10 验收的 ≥3 条
    long-only/short-only/long+short 条件由本步满足）
 3. 与 nova 同策略 field-for-field cross-check（沿用 0005/0006 方法）
@@ -107,8 +113,8 @@ moneta_s_series/(_index.json)}`。
 0008 只要求：
 1. `lyra validate` 对 temp/ 146 条 YAML 全量跑一遍，**只记录**
    通过/失败统计进报告（不作为门禁 fail）；
-2. alias 表 + C 类新特征就绪后，temp/ 146 条中失败数应显著下降
-   （基线：当前全部失败于未注册 feature）。
+2. 改名 + C 类新特征就绪后，temp/ 146 条中失败数应显著下降
+   （基线：当前失败于未注册 feature；rsi_14 仍失败——裁决 2，等 0010）。
 
 ## 5. 不在 0008 范围
 
@@ -123,3 +129,4 @@ moneta_s_series/(_index.json)}`。
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-11-10 | 0.1 | 范围修订稿：勘误"332"口径；O16 20 缺口 B/C 重分类（**B 10 alias + C 10 新增**）；补 ATR 归一化基（14 vs 24）已知分歧注；`close_*_distance_atr` 两条入 C 类；temp/ 骨架引用；0010 拆分。 |
+| 2026-11-11 | 0.2 | **用户三裁决最终版**（取代 v0.1 推荐预填）：① B 类 10 个**改名**注册（nova 名规范，无 alias 表，moneta 名不映射）；② `rsi_14` **不新增**，受影响 3 个方向文件（momentum_exhaustion/pullback_reentry/session_temporal）改写 rsi_12 重跑（TODO）；③ ATR 归一化基 **24→12**（替代语料 ATR(14)，K6 基变更；C 类距离特征同基）。C 类 10→**9**。注册数 134→**143**；FEATURE_VERSION 4→5。 |

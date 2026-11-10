@@ -1,0 +1,29 @@
+version: 1
+id: directions_relative_strength
+family: relative_strength
+hypothesis: Within-instrument strength of a six-bar price change above one Wilder ATR14, with two closes in the directional outer range quarter, may persist; this is normalized time-series strength, not cross-asset ranking.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+      - {feature: return_6_atr, op: gt, value: 1}
+      - held_for:
+          bars: 2
+          condition: {feature: range_position_24, op: gt, value: 0.75}
+  short:
+    all:
+      - {feature: return_6_atr, op: lt, value: -1}
+      - held_for:
+          bars: 2
+          condition: {feature: range_position_24, op: lt, value: 0.25}
+exit:
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.03
+  max_holding_bars: 18
+  long: {feature: return_6_atr, op: lte, value: 0}
+  short: {feature: return_6_atr, op: gte, value: 0}
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

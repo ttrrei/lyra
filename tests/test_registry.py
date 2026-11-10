@@ -15,7 +15,7 @@ def test_registry_core_names_unique():
     reg = features.build_registry()
     names = reg.names()
     assert len(names) == len(set(names))
-    assert len(names) == 134, "R3.1 / §3.4 fixed list — count is a contract (F1)"
+    assert len(names) == 143, "R3.1 / §3.4 fixed list — count is a contract (F1)"
 
 
 def test_registry_alpha_conflict_raises(tmp_path: Path):
@@ -58,4 +58,4 @@ def test_load_from_core_only_unchanged(tmp_path: Path):
     reg = features.load_from(tmp_path / "no_such_dir")
     assert reg.names() == core.names()
     # I16: the core registry itself is untouched.
-    assert len(core) == 134
+    assert len(core) == 143

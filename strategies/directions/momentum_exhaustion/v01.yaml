@@ -1,0 +1,37 @@
+version: 1
+id: directions_momentum_exhaustion
+family: momentum_exhaustion
+hypothesis: A confirmed RSI retreat from a recent extreme, accompanied by an opposing six-bar price change, may mark momentum exhaustion.
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+      - within:
+          bars: 6
+          condition: {feature: rsi_12, op: lt, value: 25}
+      - held_for:
+          bars: 2
+          condition: {feature: rsi_12, op: gt, value: 35}
+      - {feature: return_6_atr, op: gt, value: 0}
+      - {feature: rsi_12, op: lt, value: 50}
+  short:
+    all:
+      - within:
+          bars: 6
+          condition: {feature: rsi_12, op: gt, value: 75}
+      - held_for:
+          bars: 2
+          condition: {feature: rsi_12, op: lt, value: 65}
+      - {feature: return_6_atr, op: lt, value: 0}
+      - {feature: rsi_12, op: gt, value: 50}
+exit:
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.02
+  max_holding_bars: 12
+  long: {feature: rsi_12, op: gte, value: 50}
+  short: {feature: rsi_12, op: lte, value: 50}
+execution:
+  spread_bps: 2
+  slippage_bps_per_side: 0.2
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 0

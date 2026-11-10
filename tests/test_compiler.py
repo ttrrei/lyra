@@ -294,7 +294,7 @@ def test_compiler_rejects_nested_temporal():
 def test_compiler_rejects_unknown_feature():
     with pytest.raises(ss.SchemaError):
         _parse(dict(VALID_RSI, entry={
-            "long": {"feature": "range_position_24", "op": "gt", "value": 0.5},
+            "long": {"feature": "totally_unknown_feature", "op": "gt", "value": 0.5},
             "short": {"feature": "rsi_6", "op": "gt", "value": 70},
         }))
 

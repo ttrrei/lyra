@@ -33,6 +33,8 @@ strategies/*
 !strategies/examples/**
 !strategies/temp/
 !strategies/temp/**
+!strategies/directions/
+!strategies/directions/**
 
 # --- 本地 OCI 镜像（B13，可重建） -------------------------------------------
 # 默认落在 ~/.lyra/<workspace>/…；若被 --inside-repo 落进仓库则忽略
