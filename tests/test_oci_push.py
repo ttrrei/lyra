@@ -124,6 +124,64 @@ def test_push_immutable_same_sha_skips(tmp_path):
     assert t.puts == []
 
 
+def test_push_immutable_skip_with_realistic_md5_listing(tmp_path):
+    # Regression (self-check 2026-11-10): real OCI PAR listings carry
+    # name,size,md5(base64),timeModified — NOT sha256. Comparing a remote
+    # md5 to a local sha256 (different digests) made every unchanged object
+    # look like an immutable conflict, defeating I20 idempotent skips.
+    from tests.conftest import FakePar, md5_b64
+
+    content = b'{"ok":1}'
+    seed_local(tmp_path, {"runs/d1/t1/r1/manifest.json": content})
+
+    t = FakePar(objects={"runs/d1/t1/r1/manifest.json": content})
+    t.puts = []
+
+    def _put(url, **kwargs):
+        t.puts.append(url)
+        return FakeResponse(200)
+
+    t.put = _put
+
+    # listing is md5-only (no sha256 field) — realistic PAR shape
+    remote = {
+        "runs/d1/t1/r1/manifest.json": {
+            "name": "runs/d1/t1/r1/manifest.json",
+            "size": len(content),
+            "md5": md5_b64(content),
+            "timeModified": "2026-01-01T00:00:00Z",
+        }
+    }
+    from lyra.oci_push import plan_push
+
+    plan = plan_push(t, tmp_path, PREFIX, remote, top_levels=frozenset({"runs"}))
+    assert [s.rel_path for s in plan.skips] == ["runs/d1/t1/r1/manifest.json"]
+    assert plan.uploads == []
+    assert plan.conflicts == []
+
+
+def test_push_md5_listing_changed_still_conflict(tmp_path):
+    # A genuinely different payload under a md5-only listing must still be
+    # an immutable conflict — the md5 fix must not over-skip.
+    from tests.conftest import FakePar, md5_b64
+
+    remote_content = b"REMOTE"
+    seed_local(tmp_path, {"runs/d1/t1/r1/manifest.json": b"LOCAL"})
+    t = FakePar(objects={"runs/d1/t1/r1/manifest.json": remote_content})
+    remote = {
+        "runs/d1/t1/r1/manifest.json": {
+            "name": "runs/d1/t1/r1/manifest.json",
+            "size": len(remote_content),
+            "md5": md5_b64(remote_content),
+        }
+    }
+    from lyra.oci_push import plan_push
+
+    plan = plan_push(t, tmp_path, PREFIX, remote, top_levels=frozenset({"runs"}))
+    assert [c.reason for c in plan.conflicts] == ["immutable-sha-conflict"]
+    assert plan.uploads == [] and plan.skips == []
+
+
 def test_push_immutable_conflict_fails(tmp_path):
     seed_local(tmp_path, {"runs/d1/t1/r1/manifest.json": b"LOCAL"})
     t = FakeParRW(objects={"runs/d1/t1/r1/manifest.json": b"REMOTE"})

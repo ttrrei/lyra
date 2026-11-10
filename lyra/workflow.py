@@ -48,7 +48,11 @@ MAX_ACTIVE_BRANCHES_PER_TRACK = 8
 _BRANCH_RE = re.compile(r"^v\d+$")
 _VNN_FILE_RE = re.compile(r"^v(\d+)\.yaml$")
 _TRACK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-_BRANCH_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+# 0007 D2: 分支文件命名 = vNN.yaml（I17 immutable 分类依据）。new-version
+# 强制此格式，保证工具自己产出的分支文件可被 push 层分类为 immutable 并
+# 推送（非 vNN 命名的手写策略文件仍按 fail-closed 分类为 unclassified，
+# 需要作者自行归类，见 oci_push.classify_path 及 0007 决策稿 D2/D9）。
+_BRANCH_NAME_RE = re.compile(r"^v\d+$")
 
 
 class WorkflowError(RuntimeError):
@@ -487,9 +491,25 @@ def merge(
         # C6: record the *sha256* of the source (audit chain must not depend
         # on the branch name surviving prunes).
         parent_shas[p] = hashlib.sha256(pfile.read_bytes()).hexdigest()
-    slug = name or "merge-" + "-".join(parents)
+    # 0007 D2: merge candidates are vNN branches too (I17 immutable class).
+    # Default to the next free vNN number; an explicit name must also be vNN.
+    if not name:
+        existing = {
+            int(m.group(1))
+            for m in (
+                _VNN_FILE_RE.match(p.name)
+                for p in (workspace / "strategies" / direction).glob("*.yaml")
+                if p.is_file()
+            )
+            if m
+        }
+        n = 1
+        while n in existing:
+            n += 1
+        name = f"v{n:02d}"
+    slug = name
     if not _BRANCH_NAME_RE.match(slug):
-        raise WorkflowError(f"invalid merge name {slug!r}")
+        raise WorkflowError(f"invalid merge name {slug!r} — branches are vNN (0007 D2)")
     get_track(workspace, direction, track)  # must exist (I18 identity)
     enforce_branch_cap(workspace, direction, track)
 

@@ -187,14 +187,53 @@ def list_remote_map(transport: PushTransport, par_url: str) -> dict[str, dict[st
     return out
 
 
-def _remote_sha_or_md5(meta: Mapping[str, Any] | None) -> str | None:
+def _remote_sha256(meta: Mapping[str, Any] | None) -> str | None:
+    """Remote sha256 when the listing carries one (some backends do).
+
+    Never returns an md5 — comparing a remote md5 against a local sha256
+    (different digests) would make every unchanged object look like an
+    immutable conflict, defeating I20 idempotent skips on real PAR listings
+    (which only carry ``name,size,md5,timeModified`` per oci_client).
+    """
     if not meta:
         return None
-    for key in ("sha256", "eTag", "etag", "md5"):
+    v = meta.get("sha256")
+    if v:
+        return str(v).strip().strip('"').lower()
+    return None
+
+
+def _remote_md5(meta: Mapping[str, Any] | None) -> str | None:
+    if not meta:
+        return None
+    for key in ("md5", "eTag", "etag"):
         v = meta.get(key)
         if v:
-            return str(v).strip().strip('"').lower()
+            return str(v).strip().strip('"')
     return None
+
+
+def _same_object(local_path: Path, meta: Mapping[str, Any] | None) -> bool:
+    """True iff the local file is byte-identical to the remote object.
+
+    Uses sha256 when the listing carries one; otherwise compares md5 to
+    md5 (base64/hex tolerant, via oci_client._md5_matches). Falls back to
+    a size comparison when neither digest is available (I20, same policy
+    as oci_client.pull).
+    """
+    if not meta:
+        return False
+    rsha = _remote_sha256(meta)
+    if rsha:
+        return rsha == sha256_of_file(local_path)
+    rmd5 = _remote_md5(meta)
+    if rmd5:
+        from .oci_client import _md5_matches
+
+        return _md5_matches(local_path, rmd5)
+    local_size = local_path.stat().st_size
+    rsize = meta.get("size")
+    return rsize is not None and int(rsize) == local_size
 
 
 def _download_remote_text(
@@ -260,8 +299,9 @@ def push(
         ]
         plan.conflicts = [c for c in plan.conflicts if c not in forced]
         for c in forced:
+            fp = Path(local_root) / c.rel_path
             plan.uploads.append(
-                UploadItem(c.rel_path, sha256_of_file(Path(local_root) / c.rel_path), 0, "immutable")
+                UploadItem(c.rel_path, sha256_of_file(fp), fp.stat().st_size, "immutable")
             )
 
     result = PushResult(target_name=plan.target_name, dry_run=dry_run)
@@ -338,8 +378,7 @@ def plan_push(
         if meta is None:
             plan.uploads.append(UploadItem(rel, local_sha, size, kind))
             continue
-        remote_digest = _remote_sha_or_md5(meta)
-        if remote_digest is not None and remote_digest == local_sha:
+        if _same_object(path, meta):
             plan.skips.append(UploadItem(rel, local_sha, size, kind))
             continue
         if kind == "immutable":
@@ -347,7 +386,8 @@ def plan_push(
                 ConflictItem(
                     rel,
                     "immutable-sha-conflict",
-                    f"remote digest {remote_digest or 'unknown'} != local sha256 {local_sha[:16]}…",
+                    f"remote digest differs from local sha256 {local_sha[:16]}… "
+                    f"(I20 idempotent skip failed — contents differ)",
                 )
             )
             continue
