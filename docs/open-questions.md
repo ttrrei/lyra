@@ -10,7 +10,7 @@
 | # | 问题 | 倾向 | 状态 |
 |---|---|---|---|
 | O1 | snapshot_id 用整数还是时间戳？ | **定案（0002 v0.5）**：0002 **放弃目录级 snapshot_id**，采用**单文件外部表**（`all_data.parquet` / `ohlcv_5m.parquet` / `ohlcv_1h.parquet`）+ DuckDB catalog 命名视图；数据版本溯源以 **raw 层 OCI 对象 md5** 为唯一事实来源（I20）。整数 vs 时间戳的选型问题**随机制废弃而关闭**（批次7 D4：此前 ACTION_LOG 宣称已关闭但本文档仍留白，属文档断层） | **已关闭**（`0002` v0.5 + 批次7 D4） |
-| O2 | `runs/` 按 strategy_id 还是按日期分组？ | strategy_id | 待 `0007` 决策 |
+| O2 | `runs/` 按 strategy_id 还是按日期分组？ | **定案（0007 D7，用户裁决 2026-11-10）**：OCI 规范布局取 **`runs/<direction>/<track_id>/<run_id>/`**（对齐 R12 tracks，按方向 + track 分组，非日期/strategy_id）；0006 的**本地工作区**布局 `runs/<name>/<YYYYMMDD>/<run_id>/` 保持不变（暂存区），`push` 负责映射到规范 OCI 路径 | **已定案**（`0007` D7，实现期落地） |
 | O3 | alpha feature 按 family 分子目录吗？ | 不（文件名=注册名） | 待 `0003` 决策 |
 | O4 | `index/*.json` 进 git 作为只读镜像吗？ | 不进（0001 I15：`runs/` 全部 + alpha 路径不进 git；index 是派生物，可重建） | **已关闭**（0001） |
 | O5 | PAR URL 90 天过期怎么办？ | **定案（0002）**：PAR 由用户侧管理（过期重新生成、更新 `config.yml`）；`lyra pull` 遇 403/404 给出"PAR may have expired"诊断；`lyra-doctor`（0009）常规体检检测 PAR 可用性 | **已关闭**（`0002` §2） |
@@ -130,3 +130,4 @@
 | 2026-11-08 | 0.8 | 新增 **O17**：把 0005 O-0005-1（nova 自然日与 R4/O15 交易日口径冲突）纳入中央开放问题清单；保留已关闭 O15，只在 0006 锁定融资成本/报告口径前待裁决。 |
 | 2026-11-09 | 0.9 | **O17 收口（0006 锁定，用户委托我按推荐裁决并记录）**：默认 per-trade 自然日（确定性强 / 仅依赖数据 / 保持 nova cross-check diff=0 / 符合轻量立场），`simulate(trading_days=<n>)` + `--financing-days` 提供平值交易日覆盖作为 O15 合规出口；交易日历逐笔计数列为后续增强（非缺陷）。O15 维持关闭不改写。 |
 | 2026-11-09 | 1.0 | **O17 契约细化（批次4 C2，#88 处置）**：O15 交易日合规出口由旧扁平 `trading_days=<n>` / `--financing-days`（对多笔交易无差别扣同一天数，已移除）重构为**每笔交易**计数器 `trading_days_for(entry, exit)`——默认自然日（nova cross-check 基准）不变，0006 可在此接入真实交易日历逐笔计 R4/O15 交易日；"真实交易日历逐笔计数"仍为后续增强（引擎侧支持已就位）。O15/O17 裁决不推翻，仅契约 API 更新。 |
+| 2026-11-10 | 1.1 | **O2 定案（0007 D7，用户裁决 2026-11-10）**：`runs/` OCI 规范布局取 `runs/<direction>/<track_id>/<run_id>/`（对齐 R12 tracks），取代原"strategy_id 分组"草稿；0006 本地工作区布局不变，`push` 负责映射。见 0007 D7。 |
