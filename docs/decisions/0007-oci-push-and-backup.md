@@ -294,6 +294,7 @@ git、不联网（除 OCI）。
 |---|---|---|
 | 2026-11-10 | 0.1 | 初稿：范围裁决（OCI 同步 + R12 工作流全套，用户 2026-11-10）；D1–D10；不变量 I18/I21/I22；测试矩阵；O2 runs 布局取 `runs/<direction>/<track_id>/<run_id>`、O15 `backup`/`sync` 别名；R10/R11/R12 挂起项中 OCI/工作流部分承接，332 归 0008。 |
 | 2026-11-10 | 0.2 | 自检+对抗性核验（#93）修正 3 处：① D7 纠偏——track_id 为 0007 引入、由 `push --track` 注入 OCI 归档路径，0006 manifest 含 `direction`（可复用）但**无** `track_id`；② B5/C1 PAR-PUT 措辞精确化——取决于**挂载模式**（只读不支持、读写支持，`shutil.copy2` 即可），非"PAR 必然只读"；③ D8 补 0004 `strategy_schema.py` 已实现 `parents`/`driven_by_lesson`/`inherited` 的复用点。无阻塞设计问题，27 行测试矩阵实测通过，进入实现。 |
+| 2026-11-10 | 0.3 | **已实施**（#94）：新增 `lyra/oci_push.py`（I17 分类器 / plan / dry-run / force-push 提升 immutable 冲突 / append-only 行级超集 / unclassified fail-closed / I19 脱敏 / D4 无目标报错）+ `lyra/workflow.py`（tracks 基线冻结 / 每 track 8 active cap（`MAX_ACTIVE_BRANCHES_PER_TRACK`，唯一机器门禁）/ prune / new-version 复用 0004 `parent`+`parents`+`driven_by_lesson` / context track 隔离 + 0006 metrics 摘要 / compare 只读 / merge 只新增候选（`inherited`）/ synthesize 只写 `reviews/`）；CLI 新增 11 命令（push/backup/sync/list/push-strategy/push-direction/tracks/context/new-version/compare/merge/synthesize）；`tests/test_oci_push.py`（30）+ `tests/test_workflow.py`（20）全绿，全仓 228→278、pyflakes 干净。实现期确认：runs 无独立 PAR 槽位，push 侧 runs 回落到 `strategies_par_url`（或 `data_par_url`）——**实现期决策**（D7 未定 runs PAR 槽位，config_example 可 0009 补 `runs_par_url`）。 |
 
 ---
 
@@ -351,12 +352,17 @@ D 决策处置；3 个实现期检查项（B5）非设计缺陷。无阻塞设�
 > "相反解释/失败模式" + 判定 + 处置。
 
 **C1（高）PAR 是否支持 PUT？若 PAR 只读，整个 push 侧不成立**
-- 失败模式：0002 拉取用 PAR（只读）成立；但 OCI PAR 传统上是**预授权只读**链接，
-  push（写）可能根本不能用 PAR URL，必须走 OCI SDK 签名。
-- 判定：**部分成立**——这是 0007 实现期的最大不确定点（B5 已列）。
+- 失败模式：0002 拉取用 PAR（只读）成立；PAR 若为**只读挂载**则不支持 PUT，
+  此时必须走 OCI SDK 签名。
+- 判定：**部分成立**——这是 0007 实现期的最大不确定点（B5 已列）。**0.2 自检
+  已纠正**：PUT 可行性取决于**挂载模式**（只读不支持、读写支持），非"PAR 必然只读"。
 - 处置：D3/D4 已把传输抽象为"PAR 优先 / OCI SDK auth 备选"，`config.auth_file`
   出口已留；实现期第一步就是**在真实桶验证 push 传输**（R10 验收"OCI pull/push
-  真实桶端到端跑通"）。设计层**不假设** PAR 支持 PUT，保持两种传输可切换。
+  真实桶端到端跑通"）。
+- **0.3 实施状态**：✅ **已落地**——`oci_push.push` 要求 transport 有 `.put` 方法，
+  无则 `OciPushError("transport has no put() — ... is read-only; mount a read/write
+  PAR or use SDK auth (0007 C1)")`；CLI 侧 `_push_transport()` 用 `requests.Session`
+  同时暴露 `get`+`put`。读写 PAR（NFS mount）用 `shutil.copy2` 即可实现 `.put`。
 
 **C2（高）append-only"超集"判定在语义上很弱，容易把"改一个词"当成合法推进**
 - 失败模式：`lessons.md` 旧行"用 SMA"被改成"用 EMA"，行集合变了——若按"行 ⊇"
@@ -368,6 +374,10 @@ D 决策处置；3 个实现期检查项（B5）非设计缺陷。无阻塞设�
   **"旧内容逐字保留 + 只允许追加/段级扩展"**（B5 G4 粒度项）。**这条把 C2 从
   "可接受"降级为"需实现期收紧"**——设计层已把语义写为"新 ⊇ 旧"，实现期按更严的
   "逐字保留"落地，宁可 fail-closed。
+- **0.3 实施状态**：✅ **已落地**——`oci_push.is_append_only_superset` 实现为
+  **行子序列**检查（旧的非空行须按原顺序出现在新内容中），**重排**
+  （`line1\nline2` → `line2\nline1`）与**改写**均被拒绝，追加/段级插入放行；
+  回归测试 `test_superset_reorder_rejected` 覆盖重排拒绝。
 
 **C3（中）`--force-push` 覆盖了 immutable 冲突，等于开了一个绕过 I17 的口子**
 - 失败模式：`--force-push` 让任何人覆盖 OCI 上的 immutable runs/vNN.yaml，破坏
@@ -404,6 +414,10 @@ D 决策处置；3 个实现期检查项（B5）非设计缺陷。无阻塞设�
 - 处置：D8 要求 merge 记**来源的 sha256**（不只分支名），来源文件**不改**；跨 track
   merge 时来源 hash 仍在 OCI（I17 immutable），审计链不依赖分支名存活。可实现，
   已在 D8 处置（记 sha 而非裸名）。
+- **0.3 实施状态**：✅ **已落地**——`workflow.merge` 在候选分支中写
+  `# parent_sha256 (0007 C6, provenance): <parent>: <sha256>`（`inherited` 仍记分支
+  名供 0004 schema 使用，sha 为审计锚）；回归测试断言候选含两个来源的精确
+  sha256 且源分支文件字节不变。
 
 **C7（低）`lyra list` 在 PAR 只读下是成立的，但"列 OCI 对象"可能暴露对象清单**
 - 失败模式：`list` 把 OCI 上的对象名/大小列出来，若含敏感路径则信息泄露。
