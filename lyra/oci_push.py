@@ -19,7 +19,7 @@ empty/unconfigured target is an error, never a silent skip (D4).
 
 Transport: anything exposing ``get`` (listing, 0002-style) and ``put``
 (upload). A transport without ``put`` fails with a clear error (C1: read-only
-PAR cannot be pushed to; use a read/write PAR or SDK auth). PAR URLs are
+PAR cannot be pushed to; use a read/write PAR). PAR URLs are
 always redacted in error messages (I19).
 """
 
@@ -289,7 +289,7 @@ def push(
     if not hasattr(transport, "put"):
         raise OciPushError(
             f"transport has no put() — {redact_par_url(par_url)} is read-only; "
-            "mount a read/write PAR or use SDK auth (0007 C1)"
+            "mount a read/write PAR (M3: SDK auth is rejected, not implemented)"
         )
 
     remote_map = list_remote_map(transport, par_url)

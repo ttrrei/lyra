@@ -15,10 +15,9 @@ oci:
   strategies_par_url: "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/strategies-upload/"   # strategy YAML + hypothesis/lessons
   features_par_url:   "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/features-upload/"     # custom features + contract cards + tests
 
-  # Optional OCI SDK auth, only needed if a push target cannot use a
-  # write PAR. The credentials file is NOT in git and NOT read from
-  # environment variables (avoids shell-history leakage). See B10.
-  # auth_file: "~/.lyra/credentials"
+  # NOTE (M3, user ruling 2026-11-11): OCI SDK auth is NOT implemented —
+  # a push target that cannot be mounted as a read/write PAR will produce an
+  # explicit push error; mount a read/write PAR instead. No auth_file slot.
 
 local:
   # OCI mirrors live OUTSIDE the repository by default (anti-footgun:

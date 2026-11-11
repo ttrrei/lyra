@@ -127,11 +127,14 @@ strategies/directions/<family>/v01.yaml   # 从 nova/strategies/directions/*.yam
 | 交易笔数 | nova 1431 vs lyra 1612 | 数据覆盖差异 ⚠️ |
 
 **数据层发现（非 0008 代码问题）**：lyra 与 nova 的 OHLC 在重叠部分
-**逐 bar 完全一致**（USD_JPY 同窗口 OHLC 全等），但：
-1. **bar 覆盖不同**：lyra 21 根/日（24h 中有 3 根缺失，如周六全天缺失、
-   部分时段缺口），nova 24 根/日。同源性未确认（lyra 的 SPX 甚至出现
-   115 根/周的数据，nova 仅 3 根/2 天）。两侧 raw_csv/parquet 来源与
-   去重规则不一致——**需数据 owner 裁决**（新 O 项挂起）。
+**逐 bar 完全一致**（USD_JPY 同窗口 OHLC 全等），但 bar 覆盖不同：
+**O18 已深挖并关闭（2026-11-11 用户裁决，详见 `0008-bar-coverage-analysis.md`）**：
+两侧 raw 1m 逐字节同源（21/21 SHA256 一致）；总差额 183,909 = **179,550（97.6%，
+nova 丢弃 `source_bars<60` 的 partial 小时的聚合规则差异，lyra 保留并 `n_bars` 标注）
++ 4,359（2.4%，lyra 数据窗口多 2026-10-24→11-06 尾部）**；此前"21 vs 24 根/日、
+SPX 115 根/周、3 根/2 天"是 nova parquet 本地时区（AEST/AEDT）显示假象，UTC 口径
+下 lyra ≥ nova 恒成立。**用户裁决：以 lyra bar 集为准；nova 侧结果进入 lyra 必须
+在 lyra bar 集上重算**。
 2. 3% 的 entry_price 偏移 1 bar、约 40% 的 bars_held 差异、net_return
    不逐笔相等——均由 bar 覆盖/窗口差异传导（前窗特征值不同 → 信号 bar
    集合不同 → 入场价与持仓时长不同）。**信号方向与出场原因 100% 一致
@@ -143,6 +146,7 @@ strategies/directions/<family>/v01.yaml   # 从 nova/strategies/directions/*.yam
 （rsi_14 版如需精确复现，属 0010 对 temp/ 24 条 rsi_14 实验的处置范围。）
 
 **结论**：0008 §3 回归门禁按修订后范围完成；cross-check 的残余差异全部
+（归因见上：97.6% 聚合规则 + 2.4% 窗口尾部，O18 已关闭——以 lyra bar 集为准）。0008 可签收。
 归因于数据层 bar 覆盖差异（O18，**2026-11-11 已深挖并关闭**——深挖报告 `0008-bar-coverage-analysis.md`：raw 逐字节同源、差异 100% 来自 nova `source_bars<60` 过滤器 + 显示时区假象；**用户裁决以 lyra bar 集为准**，nova 侧结果进入 lyra 必须重算），非 0008 代码
 缺陷。0008 可签收。
 

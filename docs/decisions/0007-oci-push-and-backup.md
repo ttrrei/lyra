@@ -159,7 +159,7 @@ I17(a) Immutable 还是 I17(b) Append-only：
 md5（与 0002 拉取侧一致）。
 
 **D4（凭证）**：`config.yml` 的 `strategies_par_url` / `features_par_url` 为 push
-目标（0002 已预留）；`auth_file`（`~/.lyra/credentials`）可选。**凭证不进 git**
+目标（0002 已预留）。**凭证不进 git**
 （R7 / config_example 注释）；`push` 未配置 push 目标 → **报错**（不静默跳过、
 不写本地占位）。
 > **批次2/M3 终态（2026-11-11 用户裁决）**：`auth_file` / OCI SDK 认证**不实现（拒绝）**——
@@ -348,9 +348,10 @@ doctor 明确移出（§3.2）✓。
 - `append-only 超集`校验的具体粒度（行级 vs 段级 vs 内容哈希前缀）在实现期定
   （D2 只定"新 ⊇ 旧"的语义）。
 - PAR PUT 是否可用取决于**挂载模式**：**只读** PAR 不支持 PUT；**读写** PAR 支持
-  PUT（`shutil.copy2` 即可，无新依赖）。实现期第一步确认可否以读写 PAR 挂载目标桶；
-  只读时 push 侧走 OCI SDK（`config.auth_file`），D3/D4 已留 SDK 出口。**这是
-  0007 实现期的最大不确定点**（拉取侧 0002 用只读 PAR 成立，push 需要写权限）。
+  PUT（`shutil.copy2` 即可，无新依赖）。实现期第一步确认可否以读写 PAR 挂载目标桶。
+  （原文"只读时 push 侧走 OCI SDK、D3/D4 已留 SDK 出口"为 **2026-11-11 前的历史假设**，
+  已由 **M3 拒绝裁决取代**——SDK 出口不存在，只读 PAR 下 push 明确报错，须换读写 PAR。）
+  **R10 真实桶验证后本项关闭**（拉取侧 0002 用只读 PAR 成立，push 需要写权限）。
 
 **自检结论**：范围/契约/边界/不变量全对照通过；4 个自检发现（G1–G4）已在正文
 D 决策处置；3 个实现期检查项（B5）非设计缺陷。无阻塞设计问题。
@@ -363,13 +364,14 @@ D 决策处置；3 个实现期检查项（B5）非设计缺陷。无阻塞设�
 > "相反解释/失败模式" + 判定 + 处置。
 
 **C1（高）PAR 是否支持 PUT？若 PAR 只读，整个 push 侧不成立**
-- 失败模式：0002 拉取用 PAR（只读）成立；PAR 若为**只读挂载**则不支持 PUT，
-  此时必须走 OCI SDK 签名。
+- 失败模式：0002 拉取用 PAR（只读）成立；PAR 若为**只读挂载**则不支持 PUT。
+  （原文"此时必须走 OCI SDK 签名"为 **2026-11-11 前的历史假设**，已由 **M3 拒绝裁决
+  取代**——SDK 出口不存在。）
 - 判定：**部分成立**——这是 0007 实现期的最大不确定点（B5 已列）。**0.2 自检
   已纠正**：PUT 可行性取决于**挂载模式**（只读不支持、读写支持），非"PAR 必然只读"。
-- 处置：D3/D4 已把传输抽象为"PAR 优先 / OCI SDK auth 备选"，`config.auth_file`
-  出口已留；实现期第一步就是**在真实桶验证 push 传输**（R10 验收"OCI pull/push
-  真实桶端到端跑通"）。
+- 处置：传输 = 读写 PAR + `requests.Session`（get+put）；只读 PAR 下 push 明确报错。
+  实现期第一步就是**在真实桶验证 push 传输**（R10 验收"OCI pull/push 真实桶
+  端到端跑通"）。
 - **0.3 实施状态**：✅ **已落地**——`oci_push.push` 要求 transport 有 `.put` 方法，
   无则 `OciPushError("transport has no put() — ... is read-only; mount a read/write
   PAR or use SDK auth (0007 C1)")`；CLI 侧 `_push_transport()` 用 `requests.Session`

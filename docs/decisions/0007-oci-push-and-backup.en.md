@@ -401,10 +401,12 @@ check-items)**:
   semantics).
 - PAR PUT availability depends on **mount mode**: read-only PAR does not support PUT;
   read/write PAR does (via `shutil.copy2`, no new dependency). The first implementation
-  step is to verify the target bucket can be mounted read/write; if only read-only is
-  available, the push side uses the OCI SDK (`config.auth_file`). D3/D4 already leave the
-  SDK exit. **This is the largest uncertainty for 0007's implementation** (the pull side in
-  0002 using PAR read-only holds; push needs write permission).
+  step is to verify the target bucket can be mounted read/write. (The original text "if
+  only read-only is available, use the OCI SDK; D3/D4 leave the SDK exit" was a
+  **pre-2026-11-11 historical assumption**, superseded by the **M3 rejection ruling** —
+  there is no SDK exit; a read-only PAR produces an explicit push error; mount a
+  read/write PAR.) **Closed after R10 real-bucket verification** (the pull side in 0002
+  using PAR read-only holds; push needs write permission).
 
 **Self-check conclusion**: scope/contract/boundary/invariants all checked and passed; 4
 self-check findings (G1–G4) are handled in the D decisions in the body; 3 implementation-time
@@ -420,14 +422,15 @@ check-items (B5) are not design defects. No blocking design issue.
 
 **C1 (high) Does PAR support PUT? If PAR is read-only, the whole push side does not hold**
 - Failure mode: 0002's pull uses PAR (read-only) and holds; but OCI PAR is traditionally a
-  **pre-authenticated read-only** link, so push (write) may simply not be usable with a PAR
-  URL and must go through OCI SDK signing.
-- Ruling: **partially holds** — this is the largest uncertainty for 0007's implementation
+  **pre-authenticated read-only** link, so push (write) may simply not be usable with a
+  PAR URL. (The original "must go through OCI SDK signing" was a **pre-2026-11-11
+  historical assumption**, superseded by the **M3 rejection ruling**.)
+- Ruling: **partially holds** — this was the largest uncertainty for 0007's implementation
   (already listed in B5).
-- Disposition: D3/D4 already abstract the transport as "PAR preferred / OCI SDK auth
-  fallback", the `config.auth_file` exit is left in place; the first step at implementation
-  is to **verify push transport on a real bucket** (R10 acceptance "OCI pull/push
-  end-to-end on a real bucket passes"). The design layer does **not assume** PAR supports
+- Disposition: transport = read/write PAR + `requests.Session` (get+put); a read-only PAR
+  produces an explicit push error. The first step at implementation is to **verify push
+  transport on a real bucket** (R10 acceptance "OCI pull/push end-to-end on a real bucket
+  passes"). The design layer does **not assume** PAR supports
   PUT; both transports stay switchable.
 
 **C2 (high) the append-only "superset" determination is semantically weak and could pass a
@@ -511,7 +514,7 @@ uploads it again.
 idempotent path. Acceptable.
 
 **Adversarial self-check conclusion**: C1/C2 are **high** (C1 = the largest
-implementation-time uncertainty, already leaving the SDK exit + R10 real-bucket acceptance;
+implementation-time uncertainty, resolved by the read/write PAR requirement + R10 real-bucket acceptance (the SDK exit was a pre-2026-11-11 historical assumption, since rejected by M3);
 C2 = append-only semantics must be tightened to "verbatim preservation" at implementation
 time), C3/C4/C5/C6 are **med** (all handled by D decisions or already listed as B5
 implementation check-items), C7/C8 are **low** (do not hold / acceptable). No blocking design

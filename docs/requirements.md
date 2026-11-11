@@ -183,7 +183,7 @@ Lyra 的主要功能就是**跟 OCI 保持同步**：
   提供 `lyra sync` 一键命令。
 - **冲突策略**：`config.yml` 决定（默认：OCI 为 source of truth，
   本地变更需显式 `--force-push`）。
-- **凭证**：PAR URL 优先；可选 OCI auth（`~/.lyra/credentials`）。
+- **凭证**：PAR URL（自带签名 token，客户端零凭证）。**OCI SDK auth 不实现**（M3 拒绝，2026-11-11 用户裁决）；只读 PAR 无法 push 时明确报错，须换读写 PAR。
   凭证不进 git。
 
 ## R8. 非功能需求
