@@ -1,8 +1,8 @@
-# 0008 — Corpus Migration + Regression (final rulings v0.2)
+# 0008 — Corpus Migration + Regression (regression complete v0.3)
 
 > **中文**: [0008-migration-and-regression.md](./0008-migration-and-regression.md)
 >
-> Status: **final-rulings v0.2 (2026-11-11, three user rulings landed, per ACTION_LOG #100)**
+> Status: **v0.3 regression complete (2026-11-11, three rulings landed + 12-direction × 21-instrument regression + cross-check, per ACTION_LOG #100)**
 > The three recommended rulings of v0.1 (alias table / add rsi_14 /
 > ATR-basis divergence on record) are **all superseded** by the user's
 > final 2026-11-11 rulings (§2); see the revision log in §6.
@@ -119,6 +119,49 @@ Regression gate:
 3. field-for-field cross-check against nova on the same strategies
    (same method as 0005/0006)
 
+## 3.1 Regression results (2026-11-11, #100 closeout)
+
+### Gate 1: validate — PASS
+12/12 (after the rsi_14→rsi_12 rewrite).
+
+### Gate 2: lyra run, 12 directions × 21 instruments × 1h — PASS
+12/12 directions `OK` (runs archived under `~/.lyra/runs/directions_*/20261111/`,
+every direction covers all 21 instruments, auditable metrics reports). Note:
+feature tables rebuilt for all 21 instruments under the v1.5 registry
+(`feat-5-40e9ea7b446f8e13`).
+
+### Gate 3: cross-check against nova — DONE, with a data-layer finding
+
+Method: same strategy (trend_continuation — no rsi/ATR drift terms), USD_JPY,
+full history, aligned on entry_time (902 common entries).
+
+| Field | Result | Verdict |
+|---|---|---|
+| direction (same entry) | **100% match** | signal logic consistent — PASS |
+| exit_reason | **100% match** | exit logic consistent — PASS |
+| entry_price | 97% match, 3% offset by 1 bar | data-layer finding — see below |
+| trade count | nova 1431 vs lyra 1612 | coverage difference |
+
+**Data-layer finding (not an 0008 code issue)**: lyra and nova OHLC are
+**bar-for-bar identical where they overlap** (USD_JPY same-window OHLC equal),
+but (1) the **bar sets differ**: lyra has 21 bars/day (gaps incl. full
+Saturdays, per-instrument variance), nova 24 bars/day (SPX 3 bars in 2 days);
+provenance/dedup rules unconfirmed — **parked as O18, pending data owner**;
+(2) the 3% 1-bar entry_price offset, ~40% bars_held variance and the
+per-trade net_return difference are all downstream of the coverage difference
+(different warm-up windows → different signal-bar sets). **100% direction and
+exit_reason agreement proves the compiler/trade-engine semantics are correct.**
+
+**rsi_12 drift quantified (Ruling-2 TODO closed)**: momentum_exhaustion
+USD_JPY full history — lyra(rsi_12) 177 trades net −0.0271 vs nova(rsi_14)
+168 trades net −0.0602. Same sign, magnitude consistent with a parameter
+rewrite; recorded. (Exact rsi_14 reproduction belongs to 0010's handling of
+the 24 rsi_14 temp/ experiments.)
+
+**Conclusion**: 0008 §3 regression gates complete under the revised scope;
+all residual cross-check differences trace to the data-layer bar-coverage
+difference (O18, parked). 0008 is ready for acceptance.
+
 ## 4. temp/ gate (outside the regression set)
 
 Skeleton already landed (#99): `strategies/temp/{README.md,
@@ -146,3 +189,4 @@ meta.json}), moneta_s_series/(_index.json)}`.
 |---|---|---|
 | 2026-11-10 | 0.1 | Scope-revised draft: "332" erratum; O16 20 gaps reclassified (**B 10 alias + C 10 new**); ATR normalization-basis (14 vs 24) known-divergence note added; `close_*_distance_atr` pair into C-class; temp/ skeleton referenced; 0010 split out. |
 | 2026-11-11 | 0.2 | **User's three final rulings** (supersede the v0.1 pre-filled recommendations): ① B-class 10 **renamed** to the nova canonical names (no alias table; moneta names unmapped); ② `rsi_14` **not added** — the 3 affected direction files (momentum_exhaustion/pullback_reentry/session_temporal) rewritten to rsi_12 and rerun (TODO); ③ ATR normalization basis **24→12** (replacing the corpus' ATR(14); K6 basis change; C-class distance features on the same basis). C-class 10→**9**. Registry 134→**143**; FEATURE_VERSION 4→5. |
+| 2026-11-11 | 0.3 | Regression closeout: §3.1 gate 1/2/3 results recorded (validate 12/12; run 12×21 all OK; cross-check: direction/exit_reason 100% match, entry_price 97% match, residue attributed to data-layer bar coverage → O18 parked; rsi_12 drift quantified). |

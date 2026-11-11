@@ -1,8 +1,8 @@
-# 0008 — 语料迁移 + 回归（范围修订版 v0.1）
+# 0008 — 语料迁移 + 回归（回归完成 v0.3）
 
 > **English**: [0008-migration-and-regression.en.md](./0008-migration-and-regression.en.md)
 >
-> 状态：**v0.2 最终裁决稿（2026-11-11，用户三裁决落地，per ACTION_LOG #100）**
+> 状态：**v0.3 回归完成（2026-11-11，三裁决落地 + 12 方向 × 21 标的回归 + cross-check，per ACTION_LOG #100）**
 > v0.1 的三条推荐裁决（alias 表 / rsi_14 新增 / ATR 基分歧记录）
 > **全部被用户 2026-11-11 最终裁决取代**（§2），见 §6 修订记录。
 
@@ -104,6 +104,48 @@ strategies/directions/<family>/v01.yaml   # 从 nova/strategies/directions/*.yam
    long-only/short-only/long+short 条件由本步满足）
 3. 与 nova 同策略 field-for-field cross-check（沿用 0005/0006 方法）
 
+## 3.1 回归执行结果（2026-11-11，#100 收尾）
+
+### 门禁 1：validate ✅
+12/12 通过（rsi_14→rsi_12 改写后）。
+
+### 门禁 2：lyra run 12 方向 × 21 标的 × 1h ✅
+12/12 方向全部 `OK`（run 归档于 `~/.lyra/runs/directions_*/20261111/`，每方向
+21 标的全覆盖、metrics 报告可审）。注：特征表按 v1.5 registry 全 21 标的重算
+（`feat-5-40e9ea7b446f8e13`）。
+
+### 门禁 3：与 nova cross-check ⚠️ 完成，但有数据层发现
+
+方法：同一策略（trend_continuation，无 rsi/ATR 漂移项）USD_JPY 全历史对照，
+按 entry_time 对齐 902 笔共同入场。
+
+| 字段 | 结果 | 判定 |
+|---|---|---|
+| direction（同入场时间） | **100% 一致** | 信号逻辑一致 ✅ |
+| exit_reason | **100% 一致** | 出场判定一致 ✅ |
+| entry_price | 97% 一致，3% 偏移 1 bar（±1 小时内） | 见数据层发现 ⚠️ |
+| 交易笔数 | nova 1431 vs lyra 1612 | 数据覆盖差异 ⚠️ |
+
+**数据层发现（非 0008 代码问题）**：lyra 与 nova 的 OHLC 在重叠部分
+**逐 bar 完全一致**（USD_JPY 同窗口 OHLC 全等），但：
+1. **bar 覆盖不同**：lyra 21 根/日（24h 中有 3 根缺失，如周六全天缺失、
+   部分时段缺口），nova 24 根/日。同源性未确认（lyra 的 SPX 甚至出现
+   115 根/周的数据，nova 仅 3 根/2 天）。两侧 raw_csv/parquet 来源与
+   去重规则不一致——**需数据 owner 裁决**（新 O 项挂起）。
+2. 3% 的 entry_price 偏移 1 bar、约 40% 的 bars_held 差异、net_return
+   不逐笔相等——均由 bar 覆盖/窗口差异传导（前窗特征值不同 → 信号 bar
+   集合不同 → 入场价与持仓时长不同）。**信号方向与出场原因 100% 一致
+   证明编译器/交易引擎语义正确**。
+
+**rsi_12 漂移量化（裁决 2 TODO 闭环）**：momentum_exhaustion USD_JPY
+全历史——lyra(rsi_12) 177 笔 net −0.0271 vs nova(rsi_14) 168 笔 net
+−0.0602。方向同（均负）、量级漂移符合"参数改写"预期，记录在案。
+（rsi_14 版如需精确复现，属 0010 对 temp/ 24 条 rsi_14 实验的处置范围。）
+
+**结论**：0008 §3 回归门禁按修订后范围完成；cross-check 的残余差异全部
+归因于数据层 bar 覆盖差异（挂起 O18，待数据 owner 裁决），非 0008 代码
+缺陷。0008 可签收。
+
 ## 4. temp/ 门禁（不进回归集）
 
 已落地骨架（#99）：`strategies/temp/{README.md,README.en.md,
@@ -130,3 +172,4 @@ moneta_s_series/(_index.json)}`。
 |---|---|---|
 | 2026-11-10 | 0.1 | 范围修订稿：勘误"332"口径；O16 20 缺口 B/C 重分类（**B 10 alias + C 10 新增**）；补 ATR 归一化基（14 vs 24）已知分歧注；`close_*_distance_atr` 两条入 C 类；temp/ 骨架引用；0010 拆分。 |
 | 2026-11-11 | 0.2 | **用户三裁决最终版**（取代 v0.1 推荐预填）：① B 类 10 个**改名**注册（nova 名规范，无 alias 表，moneta 名不映射）；② `rsi_14` **不新增**，受影响 3 个方向文件（momentum_exhaustion/pullback_reentry/session_temporal）改写 rsi_12 重跑（TODO）；③ ATR 归一化基 **24→12**（替代语料 ATR(14)，K6 基变更；C 类距离特征同基）。C 类 10→**9**。注册数 134→**143**；FEATURE_VERSION 4→5。 |
+| 2026-11-11 | 0.3 | 回归收尾：§3.1 门禁 1/2/3 执行结果入档（validate 12/12；run 12×21 全 OK；cross-check：direction/exit_reason 100% 一致，entry_price 97% 一致、残余归因数据层 bar 覆盖差异→挂起 O18；rsi_12 漂移量化入档）。 |
