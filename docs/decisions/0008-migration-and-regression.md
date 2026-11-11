@@ -143,7 +143,7 @@ strategies/directions/<family>/v01.yaml   # 从 nova/strategies/directions/*.yam
 （rsi_14 版如需精确复现，属 0010 对 temp/ 24 条 rsi_14 实验的处置范围。）
 
 **结论**：0008 §3 回归门禁按修订后范围完成；cross-check 的残余差异全部
-归因于数据层 bar 覆盖差异（挂起 O18，待数据 owner 裁决），非 0008 代码
+归因于数据层 bar 覆盖差异（O18，**2026-11-11 已深挖并关闭**——深挖报告 `0008-bar-coverage-analysis.md`：raw 逐字节同源、差异 100% 来自 nova `source_bars<60` 过滤器 + 显示时区假象；**用户裁决以 lyra bar 集为准**，nova 侧结果进入 lyra 必须重算），非 0008 代码
 缺陷。0008 可签收。
 
 ## 4. temp/ 门禁（不进回归集）

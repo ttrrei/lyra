@@ -146,7 +146,7 @@ full history, aligned on entry_time (902 common entries).
 **bar-for-bar identical where they overlap** (USD_JPY same-window OHLC equal),
 but (1) the **bar sets differ**: lyra has 21 bars/day (gaps incl. full
 Saturdays, per-instrument variance), nova 24 bars/day (SPX 3 bars in 2 days);
-provenance/dedup rules unconfirmed — **parked as O18, pending data owner**;
+**O18 nailed down and closed (2026-11-11 user ruling, see `0008-bar-coverage-analysis.md`)**: raw 1m byte-identical on both sides (21/21 SHA256); the difference is 100% aggregation-rule-driven (nova drops `source_bars<60` partial hours — 179,550 bars, 97.6% — and the "21 vs 24 bars/day" was a nova local-timezone display artifact; under UTC, lyra ≥ nova everywhere). **User ruling: lyra's bar set is canonical; any nova-side results entering lyra must be recomputed on lyra bars**;
 (2) the 3% 1-bar entry_price offset, ~40% bars_held variance and the
 per-trade net_return difference are all downstream of the coverage difference
 (different warm-up windows → different signal-bar sets). **100% direction and
@@ -160,7 +160,7 @@ the 24 rsi_14 temp/ experiments.)
 
 **Conclusion**: 0008 §3 regression gates complete under the revised scope;
 all residual cross-check differences trace to the data-layer bar-coverage
-difference (O18, parked). 0008 is ready for acceptance.
+difference (O18, **closed 2026-11-11 — lyra's bar set is canonical per user ruling**). 0008 is ready for acceptance.
 
 ## 4. temp/ gate (outside the regression set)
 

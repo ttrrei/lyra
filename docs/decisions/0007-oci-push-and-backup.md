@@ -81,8 +81,8 @@ lessons**——多 AI 并行研究时彼此串扰、无法对比兄弟分支、�
   （复用 0002 `list_objects`），只读。
 - `push-strategy <direction>/<branch>` / `push-direction <direction>`：细粒度推送
   （单版本 vs 整方向）。
-- 传输：优先 PAR URL（config 已备 `strategies_par_url`/`features_par_url`）；可选
-  OCI SDK auth（`config.auth_file`，`~/.lyra/credentials`，**不进 git**）。
+- 传输：PAR URL（config 备 `strategies_par_url`/`features_par_url`/`data_par_url`）+ `requests.Session`
+  （get+put）。**OCI SDK auth 不实现（M3 拒绝，2026-11-11 用户裁决）**——PAR URL 自带签名、客户端零凭证。
 
 **Part B — R12 交互式工作流**（新增 `lyra/workflow.py` + `cli.py` 命令）：
 - `lyra tracks <direction> [--create <track_id>] [--list]`：管理方向内 track（研究身份）；
@@ -162,9 +162,11 @@ md5（与 0002 拉取侧一致）。
 目标（0002 已预留）；`auth_file`（`~/.lyra/credentials`）可选。**凭证不进 git**
 （R7 / config_example 注释）；`push` 未配置 push 目标 → **报错**（不静默跳过、
 不写本地占位）。
-> **批次2/M3 现状说明**：`auth_file` / OCI SDK 认证**尚未实现**——当前受支持行为 =
-> 无凭据 PAR 读/写 + `requests.Session`（`cli._push_transport`）。只读 PAR 下 push 会
-> 明确报错而非静默失败；SDK auth fallback 待 **R10 真实 OCI 桶**配合验证后补齐（批次2 挂起项）。
+> **批次2/M3 终态（2026-11-11 用户裁决）**：`auth_file` / OCI SDK 认证**不实现（拒绝）**——
+> PAR URL 方案完整覆盖读/写（URL 自带签名 token，客户端零凭证），SDK 只会引入 `oci` 包依赖
+> + 凭证管理负担，与轻量立场冲突（HLD §2.5 不做权限管理）。当前受支持行为 = 无凭据 PAR
+> 读/写 + `requests.Session`（`cli._push_transport`）。只读 PAR 下 push 会明确报错而非静默
+> 失败。**R10 真实 OCI 桶验收以 PAR 方案走通，无 SDK 后门**（批次2 原挂起项，现改判拒绝、终态）。
 
 **D5（track 是研究身份，不改机器门禁——R12/综合稿）**：`track_id` 只用于
 **隔离**（每 track 独立 context/lessons/候选/run 归属）、**归属**（run manifest 记
@@ -303,6 +305,7 @@ git、不联网（除 OCI）。
 | 2026-11-10 | 0.3 | **已实施**（#94）：新增 `lyra/oci_push.py`（I17 分类器 / plan / dry-run / force-push 提升 immutable 冲突 / append-only 行级超集 / unclassified fail-closed / I19 脱敏 / D4 无目标报错）+ `lyra/workflow.py`（tracks 基线冻结 / 每 track 8 active cap（`MAX_ACTIVE_BRANCHES_PER_TRACK`，唯一机器门禁）/ prune / new-version 复用 0004 `parent`+`parents`+`driven_by_lesson` / context track 隔离 + 0006 metrics 摘要 / compare 只读 / merge 只新增候选（`inherited`）/ synthesize 只写 `reviews/`）；CLI 新增 12 命令（push/backup/sync/list/push-strategy/push-direction/push-runs/tracks/context/new-version/compare/merge/synthesize）；`tests/test_oci_push.py`（36）+ `tests/test_workflow.py`（20）全绿，全仓 228→283、pyflakes 干净。实现期确认：runs 无独立 PAR 槽位，push 侧 runs 回落到 `strategies_par_url`（或 `data_par_url`）——**实现期决策**（D7 未定 runs PAR 槽位，config_example 可 0009 补 `runs_par_url`）。 |
 | 2026-11-10 | 0.4 | **自检+对抗性验证修两个真 bug**（对 0.07 已实施代码的独立核验）：① **I20 幂等跳过在真实 PAR listing 下失效**——真实 OCI PAR listing 只带 `name,size,md5(base64),timeModified`（见 `oci_client._LIST_FIELDS`）**无 sha256**，而 `oci_push.plan_push` 旧实现拿 remote md5 与 local sha256 直接比（两种摘要永不相等）→ 未变文件被全部误报 `immutable-sha-conflict`、I20 跳过永远失效；`FakeParRW` 测试 transport 自造 `sha256` 字段掩盖了该 bug。修：新增 `_same_object`——sha256 直通（保持兼容）/ md5↔md5（复用 `oci_client._md5_matches`，base64+hex 容错）/ size 回退；force-push 重建 UploadItem 的 `size=0` 一并修。② **`new-version`/`merge` 产出分支文件被推层判 unclassified（自相矛盾）**——0.3 把分支名放宽为任意 slug（`b0`/`foo`），但 I17 D2 分类器只认 `strategies/**/vNN.yaml` 为 immutable → 工具自己 `new-version` 出的 `b0.yaml` 推层判 unclassified、`lyra push` fail-closed 拒推。修：`_BRANCH_NAME_RE` 收紧回 `^v\d+$`，`merge` 默认名改为下一个空闲 `vNN`（不再 `merge-vNN-vNN`）。新增 4 条回归测试（2 真实 md5 listing + 2 vNN 分类自洽）。全仓 287 绿、pyflakes 干净。 |
 | 2026-11-10 | 0.5 | **批次2 对抗性 review 处置**（`docs/reviews/对抗性review-2026-11-10-批次2.md` 处置记录）：14 项发现 **接受 13 / 挂起 1（M3）/ 拒绝 0**。核心修正：① **H1** push-strategy/push-direction 静默空操作 → 改为按 direction 切片 staging 成规范 `strategies/<direction>/...`（`push-direction` 含 runs 切片）再走 I17 分类器；② **H2** 无摘要按 size 判同 → 删除 size 兜底，两侧无摘要即 fail-closed 冲突（#89 R1）；③ **H3** PAR path-token 泄漏 → `redact_par_url` 只留 `scheme://host`，新增 `redact_in_message` 清洗异常文本；④ **H4** 路径越界/符号链接 → 新增 `validate_ident`（direction/track/run_id 单组件校验）+ `plan_push` 拒符号链接与逃逸路径；⑤ **H5** 兄弟/交叉分支命名 → `^v\d+[a-z]*$`（`v02a/v04ab`）workflow 与 I17 分类器统一；⑥ **H6** context 不自包含/混入他人 lessons → 重写 `render_context`（完整 hypothesis+哈希、feature 清单、逐分支完整 YAML、逐标的 run 指标），per-track lessons 落到 `tracks/<direction>/<track>.lessons.md`；⑦ **H7** 兄弟 run 串线/只报一个标的 → 严格分支身份匹配 + 保留全部 per_instrument；⑧ **H8** push-runs 未校验归档 → 上传前校验 `manifest.artifacts` 存在+sha256、拒清单外文件、写 `run_provenance.json` sidecar；⑨ **H9** backup 漏默认 run → `_push_all_roots` 增第二遍推 `~/.lyra/runs`（冲突安全）；⑩ **H10** 可变 track index 无法过 append-only → index 改 JSONL 事件日志（create/activate/prune），天然逐行超集；⑪ **M1** 冻结基线改用真实 `catalog.duckdb`；⑫ **M2** backup 定为 push-only 并同步 HLD §2.5/0007 文案；⑬ **M4** 同 run 内 manifest.json 最后发布、文档不再把逐对象 PUT 描述成事务。**M3（SDK auth fallback）挂起**：需 R10 实桶配合，本回合文档明确"当前受支持 = 无凭据 PAR 读/写 + requests session；auth_file 未实现，待 R10"。全仓 **302 绿**、pyflakes 干净。R10 真实 OCI 桶端到端验收仍未执行，本回合不视为 0007 最终签收。 |
+| 2026-11-11 | 0.6 | **M3 改判拒绝（用户裁决 2026-11-11，终态）**：SDK auth fallback **不实现**——PAR URL 方案完整覆盖读/写（URL 自带签名 token、客户端零凭证），SDK 引入 `oci` 包依赖 + 凭证管理负担，与轻量立场（HLD §2.5 不做权限管理）冲突。D4 现状说明段改写为"拒绝（不实现）"；R10 真实 OCI 桶验收以 PAR 方案走通，无 SDK 后门。批次2 最终计数：接受 13 / 拒绝 1（M3）/ 挂起 0。HLD §8 0007 行与 ACTION_LOG 状态块同步。 |
 
 ---
 

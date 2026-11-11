@@ -74,3 +74,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# 一次性分析 scratch（O18 深挖复现中间产物；报告已归档 decisions/）
+scratch/
