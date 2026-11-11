@@ -793,7 +793,8 @@ def push_runs(
             encoding="utf-8",
         )
 
-        url = (oci.strategies_par_url or oci.data_par_url).rstrip("/")
+        url = (oci.runs_par_url or oci.strategies_par_url
+               or oci.data_par_url).rstrip("/")
         if not url:
             typer.secho("no push target configured (oci.*_par_url empty)",
                         fg=typer.colors.RED, err=True)
@@ -828,7 +829,7 @@ def list_cmd(
     urls = {
         "strategies": oci.strategies_par_url,
         "features": oci.features_par_url,
-        "runs": oci.strategies_par_url or oci.data_par_url,
+        "runs": oci.runs_par_url or oci.strategies_par_url or oci.data_par_url,
         "data": oci.data_par_url,
     }
     url = urls.get(prefix)

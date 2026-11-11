@@ -30,6 +30,7 @@ def test_pull_never_requires_push_par_slots(tmp_path):
     assert oci.data_par_url.startswith("https://")
     assert oci.strategies_par_url == ""   # absent → empty, not an error
     assert oci.features_par_url == ""
+    assert oci.runs_par_url == ""
 
 
 def test_data_par_url_required(tmp_path):

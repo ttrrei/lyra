@@ -284,7 +284,7 @@ def push(
     if not par_url:
         raise OciPushError(
             "no push target configured (oci.*_par_url empty) — set the PAR "
-            "URL or auth_file in config.yml (0007 D4)"
+            "URL in config.yml (M3: SDK auth is rejected, not implemented)"
         )
     if not hasattr(transport, "put"):
         raise OciPushError(

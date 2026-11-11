@@ -1,72 +1,108 @@
-# Lyra configuration — example template (in git, no secrets)
+# ============================================================================
+# Lyra — configuration template
+# ----------------------------------------------------------------------------
+# This file is a TEMPLATE (in git, contains no secrets).
+#   1. Copy it:  cp config/config_example.yml config/config.yml
+#   2. Fill in your real PAR URLs / paths / tokens.
+#   3. config/config.yml is gitignored — real values never enter the repo.
 #
-# Copy to config/config.yml (gitignored) and fill in real values.
-# Real PAR URLs, local paths and OCI auth never enter the repository.
+# OCI credential model (M3 ruling, 2026-11-11):
+#   The ONLY credential path is a signed Prefix Access (PAR) URL.
+#   No OCI SDK, no auth_file — a target that cannot be mounted as a PAR
+#   produces an explicit push error rather than silently falling back.
+#
+# The four OCI buckets map one-to-one to the four *_par_url slots below:
+#
+#   bucket          prefix        PAR permissions    config slot
+#   --------------  ------------  -----------------  -------------------
+#   lyra-data       raw_zips/     Read (+Write opt)  data_par_url
+#   lyra-features   features/     Read + Write       features_par_url
+#   lyra-strategies strategies/   Read + Write       strategies_par_url
+#   lyra-runs       runs/         Read + Write       runs_par_url
+#
+#   Never enable the "Delete" PAR permission on any bucket.
+#   PARs expire (90-day limit) — regenerate and update config.yml on expiry.
+# ============================================================================
 
+# ----------------------------------------------------------------------------
+# oci — Oracle Cloud Infrastructure bucket PAR URLs
+# ----------------------------------------------------------------------------
 oci:
-  # ---- pull (0002 uses this; read-only PAR PREFIX URL, moneta-proven
-  #      mechanism: list objects + download each; moneta's
-  #      `pipeline/extract_oci.py` is the reference implementation) ----
-  data_par_url: "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/data/"
+  # Pull source (0002 uses this). Read-only PAR PREFIX over the data bucket's
+  # raw_zips/ prefix. `lyra pull` lists objects and downloads each (the
+  # moneta-proven mechanism; moneta `pipeline/extract_oci.py` is the
+  # reference implementation).
+  data_par_url: "https://objectstorage.<region>.oraclecloud.com/p/.../n/lyra-data/b/lyra-data/o/raw_zips/"
 
-  # ---- push (0007 uses these; RESERVED NOW, never read by 0002) ----
-  # Write PAR prefixes. Regenerate on expiry (90-day limit) and update
-  # config.yml — see decision 0002 §2 (O5 settled) and 0007 (when written).
-  strategies_par_url: "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/strategies-upload/"   # strategy YAML + hypothesis/lessons
-  features_par_url:   "https://objectstorage.<region>.oraclecloud.com/p/.../n/.../b/lyra/o/features-upload/"     # custom features + contract cards + tests
+  # Push targets (0007 uses these). Write PAR prefixes, one per bucket.
+  # Leave a slot empty if that bucket is not configured yet — the matching
+  # push command then errors explicitly instead of guessing a target.
+  features_par_url:   "https://objectstorage.<region>.oraclecloud.com/p/.../n/lyra-features/b/lyra-features/o/features/"
+  strategies_par_url: "https://objectstorage.<region>.oraclecloud.com/p/.../n/lyra-strategies/b/lyra-strategies/o/strategies/"
+  runs_par_url:       "https://objectstorage.<region>.oraclecloud.com/p/.../n/lyra-runs/b/lyra-runs/o/runs/"
 
-  # NOTE (M3, user ruling 2026-11-11): OCI SDK auth is NOT implemented —
-  # a push target that cannot be mounted as a read/write PAR will produce an
-  # explicit push error; mount a read/write PAR instead. No auth_file slot.
+  # NOTE (M3, 2026-11-11): there is NO auth_file slot. SDK auth is rejected —
+  # a PAR URL is the only credential path.
 
+# ----------------------------------------------------------------------------
+# local — where data, strategies, runs and alpha live on this machine
+# ----------------------------------------------------------------------------
 local:
-  # OCI mirrors live OUTSIDE the repository by default (anti-footgun:
-  # alpha content must never be reachable from the git working tree).
-  # "workspace" is expanded to ~/.lyra/<workspace>. Override per-run with
+  # OCI mirrors live OUTSIDE the repository by default (anti-footgun: alpha
+  # content must never be reachable from the git working tree).
+  # "workspace" expands to ~/.lyra/<workspace>; override per-run with
   # --data-root / --strategies-root / --runs-root if you must colocate.
   workspace:  "default"      # → ~/.lyra/default/
-  data:       "data"         # relative to workspace (rebuildable cache)
-  strategies: "strategies"   # relative to workspace (OCI mirror)
-  runs:       "runs"         # relative to workspace (OCI mirror)
-  alpha:      "alpha"        # relative to workspace (alpha features code; B13)
+  data:       "data"         # rebuildable cache (relative to workspace)
+  strategies: "strategies"   # OCI mirror (relative to workspace)
+  runs:       "runs"         # OCI mirror (relative to workspace)
+  alpha:      "alpha"        # alpha features code (B13)
   tmp:        "data/tmp"     # scratch for DuckDB spills
 
+# ----------------------------------------------------------------------------
+# features — optional alpha-feature loading
+# ----------------------------------------------------------------------------
 features:
   # Optional: load alpha features from an OCI-mounted or local directory.
-  # Left empty → core standard features only.
-  extend_from: ""         # e.g. "oci://lyra/alpha/features" or "/mnt/oci/alpha/features"
+  # Leave empty → core standard features only.
+  extend_from: ""            # e.g. "oci://lyra/alpha/features" or a local path
 
+# ----------------------------------------------------------------------------
+# run — cost model (applied to every fill)
+# ----------------------------------------------------------------------------
 run:
-  # Cost model (applied to every fill). Spread/slippage are already in the
-  # fills; do not double-count here.
-  commission_round_trip: 0.0002   # flat fraction of entry fill
-  financing_per_day: 0.0001         # fraction of entry fill per TRADING day held (weekends & market holidays excluded, not calendar days)
-  stop_loss:             0.02     # mandatory 2% adverse-price stop (R4)
+  # Spread/slippage are already in the fills — do not double-count here.
+  commission_round_trip: 0.0002  # flat fraction of entry fill
+  financing_per_day:     0.0001  # fraction of entry fill per TRADING day held
+  stop_loss:             0.02    # mandatory 2% adverse-price stop (R4)
 
+# ----------------------------------------------------------------------------
+# databackend — DuckDB resource limits
+# ----------------------------------------------------------------------------
 databackend:
-  # DuckDB resource limits (0002 batch-7 D3 — applied via
-  # SET max_memory / threads / temp_directory on every pipeline connection;
-  # without these DuckDB takes 80% of host RAM by default and a low-RAM box
-  # running 48M rows would be OOM-killed).
-  # NOTE: the real moneta dataset (48.8M rows) needs a ~10 GB working set
-  # for aggregate (batch-6 A6). Keep memory_limit >= 16GB on the machine
-  # that runs `lyra pull` on the full dataset; lower it only if you run a
-  # smaller instrument subset.
-  memory_limit: "16GB"  # DuckDB ceiling before it spills to temp_directory
-  threads: 4            # parallel threads (omit to use DuckDB default)
-  tmp: "tmp"            # spill directory, relative to the data root
+  # Applied via SET max_memory / threads / temp_directory on every pipeline
+  # connection. Without these DuckDB takes 80% of host RAM by default and a
+  # low-RAM box running 48M rows would be OOM-killed.
+  # NOTE: the real moneta dataset (48.8M rows) needs a ~10 GB working set.
+  # Keep memory_limit >= 16GB on the machine that runs `lyra pull` on the
+  # full dataset; lower it only for a smaller instrument subset.
+  memory_limit: "16GB"       # DuckDB ceiling before it spills to tmp
+  threads: 4                 # parallel threads (omit to use DuckDB default)
+  tmp: "tmp"                 # spill directory, relative to the data root
 
+# ----------------------------------------------------------------------------
+# oanda — OANDA historical-candle backfill / gap-fill (`lyra oanda`)
+# ----------------------------------------------------------------------------
 oanda:
-  # OANDA historical-candle backfill / gap-fill (0002 §3.5, `lyra oanda`).
-  # This is the COMPLEMENT to the OCI-PAR pull: `lyra pull` downloads what is
-  # already in the PAR prefix; `lyra oanda` fetches a specific
-  # (instrument, time window) of 1-min candles straight from the OANDA API
-  # into raw_csv/<instrument>/ so `lyra pull`'s clean step picks it up.
+  # COMPLEMENT to the OCI-PAR pull: `lyra pull` downloads what is already in
+  # the PAR prefix; `lyra oanda` fetches a specific (instrument, time window)
+  # of 1-min candles straight from the OANDA API into raw_csv/<instrument>/
+  # so `lyra pull`'s clean step picks it up.
   #
   # api_token is a SECRET — it lives only in config/config.yml (gitignored)
-  # and is NEVER committed (moneta's convention). Leave empty to disable
-  # the OANDA backfill; the OCI-PAR pull pipeline is unaffected either way.
-  api_token: ""          # your OANDA API token (a secret; never commit)
+  # and is NEVER committed. Leave empty to disable OANDA backfill; the
+  # OCI-PAR pull pipeline is unaffected either way.
+  api_token: ""              # your OANDA API token (secret; never commit)
   host: "api-fxpractice.oanda.com"   # practice (demo) host by default
-  price: "MBA"           # mid + bid + ask components (matches bronze schema)
-  granularity: "M1"      # 1-minute candles (the bronze native resolution, I22)
+  price: "MBA"               # mid + bid + ask components (matches bronze schema)
+  granularity: "M1"          # 1-minute candles (bronze native resolution, I22)

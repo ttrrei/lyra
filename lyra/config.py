@@ -25,7 +25,9 @@ class OciConfig:
     # Reserved for 0007; may be empty/absent in 0002.
     strategies_par_url: str = ""
     features_par_url: str = ""
-    auth_file: str = ""
+    runs_par_url: str = ""
+    # No ``auth_file`` slot — SDK auth is rejected (M3, 2026-11-11 user
+    # ruling); a PAR URL is the only credential path.
 
 
 @dataclass(frozen=True)
@@ -96,7 +98,7 @@ def oci_from_dict(data: dict) -> OciConfig:
         data_par_url=url,
         strategies_par_url=str(oci.get("strategies_par_url") or ""),
         features_par_url=str(oci.get("features_par_url") or ""),
-        auth_file=str(oci.get("auth_file") or ""),
+        runs_par_url=str(oci.get("runs_par_url") or ""),
     )
 
 
