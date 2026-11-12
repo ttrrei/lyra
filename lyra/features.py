@@ -1124,6 +1124,13 @@ def run_features(
             con.close()
 
     # Promote: every file built successfully, so the generation is complete.
+    # Prune parquet for instruments no longer in the dataset so the generation
+    # manifest stays exact (validate_generation's whitelist is otherwise stale).
+    current_stems = {f"{inst}.parquet" for inst in instruments}
+    for old in target_layer_dir.glob("*.parquet"):
+        if old.name not in current_stems:
+            old.unlink()
+
     file_sha256: dict[str, str] = {}
     final_paths: list[Path] = []
     for staged, inst in zip(staged_paths, instruments):

@@ -235,7 +235,7 @@ Lyra 的主要功能就是**跟 OCI 保持同步**：
   （已达成；"332 个 legacy 策略"为 0008 勘误前的旧口径，#99/#100 已取代）。
 - OCI pull/push 在真实桶上跑通一次端到端。
 
-> **R10 签收（0009 完成，2026-11-11）**：`pytest -q` 323 全绿；`lyra-doctor`
+> **R10 签收（0009 完成，2026-11-11）**：`pytest -q` 324 全绿；`lyra-doctor`
 > exit 0（含 `feature_generation` / catalog / compile 检查，0 hard fail、1 WARN
 > —— WARN 仅为 feat-6 历史表尚无 generation manifest，属预期）；12 方向
 > `validate` 通过；真实 OCI 桶（raw_zips/oci-alpha）端到端读写已验证。

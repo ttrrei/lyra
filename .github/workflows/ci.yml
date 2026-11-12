@@ -13,7 +13,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        # Python 3.12 is the pinned support: requirements.lock targets 3.12
+        # (numpy 2.5.4 ships cp312 wheels only; 3.11 would need an older numpy).
+        python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
 

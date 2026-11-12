@@ -80,7 +80,7 @@ Non-negotiable rules (see `AGENTS.md`):
 lyra/
 ├── README.md                 ← this file
 ├── AGENTS.md                 working contract for AI contributors
-├── pyproject.toml            deps + Python policy (>=3.11,<3.13)
+├── pyproject.toml            deps + Python policy (>=3.12,<3.13)
 ├── requirements.lock         pinned environment (single lock; no requirements.txt)
 ├── config/
 │   └── config_example.yml    in git (documented template, no secrets)
@@ -98,12 +98,12 @@ lyra/
 │   └── temp/                 0008 corpus snapshots, read-only (0010 triage target)
 ├── tests/                    full test suite (pytest)
 ├── scripts/make_lock.sh      regenerate requirements.lock
-└── .github/workflows/ci.yml  py3.11+3.12 CI (pyflakes + pytest)
+└── .github/workflows/ci.yml  py3.12 CI (pyflakes + pytest)
 ```
 
 ## Getting started
 
-Python **3.11 or 3.12** (policy `>=3.11,<3.13`; 3.12 is the validated baseline).
+Python **3.12** (policy `>=3.12,<3.13`; the lock targets 3.12 — numpy 2.5.4 ships cp312 wheels only).
 
 ```bash
 python3 -m venv .venv

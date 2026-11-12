@@ -690,6 +690,29 @@ def test_validate_generation_detects_tamper(tmp_path, monkeypatch):
         feat.validate_generation(tmp_path)
 
 
+def test_atomic_publish_prunes_stale_instruments(tmp_path, monkeypatch):
+    """0009 D4: an instrument dropped from the dataset must not leave a stale
+    parquet behind, and the generation manifest must exactly match the dir."""
+    from lyra import features as feat
+
+    monkeypatch.setattr(feat, "build_instrument", _fake_build_instrument())
+    reg = feat.build_registry()
+
+    # v1: two instruments
+    feat.run_features(tmp_path, 60, reg, con=_gen_con(("AAA", "BBB")))
+    layer = tmp_path / "features" / "ohlcv_1h"
+    assert (layer / "BBB.parquet").exists()
+
+    # v2: BBB dropped from the dataset
+    feat.run_features(tmp_path, 60, reg, con=_gen_con(("AAA",)))
+    assert (layer / "AAA.parquet").exists()
+    assert not (layer / "BBB.parquet").exists(), "stale BBB.parquet should be pruned"
+    gen = feat.read_generation(layer)
+    assert gen is not None and set(gen["file_sha256"]) == {"AAA"}
+    # whitelist is now exact -> generation validates (no false stale/missing)
+    feat.validate_generation(tmp_path)
+
+
 def test_validate_generation_detects_missing_manifest(tmp_path):
     """0009 D4 gate: parquet files without a generation manifest fail closed."""
     import pytest as _pt

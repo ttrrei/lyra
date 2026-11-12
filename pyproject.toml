@@ -7,7 +7,7 @@ name = "lyra"
 version = "0.1.0"
 description = "Open-source research framework for universal trading strategies, keeping alpha in sync with OCI Object Storage."
 readme = "README.md"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.12,<3.13"
 license = {text = "Apache-2.0"}
 authors = [{name = "ttrrei"}]
 # 核心依赖刻意保持轻量（R10：≤ 15 个包）；
