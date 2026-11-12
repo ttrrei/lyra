@@ -30,6 +30,12 @@
 | O18 | **lyra 与 nova 的 1h bar 覆盖不一致**（0008 cross-check 发现，2026-11-11）：深挖后钉死（`docs/decisions/0008-bar-coverage-analysis.md`）：① 两侧 raw 1m 逐字节同源（21/21 SHA256 一致）；② 总差额 183,909 = **179,550（97.6%，nova 丢弃 `source_bars<60` 的 partial 小时的聚合规则差异，lyra 保留并 `n_bars` 标注）+ 4,359（2.4%，lyra 数据窗口多 2026-10-24→11-06 尾部）**，与 raw 缺失无关；③ 此前"lyra 21/日 vs nova 24/日"是 nova parquet 本地时区（AEST/AEDT）显示假象，UTC 口径下 lyra ≥ nova 恒成立；④ lyra 更贴近各类别共识（FX/加密 24、指数 21–23）。 | **已关闭（2026-11-11 用户裁决）**：以 **lyra 的 bar 集合为准**（UTC 桶 + 保留 partial + `n_bars` 标注）；不重拉 raw。**附加裁决**：后续任何 nova 侧数据/结果进入 lyra（含 0010 temp/ triage）时必须**在 lyra bar 集上重新计算**，不得直接沿用 nova 的 bar 依赖结果。 |
 ## O16 详情：332 策略的 feature 缺口（2026-11-08 核实）
 
+> **⚠️ 本节为 2026-11-11 三裁决前的历史快照，已被取代**（2026-11-12 标注）：
+> 最终裁决见上方 O16 行（B 类 10 个直接改名注册、无 alias；`rsi_14` 不新增改
+> `rsi_12` 重跑；ATR 基 24→12；C 类收敛为 9 个新增；注册 134→143、
+> FEATURE_VERSION 4→5）。下方"三类处置选项 / 建议路径 / 用户待决策"为当时
+> 候选讨论，**均不再待决**。
+
 **背景**：`requirements.md` R10/R11 的验收标准是"332 legacy 策略全部 `lyra validate` 通过"。
 0004 编译器实现 + 自检时（2026-11-08）逐一对照 lyra registry 发现：
 **332 策略里有 326 个至少引用 1 个不在 lyra 0003 registry 的 feature**。

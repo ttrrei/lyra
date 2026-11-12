@@ -4,19 +4,22 @@ version: 1
 id: momentum_breakout_v01
 direction: momentum_breakout
 hypothesis: >-
-  A breakout above the recent 12-bar high with range_position above 0.9
+  A breakout above the recent 24-bar high with range_position above 0.9
   may continue for a short window; 2% hard stop caps fake-breakout losses.
 timeframe_minutes: 60
 
 # entry / exit / execution 结构沿用 nova 已验证 schema（R4 / R9）
+# 2026-11-12: 原引用未注册的 range_high_12/range_low_12（与 prior24_high/low
+# 语义相同、仅窗口 12≠24 之差），按用户裁决改写为注册特征；突破判定同步
+# 修正为 gt/lt（原 eq 为语义错误）。
 entry:
   long:
     all:
-      - {feature: range_high_12, op: eq, value: close}   # 突破 12-bar 高点
+      - {feature: prior24_high, op: gt, value: close}     # 突破前 24-bar 高点
       - {feature: range_position_24, op: gt, value: 0.9}  # 区间位置确认
   short:
     all:
-      - {feature: range_low_12, op: eq, value: close}
+      - {feature: prior24_low, op: lt, value: close}
       - {feature: range_position_24, op: lt, value: 0.1}
 exit:
   stop_loss_pct: 0.02          # 2% 硬止损（I3）

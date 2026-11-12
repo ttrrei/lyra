@@ -31,6 +31,8 @@
 
 ## O16 detail: the 332-strategy feature gap (verified 2026-11-08)
 
+> **⚠️ This section is a historical snapshot from before the 2026-11-11 three rulings (annotated 2026-11-12) and is superseded**: the final rulings are in the O16 row above (B-class 10 renamed and registered directly, no alias; `rsi_14` not added, `rsi_12` re-run instead; ATR basis 24→12; C-class reduced to 9 new features; registry 134→143, FEATURE_VERSION 4→5). The "three disposition options / suggested path / user decisions pending" below were the candidate discussion at the time and **are no longer pending**.
+
 **Context**: `requirements.md` R10/R11 acceptance is "all 332 legacy strategies pass `lyra validate`".
 During 0004 compiler implementation + self-check (2026-11-08), a per-feature cross-check against
 lyra's registry found: **326 of the 332 strategies reference at least one feature not in lyra's

@@ -21,7 +21,7 @@
 |---|---|
 | ID | 0007 |
 | 标题 | OCI 双向同步（push/backup/list）+ R12 交互式工作流（tracks/context/new-version/compare/merge） |
-| 状态 | **已实施（代码审查通过；R10 真实 OCI 桶验收待完成）** |
+| 状态 | **已签收（代码审查通过 + R10 真实 OCI 桶验收 2026-11-12 通过，#105/#106）** |
 | Owner | `ttrrei` |
 | 创建日期 | 2026-11-10 |
 | 相关提案 | `docs/proposals/2026-11-08-vectorbt-multi-ai-consolidated.md`（tracks 落地路径 §9）、`docs/proposals/oci-alpha-layout.md`（OCI 布局 + B9/I17） |
@@ -293,7 +293,7 @@ git、不联网（除 OCI）。
 - [ ] AI review（另一模型）
 - [ ] 自检 + 对抗性自检（本附录 B/C）
 - [ ] 测试全绿（新增 `test_oci_push.py` + `test_workflow.py`）
-- [ ] OCI 端到端跑通（R10 验收：pull/push 在真实桶上跑通一次）
+- [x] OCI 端到端跑通（R10 验收：2026-11-12 真实桶通过——4 桶 list/read/write 全 200 + read-back 逐字节一致 + OANDA 真实 token 验证 + 1.28 GB 全量基线迁移至 lyra-data 桶并校验，#105/#106）
 - [ ] 332 策略回归通过（**N/A**——332 语料门禁归 0008）
 
 ## 8. 修订记录
@@ -449,3 +449,4 @@ D 决策处置；3 个实现期检查项（B5）非设计缺陷。无阻塞设�
 （均有 D 决策处置或已列 B5 实现检查项），C7/C8 为**低**（不成立/可接受）。
 无阻塞设计缺陷；C1/C2 是**实现期门禁**（R10 真实桶跑通 + append-only 逐字保留
 校验），需在 0007 实现期优先验证。
+| 2026-11-12 | 0.7 | **R10 验收通过 + 0007 签收（#105/#106）**：真实桶验收在 4 个新桶（lyra-data/features/strategies/runs）全部通过——LIST 200 / WRITE 200（readme.md 探针）/ READ-back 逐字节一致；OANDA 真实 token 验证（EUR_USD 2h = 113 根 K 线）；1.28 GB 全量基线 moneta_prices_m1.zip（2020→2026-10，21 标的）从 org 源桶迁移至 lyra-data 桶并三重校验（远端 content-length 一致 + Range read-back + list 确认）。状态行改"已签收"；验收清单 R10 项勾选。本决策稿全部挂起项清零，0007 正式关闭。 |

@@ -23,7 +23,7 @@
 |---|---|
 | ID | 0007 |
 | Title | OCI bidirectional sync (push/backup/list) + R12 interactive workflow (tracks/context/new-version/compare/merge) |
-| Status | **Implemented (code review passed; R10 real-OCI-bucket acceptance pending)** |
+| Status | **Signed off (code review passed + R10 real-OCI-bucket acceptance passed 2026-11-12, #105/#106)** |
 | Owner | `ttrrei` |
 | Created | 2026-11-10 |
 | Related proposals | `docs/proposals/2026-11-08-vectorbt-multi-ai-consolidated.md` (tracks landing path §9), `docs/proposals/oci-alpha-layout.md` (OCI layout + B9/I17) |
@@ -335,7 +335,7 @@ field-for-field (R5 frozen set).
 - [ ] AI review (another model)
 - [ ] Self-check + adversarial self-check (this doc Appendices B/C)
 - [ ] Tests green (new `test_oci_push.py` + `test_workflow.py`)
-- [ ] OCI end-to-end passes (R10 acceptance: pull/push passes once on a real bucket)
+- [x] OCI end-to-end passes (R10 acceptance: passed on real buckets 2026-11-12 — all 4 buckets list/read/write 200 + byte-identical read-back + real OANDA token validated + 1.28 GB full baseline migrated to the lyra-data bucket and verified, #105/#106)
 - [ ] 332-strategy regression passes (**N/A** — the 332-corpus gate belongs to 0008)
 
 ## 8. Revision log
@@ -520,3 +520,4 @@ time), C3/C4/C5/C6 are **med** (all handled by D decisions or already listed as 
 implementation check-items), C7/C8 are **low** (do not hold / acceptable). No blocking design
 defect; C1/C2 are **implementation-time gates** (R10 real-bucket pass + append-only
 verbatim-preservation validation) that must be verified first in 0007's implementation.
+| 2026-11-12 | 0.7 | **R10 acceptance passed + 0007 signed off (#105/#106)**: real-bucket acceptance passed on all 4 new buckets (lyra-data/features/strategies/runs) - LIST 200 / WRITE 200 (readme.md probe) / READ-back byte-identical; real OANDA token validated (EUR_USD 2h = 113 candles); the 1.28 GB full baseline moneta_prices_m1.zip (2020 to 2026-10, 21 instruments) migrated from the org source bucket to the lyra-data bucket and triple-verified (remote content-length matches + Range read-back + list confirms). Status line set to signed off; R10 checklist item checked. All pending items in this decision document are cleared; 0007 is formally closed. |
