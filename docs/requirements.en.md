@@ -270,7 +270,7 @@ Lyra's **primary function** is to stay in sync with OCI:
 
 - `pytest -q` all green (causality / execution contract / metric
   definitions / data contracts).
-- `lyra-doctor` all green.
+- `lyra doctor` all green.
 - At least 3 strategies (long-only / short-only / long+short) run on
   21 instruments H1 full data, reports reviewable.
 - All 12 official direction strategies (`strategies/directions/`) pass
@@ -278,12 +278,7 @@ Lyra's **primary function** is to stay in sync with OCI:
   baseline, superseded by #99/#100).
 - OCI pull/push passes one end-to-end run on a real bucket.
 
-> **R10 sign-off (0009 complete, 2026-11-11)**: `pytest -q` 324 all green;
-> `lyra-doctor` exit 0 (incl. `feature_generation` / catalog / compile checks,
-> 0 hard fail, 1 WARN — the WARN is only the feat-6 legacy tables lacking a
-> generation manifest, expected); 12 directions pass `validate`; real OCI
-> buckets (raw_zips/oci-alpha) read+write verified end-to-end. `lyra-doctor`
-> added by 0009 (see `docs/decisions/0009-polish.md`).
+> **R10 sign-off (0009 complete, 2026-11-12, incl. 11-12 batch-1 review disposition)**: `pytest -q` 327 all green; `lyra doctor` exit 0 (real config: python=3.12 single-point, core deps incl. numpy/TA-Lib, four OCI slots hard-fail, catalog/feature-generation/compile smoke are WARN-level, 0 hard fail); 12 directions pass `validate`; real OCI buckets (raw_zips/oci-alpha) read+write verified end-to-end. `lyra doctor` added by 0009 (see `docs/decisions/0009-polish.md`). Also: H3 consumer-side generation fail-closed gate implemented; H5 README clean-environment install verified.
 
 ## R11. Compatibility
 

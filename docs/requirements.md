@@ -228,18 +228,19 @@ Lyra 的主要功能就是**跟 OCI 保持同步**：
 ## R10. 验收
 
 - `pytest -q` 全绿（含因果性 / 执行合约 / 指标口径 / 数据合约）。
-- `lyra-doctor` 全绿。
+- `lyra doctor` 全绿。
 - 至少 3 个策略（long-only / short-only / long+short）在 21 标的
   H1 全量数据上跑通，报告可审查。
 - 12 个正式方向策略（`strategies/directions/`）全部 `lyra validate` 通过
   （已达成；"332 个 legacy 策略"为 0008 勘误前的旧口径，#99/#100 已取代）。
 - OCI pull/push 在真实桶上跑通一次端到端。
 
-> **R10 签收（0009 完成，2026-11-11）**：`pytest -q` 324 全绿；`lyra-doctor`
-> exit 0（含 `feature_generation` / catalog / compile 检查，0 hard fail、1 WARN
-> —— WARN 仅为 feat-6 历史表尚无 generation manifest，属预期）；12 方向
-> `validate` 通过；真实 OCI 桶（raw_zips/oci-alpha）端到端读写已验证。
-> `lyra-doctor` 由 0009 新增（见 `docs/decisions/0009-polish.md`）。
+> **R10 签收（0009 完成，2026-11-12，含 11-12 批次1 review 处置）**：`pytest -q`
+> 327 全绿；`lyra doctor` exit 0（真实 config：python=3.12 单点、核心依赖含
+> numpy/TA-Lib、四 OCI 槽位硬失败、catalog/feature-generation/compile 冒烟为
+> WARN 级，0 hard fail）；12 方向 `validate` 通过；真实 OCI 桶（raw_zips/oci-alpha）
+> 端到端读写已验证。`lyra doctor` 由 0009 新增（见 `docs/decisions/0009-polish.md`）。
+> 另：H3 消费端 generation fail-closed 门禁已实现，H5 README 干净环境安装已实测通过。
 
 ## R11. 兼容性
 

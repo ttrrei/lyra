@@ -109,7 +109,7 @@ Python **3.12** (policy `>=3.12,<3.13`; the lock targets 3.12 — numpy 2.5.4 sh
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.lock      # pinned environment (TA-Lib wheels included)
-.venv/bin/pip install -e . --no-deps --no-build-isolation
+.venv/bin/pip install -e . --no-deps            # editable install (build isolation on → pip pulls setuptools)
 .venv/bin/pytest -q                             # or: python -m pytest -q
 ```
 

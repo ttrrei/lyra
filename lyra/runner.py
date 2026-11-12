@@ -121,16 +121,44 @@ def _data_digest(con: duckdb.DuckDBPyConnection, view: str,
     return h.hexdigest()
 
 
+def _feature_layer_for_view(view: str) -> str | None:
+    """Map a Catalog strategy view to its physical feature layer dir.
+
+    Strategy views are ``features_5m`` / ``features_1h`` (catalog.py:37-38);
+    the Parquet layers they read from are ``ohlcv_5m`` / ``ohlcv_1h``.
+    """
+    return {"features_5m": "ohlcv_5m", "features_1h": "ohlcv_1h"}.get(view)
+
+
 def _generation_present(data_dir: str | Path, view: str) -> bool:
-    """0009 D6: does the layer backing ``view`` (ohlcv_5m/ohlcv_1h) have a
-    generation manifest under features/<layer>/ ?"""
+    """0009 D6: does the layer backing ``view`` have a generation manifest
+    under ``features/<layer>/``?"""
     from .features import GENERATION_FILENAME
 
-    view_to_layer = {"ohlcv_5m": "5m", "ohlcv_1h": "1h"}
-    layer = view_to_layer.get(view)
+    layer = _feature_layer_for_view(view)
     if layer is None:
         return False
     return (Path(data_dir) / "features" / layer / GENERATION_FILENAME).exists()
+
+
+def _validate_generation_for_view(data_dir: str | Path, view: str) -> None:
+    """0009 D4 (H3 fail-closed gate): verify the generation manifest for the
+    feature layer the strategy reads is consistent (sha + manifest exact)
+    BEFORE any bar is read. Raises ``FeaturesError`` if the layer is mixed
+    or stale. A layer with no manifest at all is the legacy state — the D6
+    digest already flags it as ``legacy`` and the run proceeds (matching the
+    pre-D4 data that was computed before the gate existed); a manifest that
+    IS present but inconsistent is a hard failure."""
+    from . import features as feat
+
+    layer = _feature_layer_for_view(view)
+    if layer is None:
+        return
+    layer_dir = Path(data_dir) / "features" / layer
+    if not layer_dir.is_dir() or not feat.read_generation(layer_dir):
+        return  # legacy / not computed — not a mixed-generation hazard
+    # Manifest exists → enforce it (fail-closed on any mismatch).
+    feat._validate_layer(layer_dir)
 
 
 def _counter_fingerprint(trading_days_for: Any) -> str:
@@ -293,6 +321,11 @@ def run_strategy(
     plan = compiler_mod.compile_strategy(
         spec, registry, feature_catalog_snapshot=feature_catalog_snapshot,
     )
+
+    # 0009 D4 (H3): fail-closed generation gate on the feature layer this
+    # strategy reads, BEFORE any bar is read — a mixed/stale generation must
+    # never be silently consumed into metrics or the run_id digest.
+    _validate_generation_for_view(data_dir, spec.view)
 
     # 2) signal SQL + per-instrument OHLC (I16 isolation) --------------------
     con = duckdb.connect(str(cat.path), read_only=True)

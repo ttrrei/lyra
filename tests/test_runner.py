@@ -464,3 +464,57 @@ def test_d5_counter_identity_enters_fingerprint():
     assert fp2.startswith("counter:unidentified:")
     # None (natural days) unchanged
     assert _counter_fingerprint(None) == "natural"
+
+
+def _add_generation_manifest(data_root):
+    """Write a correct _generation.json for the ohlcv_1h layer so the D4
+    gate is active (not legacy)."""
+    from lyra import features as feat
+
+    layer = data_root / "features" / "ohlcv_1h"
+    gen = {
+        "version_string": "test-feat",
+        "file_sha256": {
+            f.stem: feat._sha256_file_bytes(f.read_bytes())
+            for f in sorted(layer.glob("*.parquet"))
+        },
+        "generated_at": "2026-11-12T00:00:00Z",
+    }
+    (layer / feat.GENERATION_FILENAME).write_text(
+        json.dumps(gen) + "\n", encoding="utf-8")
+    return layer
+
+
+def test_run_generation_gate_and_digest_source(env):
+    """0009 D4/D6 (H3, digest-source fix): with a valid generation manifest
+    for the strategy's layer, the run passes the consumer gate (no error)."""
+    data_root, strat, reg = env["data_root"], env["strat"], env["registry"]
+    _add_generation_manifest(data_root)
+
+    # the view→layer mapping now resolves (was 'legacy' before the fix):
+    # with a manifest present, digest_source is generation_manifest, not legacy
+    assert runner._feature_layer_for_view("features_1h") == "ohlcv_1h"
+    assert runner._generation_present(data_root, "features_1h") is True
+
+    # a consistent generation passes the consumer gate (no error)
+    runner.run_strategy(strat, data_root, registry=reg,
+                        out_dir=str(data_root / "runs"))
+
+
+def test_run_generation_gate_fails_closed_on_tamper(env):
+    """0009 D4 (H3): if a feature file is modified after publish, the
+    consumer gate fails the run BEFORE it reads bars (fail-closed)."""
+    from lyra import features as feat
+
+    data_root, strat, reg = env["data_root"], env["strat"], env["registry"]
+    layer = _add_generation_manifest(data_root)
+
+    # consistent generation -> run is allowed
+    feat._validate_layer(layer)  # no error
+
+    # tamper a file -> the consumer gate must reject before reading
+    f = layer / "EURUSD.parquet"
+    f.write_bytes(f.read_bytes() + b"X")
+    with pytest.raises(feat.FeaturesError):
+        runner.run_strategy(strat, data_root, registry=reg,
+                            out_dir=str(data_root / "runs"))

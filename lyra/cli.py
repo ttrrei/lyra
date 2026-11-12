@@ -414,13 +414,20 @@ def run(
         typer.secho(f"RUN FAILED: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
-    # 0009 D2: run_meta.json identity sidecar (CLI knows the workspace
-    # context the runner core intentionally stays agnostic about).
+    # 0009 D2 (M4): run_meta.json is the R12 identity source — a run the
+    # workflow cannot attribute is broken, so a sidecar write failure must
+    # fail the command (not warn-and-succeed). The run itself already
+    # succeeded and its artifacts are on disk; the failure is attribution.
     try:
         _write_run_meta(Path(strategy), Path(result.out_dir), track)
-    except Exception as exc:  # sidecar failure must not hide a successful run
-        typer.secho(f"warn: run_meta.json not written: {exc}",
-                    fg=typer.colors.YELLOW, err=True)
+    except Exception as exc:
+        typer.secho(
+            f"RUN OK but FAILED to write run_meta.json "
+            f"({result.out_dir}): {exc} — this run will not be attributable "
+            "by the R12 workflow (context/compare).",
+            fg=typer.colors.RED, err=True,
+        )
+        raise typer.Exit(code=1)
 
     typer.secho(f"OK: run {result.run_id[:12]} -> {result.out_dir}",
                 fg=typer.colors.GREEN)
@@ -1086,7 +1093,7 @@ def synthesize_cmd(
 #: 0009 D10: doctor severity levels — hard failures exit 1, warnings only
 #: keep the exit code at 0 (doctor must stay usable as an environment
 #: readiness probe before the user has run `lyra pull`).
-_DOCTOR_MIN_PY = (3, 11)
+_DOCTOR_MIN_PY = (3, 12)
 _DOCTOR_MAX_PY = (3, 13)
 
 
@@ -1115,12 +1122,13 @@ def doctor(
             f"{'.'.join(map(str, _DOCTOR_MAX_PY))} (exclusive)"
         )
     else:
-        typer.echo(f"PASS python {sys.version.split()[0]} (policy >=3.11,<3.13)")
+        typer.echo(f"PASS python {sys.version.split()[0]} (policy >=3.12,<3.13)")
 
     # --- hard: core deps importable ----------------------------------------
     for mod, pkg in (("duckdb", "duckdb"), ("pyarrow", "pyarrow"),
                      ("pydantic", "pydantic"), ("yaml", "pyyaml"),
-                     ("typer", "typer"), ("requests", "requests")):
+                     ("typer", "typer"), ("requests", "requests"),
+                     ("numpy", "numpy"), ("talib", "TA-Lib")):
         try:
             __import__(mod)
             typer.echo(f"PASS import {pkg}")
@@ -1134,13 +1142,18 @@ def doctor(
         data = load_config(config)
         oci = oci_from_dict(data)
         local = local_from_dict(data)
+        # D10: all four OCI slots are HARD requirements (a config missing any
+        # of them cannot run full OCI sync/backup, so doctor must fail closed,
+        # not degrade to a warning).
         for slot in ("data_par_url", "features_par_url",
                      "strategies_par_url", "runs_par_url"):
             val = getattr(oci, slot, None)
             if val:
                 typer.echo(f"PASS config slot {slot} set")
             else:
-                warnings.append(f"config slot {slot} not set (OCI sync unavailable)")
+                failures.append(
+                    f"config slot {slot} not set (required for OCI sync/backup)"
+                )
         typer.echo("PASS config parses")
     except Exception as exc:
         failures.append(f"config unreadable at {config}: {exc}")
@@ -1163,11 +1176,17 @@ def doctor(
             have = views & {"bronze", "features_5m", "features_1h"}
             typer.echo(f"PASS catalog.duckdb present (views: {sorted(views) or 'none'})")
             if not have:
-                warnings.append("catalog has no bronze/features views yet (run `lyra build`)")
+                warnings.append(
+                    "catalog has no bronze/features views yet "
+                    "(run `lyra pull` → `lyra features` → `lyra catalog`)"
+                )
         except Exception as exc:
             warnings.append(f"catalog present but unreadable: {exc}")
     else:
-        warnings.append("no catalog.duckdb found (run `lyra pull` + `lyra build`)")
+        warnings.append(
+            "no catalog.duckdb found "
+            "(run `lyra pull` → `lyra features` → `lyra catalog`)"
+        )
 
     # --- warn: feature generation integrity (D4) ----------------------------
     if data_root is not None and (data_root / "features").is_dir():
@@ -1206,12 +1225,39 @@ def doctor(
 
 
 def _default_example_strategy() -> str:
-    """The bundled example strategy (0003/0004 fixtures) for the smoke test."""
-    # strategies/ lives at the repo root, next to the lyra package.
+    """A strategy YAML for the compile smoke test.
+
+    Prefers the repo's bundled example (``strategies/examples/*/v01.yaml``)
+    when running from a source checkout; otherwise writes a minimal RSI
+    strategy to a temp file so the smoke works from any install (0009 M3).
+    """
     pkg_root = Path(__file__).resolve().parent.parent
     for cand in sorted((pkg_root / "strategies").glob("examples/*/v01.yaml")):
         return str(cand)
-    raise FileNotFoundError("no bundled example strategy found under strategies/examples/")
+    # Fallback: an in-memory minimal strategy (registered features only).
+    import tempfile
+    fallback = (
+        "version: 1\n"
+        "id: doctor_smoke_rsi\n"
+        "direction: mean_reversion\n"
+        "timeframe_minutes: 60\n"
+        "entry:\n"
+        "  long:\n"
+        "    all:\n"
+        "      - {feature: rsi_12, op: lt, value: 30}\n"
+        "exit:\n"
+        "  long: {feature: rsi_12, op: gt, value: 55}\n"
+        "  stop_loss_pct: 0.02\n"
+        "execution:\n"
+        "  spread_bps: 2\n"
+        "  slippage_bps_per_side: 0.2\n"
+        "  commission_bps_round_trip: 0\n"
+        "  financing_bps_per_day: 0\n"
+    )
+    fd, path = tempfile.mkstemp(prefix="lyra_smoke_", suffix=".yaml")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(fallback)
+    return path
 
 
 @app.command()

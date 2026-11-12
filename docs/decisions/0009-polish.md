@@ -96,14 +96,21 @@
 
 ## 4. 验收（0009 完成判据）
 
-- [ ] R1/R2/R7/R8/R9 五项挂起项全部有实现 + 回归测试
-- [ ] README 与真实 CLI 一致（无 `src/`、无占位命令）
-- [ ] `pyproject.toml` `requires-python` 有上下界；`requirements.lock` 存在且 CI 用它安装
-- [ ] `.github/workflows/ci.yml` 在 GitHub Actions 上绿（或本地等价验证）
-- [ ] `lyra-doctor` 在本机开发环境全绿
-- [ ] 全仓 `pytest -q` 绿 + pyflakes 干净
-- [ ] `requirements.md` R10 双语签收标注（D11）
-- [ ] ACTION_LOG 状态块 + 0009 决策稿双语成对 + HLD §8 第 9 行刷新
+- [x] R1/R2/R7/R8/R9 五项挂起项全部有实现 + 回归测试
+- [x] README 与真实 CLI 一致（无 `src/`、无占位命令）
+- [x] `pyproject.toml` `requires-python` 有上下界（`>=3.12,<3.13`）；`requirements.lock` 存在且 CI 用它安装
+- [x] `.github/workflows/ci.yml` 本地等价验证（py3.12：lock 安装 + editable install + `lyra` 入口 + pyflakes + pytest）
+- [x] `lyra doctor` 在本机开发环境全绿（真实 config，0 hard fail + WARN）
+- [x] 全仓 `pytest -q` 绿 + pyflakes 干净（327 passed）
+- [x] `requirements.md` R10 双语签收标注（D11）
+- [x] ACTION_LOG 状态块 + 0009 决策稿双语成对 + HLD §8 第 9 行刷新
+
+> **11-12 批次1 review 追加（§3a 之后）**：H3 消费端 fail-closed generation 门禁
+> 已实现（`lyra run` 读特征前校验 + 回归测试）；H4 doctor 四 OCI 槽位均硬失败
+> （D10 语义）；H5 README 干净环境安装改为 build isolation（已实测通过）；
+> M1 doctor Python 策略=3.12 单点 + 核心依赖补 numpy/TA-Lib；M2 本清单 + HLD +
+> ACTION_LOG 同步；M3 命令名 `lyra doctor`、`lyra build`→真实管道命令、compile
+> smoke 内置 fallback；M4 run_meta 写失败改为硬失败。详见 `docs/reviews/`。
 
 ## 修订记录
 

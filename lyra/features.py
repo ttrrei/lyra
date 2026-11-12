@@ -984,50 +984,56 @@ def feature_snapshot_digest(data_root: str | Path) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _validate_layer(layer_dir: Path) -> list[Path]:
+    """0009 D4 gate for a single feature layer: every ``*.parquet`` must appear
+    in the ``_generation.json`` sha table with a matching SHA256, and every
+    manifest entry must exist on disk. Fail-closed (FeaturesError)."""
+    checked: list[Path] = []
+    gen = read_generation(layer_dir)
+    if gen is None:
+        files = sorted(layer_dir.glob("*.parquet"))
+        if files:
+            raise FeaturesError(
+                f"{layer_dir} has {len(files)} parquet file(s) but no "
+                f"{GENERATION_FILENAME}; re-run `lyra features` "
+                "(or delete the layer and recompute)"
+            )
+        return checked
+    expected = gen.get("file_sha256", {})
+    files = sorted(layer_dir.glob("*.parquet"))
+    for f in files:
+        actual = _sha256_file_bytes(f.read_bytes())
+        if f.stem not in expected:
+            raise FeaturesError(
+                f"{f} is not in the generation manifest {layer_dir}/{GENERATION_FILENAME} "
+                "(mixed generations?)"
+            )
+        if expected[f.stem] != actual:
+            raise FeaturesError(
+                f"{f} sha256 {actual[:12]}… != manifest {expected[f.stem][:12]}… "
+                "(feature file modified after publish)"
+            )
+        checked.append(f)
+    on_disk = {f.stem for f in files}
+    for stem in expected:
+        if stem not in on_disk:
+            raise FeaturesError(
+                f"{layer_dir}/{stem}.parquet listed in {GENERATION_FILENAME} "
+                "but missing on disk"
+            )
+    return checked
+
+
 def validate_generation(data_root: str | Path) -> list[Path]:
-    """0009 D4 gate: every ``features/<layer>/*.parquet`` must appear in the
-    current ``_generation.json`` sha table with a matching actual SHA256,
-    else FeaturesError (fail-closed). Returns the checked file list.
+    """0009 D4 gate: verify every existing ``features/<layer>`` is generation
+    consistent (fail-closed). Returns the checked file list.
     """
     root = Path(data_root)
     checked: list[Path] = []
     for layer in _MINUTES_TO_VIEW.values():
         layer_dir = root / "features" / layer
-        if not layer_dir.is_dir():
-            continue
-        gen = read_generation(layer_dir)
-        if gen is None:
-            files = sorted(layer_dir.glob("*.parquet"))
-            if files:
-                raise FeaturesError(
-                    f"{layer_dir} has {len(files)} parquet file(s) but no "
-                    f"{GENERATION_FILENAME}; re-run `lyra features` "
-                    "(or delete the layer and recompute)"
-                )
-            continue
-        expected = gen.get("file_sha256", {})
-        files = sorted(layer_dir.glob("*.parquet"))
-        for f in files:
-            actual = _sha256_file_bytes(f.read_bytes())
-            if f.stem not in expected:
-                raise FeaturesError(
-                    f"{f} is not in the generation manifest {layer_dir}/{GENERATION_FILENAME} "
-                    "(mixed generations?)"
-                )
-            if expected[f.stem] != actual:
-                raise FeaturesError(
-                    f"{f} sha256 {actual[:12]}… != manifest {expected[f.stem][:12]}… "
-                    "(feature file modified after publish)"
-                )
-            checked.append(f)
-        # every manifest entry must exist on disk
-        on_disk = {f.stem for f in files}
-        for stem in expected:
-            if stem not in on_disk:
-                raise FeaturesError(
-                    f"{layer_dir}/{stem}.parquet listed in {GENERATION_FILENAME} "
-                    "but missing on disk"
-                )
+        if layer_dir.is_dir():
+            checked.extend(_validate_layer(layer_dir))
     return checked
 
 
