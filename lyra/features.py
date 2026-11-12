@@ -894,7 +894,26 @@ def feature_path(data_root: str | Path, minutes: int, instrument: str) -> Path:
         raise FeaturesError(
             f"unsupported minutes={minutes!r}; supported={sorted(_MINUTES_TO_VIEW)}"
         )
-    return Path(data_root) / "features" / layer / f"{instrument}.parquet"
+    # 整体review-R6: instrument is a filename component, never a path —
+    # reject separators / traversal / empty so a malicious or corrupt
+    # instrument value can never escape the data root (fail-closed).
+    if (
+        not instrument
+        or any(sep in instrument for sep in ("/", "\\", "\x00"))
+        or instrument in (".", "..")
+    ):
+        raise FeaturesError(
+            f"invalid instrument for feature path: {instrument!r} "
+            "(must be a single path component)"
+        )
+    path = Path(data_root) / "features" / layer / f"{instrument}.parquet"
+    root = Path(data_root).resolve()
+    resolved = path.resolve()
+    if root not in resolved.parents:
+        raise FeaturesError(
+            f"feature target {resolved} escapes the data root {root}"
+        )
+    return path
 
 
 @dataclass

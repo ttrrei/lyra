@@ -44,8 +44,13 @@ system.
 - **One strategy = one timeframe.** (No 60m entry + 5m exit combo.)
 - **One strategy = one rule set**; `long` / `short` may be specified
   separately; conflicting conditions → neither opens.
-- **Backward compatibility**: all 332 existing strategy YAMLs must run
-  on the Lyra compiler with no syntax change.
+- **Backward compatibility** (scope revised by 0008 #99/#100, 2026-11-11): all
+  **12 official direction strategies** run on the Lyra compiler with no syntax
+  change (achieved: validate 12/12); the nova corpus' 146 campaign snapshots and
+  169 non-strategy YAMLs sit in `strategies/temp/` and are triaged one-by-one
+  in 0010 (promote/drop/archive) — they are NOT the acceptance object of this
+  clause (the original "332 strategy YAMLs" was the pre-erratum Nova-repo YAML
+  file total, including runs/manifest non-strategy files; superseded).
 
 ## R3. Feature model
 
@@ -159,10 +164,12 @@ authoritative grid**). Initial list:
 - **Conflicting long/short conditions → neither opens.**
 - **An entry scheduled on the last bar expires.**
 - **A position still open at end of data exits at that last close.**
-- **Costs**: flat round-trip commission fraction + financing fraction per
-  **trading day** (elapsed = trading days in the holding interval;
-  **weekends and market holidays — New Year / Christmas, etc. — are not
-  counted**, not physical calendar days); spread/slippage are already in
+- **Costs**: flat round-trip commission fraction + financing fraction.
+  **Basis superseded by the O17/0006 ruling**: the default is **per-trade
+  natural days** — deterministic, data-only, keeps the nova cross-check at
+  diff=0; `trading_days_for(entry, exit)` is the trading-day compliance
+  outlet. (The original "per trading day" was O15's initial ruling; see the
+  final state of O15/O17 in open-questions.) Spread/slippage are already in
   the fills, not double-counted.
   double-counted.
 - **Return formula**: `direction × (exit_fill − entry_fill) /
@@ -184,11 +191,14 @@ authoritative grid**). Initial list:
 ## R6. Data and OCI
 
 - **Base data is pulled from OCI** (PAR URL), not kept in git.
-- Local layout (see `docs/proposals/oci-alpha-layout.md`):
-  - `oci://<bucket>/lyra/data/raw_csv/`: raw CSVs (OANDA / other sources)
-  - `oci://<bucket>/lyra/data/raw_parquet/`: raw Parquet
-  - `oci://<bucket>/lyra/data/market/<minutes>m/`: cleaned OHLCV Parquet
-  - `oci://<bucket>/lyra/data/features/<minutes>m/`: feature wide tables
+- Local layout (**per the 0002 implementation**;
+  `docs/proposals/oci-alpha-layout.md` is an early proposal, its layout
+  section superseded):
+  - `oci://<bucket>/lyra-data/raw_zips/`: raw ZIPs (OANDA / other sources;
+    extracted locally to raw_csv derived cache, never on OCI)
+  - local derived layers: `bronze/` (cleaned), `ohlcv_5m/` and `ohlcv_1h/`
+    (aggregated, single-file external tables)
+  - `oci://<bucket>/lyra-features/<instrument>.parquet`: feature wide tables
 - **Alpha boundary** (all OCI-only; layout in
   `docs/proposals/oci-alpha-layout.md`):
   - `oci://<bucket>/lyra/alpha/features/*.py`
@@ -196,7 +206,8 @@ authoritative grid**). Initial list:
   - `oci://<bucket>/lyra/alpha/features/tests/*.py`
   - `oci://<bucket>/lyra/strategies/<direction>/{hypothesis.md, lessons.md, vNN.yaml}`
     (direction-folder organization, see R12)
-  - `oci://<bucket>/lyra/runs/<name>/<date>/*`
+  - `oci://<bucket>/lyra-runs/runs/<direction>/<track_id>/<run_id>/`
+    (0007 D7 canonical path, O2 user ruling 2026-11-10)
 - **Bidirectional sync** is Lyra's core feature (see R7).
 - **OCI mirrors live outside the repository by default**: local `data/`
   `strategies/` `runs/` resolve to `~/.lyra/<workspace>/…`, **not**
@@ -217,8 +228,9 @@ Lyra's **primary function** is to stay in sync with OCI:
   change.
 - **Conflict policy**: `config.yml` decides (default: OCI is source of
   truth; local changes require explicit `--force-push`).
-- **Credentials**: PAR URL preferred; optional OCI auth
-  (`~/.lyra/credentials`). Credentials never enter git.
+- **Credentials**: PAR URL is the ONLY credential path (embedded token).
+  **OCI SDK auth is NOT implemented** (M3 rejected by the user ruling
+  2026-11-11). Credentials never enter git.
 
 ## R8. Non-functional requirements
 
@@ -261,14 +273,20 @@ Lyra's **primary function** is to stay in sync with OCI:
 - `lyra-doctor` all green.
 - At least 3 strategies (long-only / short-only / long+short) run on
   21 instruments H1 full data, reports reviewable.
-- All 332 legacy strategy YAMLs pass `lyra validate`.
+- All 12 official direction strategies (`strategies/directions/`) pass
+  `lyra validate` (achieved; "332 legacy strategies" was the pre-0008-erratum
+  baseline, superseded by #99/#100).
 - OCI pull/push passes one end-to-end run on a real bucket.
 
 ## R11. Compatibility
 
-- **Backward-compatible with Nova**: the 332 strategy YAMLs run as-is;
-  the 17 registered feature names are unchanged; the 2% stop semantics
-  are unchanged.
+- **Backward-compatible with Nova** (0008 scope, #99/#100): the 12 official
+  direction strategies run as-is (achieved); feature naming per the user's
+  three rulings — B-class 10 renamed to the nova-canonical names (no alias),
+  `rsi_14` not added (rewrite to `rsi_12` and re-run), ATR basis 24→12,
+  C-class 9 new, registry 134→146 (later +prior12 family); the 2% stop
+  semantics are unchanged. (The original "332 strategy YAMLs / 17 unchanged
+  feature names" was the pre-ruling baseline; superseded.)
 - **Not compatible with Moneta**: Moneta's OOS ledger / trial_log /
   305/270-column feature tables are **not** Lyra's input contract; if
   migration is needed, use `lyra ingest --kind moneta` (future feature).

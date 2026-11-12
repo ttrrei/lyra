@@ -33,8 +33,12 @@
 - **一个策略 = 一个 timeframe。**（不做 60m entry + 5m exit 这种组合）
 - **一个策略 = 一个方向规则集**，`long` / `short` 可分别指定，冲突时
   两个都不开。
-- **向后兼容**：现有 332 个策略 YAML 全部能在 Lyra 编译器上跑通，语法
-  不变。
+- **向后兼容**（口径经 0008 范围修订 #99/#100，2026-11-11）：**12 个正式方向
+  策略**全部能在 Lyra 编译器上跑通、语法不变（已达成：validate 12/12）；
+  nova 语料的 146 个 campaign 快照与 169 个非策略 YAML 归 `strategies/temp/`，
+  由 0010 triage 逐条裁决（promote/drop/archive），不属本兼容条款的验收对象
+  （原文"332 个策略 YAML"为 0008 勘误前的 Nova 仓库 YAML 文件总数，含 runs/
+  manifest 等非策略文件，已被取代）。
 
 ## R3. 特征模型
 
@@ -132,7 +136,10 @@
 - **冲突的 long/short 条件 → 两个都不开。**
 - **最后一根 bar 上排队的入场 → 作废（expire）。**
 - **数据结束时还持仓 → 在最后一根收盘平仓。**
-- **成本**：flat round-trip 佣金比例 + 按 **交易日**计的 financing 比例
+- **成本**：flat round-trip 佣金比例 + financing 比例（**口径已被 O17/0006 裁决
+  取代**：默认按 **per-trade 自然日**计——确定性、仅依赖数据、保持 nova
+  cross-check diff=0；`trading_days_for(entry, exit)` 回调为交易日合规出口。
+  原文"按交易日计"为 O15 初始裁决，见 open-questions O15/O17 的最终状态）。
   （elapsed = 持仓区间内的交易日数；**周末与市场节假日——新年 / 圣诞等——
   均不计**，非物理日历天）；
   spread / slippage 已在成交价中，不重复计。
@@ -152,18 +159,20 @@
 ## R6. 数据与 OCI
 
 - **基础数据从 OCI 拉**（PAR URL），不在 git 里。
-- 本地目录结构（见 `docs/proposals/oci-alpha-layout.md`）：
-  - `oci://<bucket>/lyra/data/raw_csv/`：原始 CSV（OANDA / 其他源）
-  - `oci://<bucket>/lyra/data/raw_parquet/`：原始 Parquet
-  - `oci://<bucket>/lyra/data/market/<minutes>m/`：清洗后的 OHLCV Parquet
-  - `oci://<bucket>/lyra/data/features/<minutes>m/`：特征宽表
+- 本地目录结构（**以 0002 实际实现为准**；`docs/proposals/oci-alpha-layout.md`
+  为早期 proposal，布局部分已被取代）：
+  - `oci://<bucket>/lyra-data/raw_zips/`：原始 ZIP（OANDA / 其他源；本地解压为
+    raw_csv 派生缓存，不入 OCI）
+  - 本地派生层：`bronze/`（清洗）、`ohlcv_5m/` 与 `ohlcv_1h/`（聚合，单文件外部表）
+  - `oci://<bucket>/lyra-features/<instrument>.parquet`：特征宽表
 - **alpha 边界**（全部只在 OCI，目录布局见 `docs/proposals/oci-alpha-layout.md`）：
   - `oci://<bucket>/lyra/alpha/features/*.py`
   - `oci://<bucket>/lyra/alpha/features/contracts/*.md`
   - `oci://<bucket>/lyra/alpha/features/tests/*.py`
   - `oci://<bucket>/lyra/strategies/<direction>/{hypothesis.md, lessons.md, vNN.yaml}`
     （方向文件夹组织，见 R12）
-  - `oci://<bucket>/lyra/runs/<name>/<date>/*`
+  - `oci://<bucket>/lyra-runs/runs/<direction>/<track_id>/<run_id>/`
+    （0007 D7 规范路径，O2 用户裁决 2026-11-10）
 - **双向同步**是 Lyra 的核心 feature（见 R7）。
 - **OCI 镜像默认在仓库外**：本地 `data/` `strategies/` `runs/` 解析为
   `~/.lyra/<workspace>/…`，**不落在 git 工作区内**（B13 防呆）。
@@ -222,13 +231,18 @@ Lyra 的主要功能就是**跟 OCI 保持同步**：
 - `lyra-doctor` 全绿。
 - 至少 3 个策略（long-only / short-only / long+short）在 21 标的
   H1 全量数据上跑通，报告可审查。
-- 332 个 legacy 策略 YAML 全部 `lyra validate` 通过。
+- 12 个正式方向策略（`strategies/directions/`）全部 `lyra validate` 通过
+  （已达成；"332 个 legacy 策略"为 0008 勘误前的旧口径，#99/#100 已取代）。
 - OCI pull/push 在真实桶上跑通一次端到端。
 
 ## R11. 兼容性
 
-- **向后兼容 Nova**：332 个策略 YAML 直接能跑；
-  17 个已注册 feature 名称不变；2% stop 语义不变。
+- **向后兼容 Nova**（0008 口径，#99/#100）：12 个正式方向策略直接能跑
+  （已达成）；feature 命名按用户三裁决执行——B 类 10 个改名注册为 nova
+  规范名（无 alias）、`rsi_14` 不新增改 `rsi_12` 重跑、ATR 基 24→12、
+  C 类 9 个新增、注册 134→146（后续 prior12 族）；2% stop 语义不变。
+  （原文"332 个策略 YAML / 17 个 feature 名称不变"为 0008 裁决前的旧基线，
+  已被取代。）
 - **不兼容 Moneta**：Moneta 的 OOS ledger / trial_log / 305/270 列
   feature 表不作为 Lyra 的输入合约；如需迁移，走
   `lyra ingest --kind moneta`（未来 feature）。

@@ -573,3 +573,21 @@ def test_real_data_one_instrument(tmp_path):
     t = pq.read_table(res.paths[0])
     assert len(t.column_names) == 154   # 146 + 8
     assert t.schema.metadata[b"feature_version"] == str(features.FEATURE_VERSION).encode()
+
+
+def test_feature_path_rejects_instrument_traversal(tmp_path):
+    """整体review-R6: instrument is a filename component — path separators,
+    traversal and empty values must fail closed, never write outside the
+    data root."""
+    from lyra.features import FeaturesError, feature_path
+
+    for bad in ("../../x", "a/b", "a\\b", "", ".", "..", "\x00evil"):
+        try:
+            feature_path(tmp_path, 60, bad)
+        except FeaturesError:
+            pass
+        else:
+            raise AssertionError(f"instrument {bad!r} was not rejected")
+    # legal instruments still resolve inside the root
+    ok = feature_path(tmp_path, 60, "EUR_USD").resolve()
+    assert str(ok).startswith(str(tmp_path.resolve()))

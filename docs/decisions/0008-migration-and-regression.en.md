@@ -146,7 +146,7 @@ full history, aligned on entry_time (902 common entries).
 **bar-for-bar identical where they overlap** (USD_JPY same-window OHLC equal),
 but (1) the **bar sets differ**: lyra has 21 bars/day (gaps incl. full
 Saturdays, per-instrument variance), nova 24 bars/day (SPX 3 bars in 2 days);
-**O18 nailed down and closed (2026-11-11 user ruling, see `0008-bar-coverage-analysis.md`)**: raw 1m byte-identical on both sides (21/21 SHA256); the difference is 100% aggregation-rule-driven (nova drops `source_bars<60` partial hours — 179,550 bars, 97.6% — and the "21 vs 24 bars/day" was a nova local-timezone display artifact; under UTC, lyra ≥ nova everywhere). **User ruling: lyra's bar set is canonical; any nova-side results entering lyra must be recomputed on lyra bars**;
+**O18 nailed down and closed (2026-11-11 user ruling, see `0008-bar-coverage-analysis.md`)**: raw 1m byte-identical on both sides (21/21 SHA256); the total difference is 183,909 = **179,550 (97.6%, aggregation-rule: nova drops `source_bars<60` partial hours — lyra keeps them with `n_bars` annotation) + 4,359 (2.4%, lyra window tail 2026-10-24→11-06)**; the "21 vs 24 bars/day" was a nova local-timezone display artifact; under UTC, lyra ≥ nova everywhere. **User ruling: lyra's bar set is canonical; any nova-side results entering lyra must be recomputed on lyra bars**;
 (2) the 3% 1-bar entry_price offset, ~40% bars_held variance and the
 per-trade net_return difference are all downstream of the coverage difference
 (different warm-up windows → different signal-bar sets). **100% direction and
@@ -181,7 +181,7 @@ meta.json}), moneta_s_series/(_index.json)}`.
 - moneta 200 research batch (confirmed no migration value; archive stays in moneta)
 - moneta S-series code rewrite (Python libs; 0010 triage only re-expresses
   the few "worth keeping" as YAML — not this feature)
-- R10 real-bucket acceptance (held, #98)
+- R10 real-bucket acceptance (**passed and signed off #105/#106, 2026-11-12**: 4-bucket list/read/write acceptance on real PAR URLs + OANDA token validation + 1.28 GB baseline migrated to `lyra-data`)
 
 ## Revision history
 
@@ -189,4 +189,4 @@ meta.json}), moneta_s_series/(_index.json)}`.
 |---|---|---|
 | 2026-11-10 | 0.1 | Scope-revised draft: "332" erratum; O16 20 gaps reclassified (**B 10 alias + C 10 new**); ATR normalization-basis (14 vs 24) known-divergence note added; `close_*_distance_atr` pair into C-class; temp/ skeleton referenced; 0010 split out. |
 | 2026-11-11 | 0.2 | **User's three final rulings** (supersede the v0.1 pre-filled recommendations): ① B-class 10 **renamed** to the nova canonical names (no alias table; moneta names unmapped); ② `rsi_14` **not added** — the 3 affected direction files (momentum_exhaustion/pullback_reentry/session_temporal) rewritten to rsi_12 and rerun (TODO); ③ ATR normalization basis **24→12** (replacing the corpus' ATR(14); K6 basis change; C-class distance features on the same basis). C-class 10→**9**. Registry 134→**143**; FEATURE_VERSION 4→5. |
-| 2026-11-11 | 0.3 | Regression closeout: §3.1 gate 1/2/3 results recorded (validate 12/12; run 12×21 all OK; cross-check: direction/exit_reason 100% match, entry_price 97% match, residue attributed to data-layer bar coverage → O18 parked; rsi_12 drift quantified). |
+| 2026-11-11 | 0.3 | Regression closeout: §3.1 gate 1/2/3 results recorded (validate 12/12; run 12×21 all OK; cross-check: direction/exit_reason 100% match, entry_price 97% match, residue attributed to data-layer bar coverage → O18 parked; rsi_12 drift quantified). *(Historical snapshot taken before O18 was closed the same day; O18 is closed per the 2026-11-11 user ruling.)* || 2026-11-12 | 0.4 | overall-design review R10 disposition: §3.1 O18 paragraph unified to the "183,909 = 179,550 (97.6% aggregation) + 4,359 (2.4% window tail)" wording (fixes the EN "100%" stale phrase and the ZH conclusion's duplicated/broken lines); §5 R10 real-bucket acceptance status updated from "held" to "signed off #105/#106"; revlog 0.3 annotated as a pre-closure historical snapshot. |

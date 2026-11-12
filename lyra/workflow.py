@@ -52,7 +52,10 @@ MAX_ACTIVE_BRANCHES_PER_TRACK = 8
 _BRANCH_RE = re.compile(r"^v\d+[a-z]*$")
 _VNN_FILE_RE = re.compile(r"^v(\d+)[a-z]*\.yaml$")
 _TRACK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-_BRANCH_NAME_RE = re.compile(r"^v\d+[a-z]*$")
+# O12 (user ruling): versioned branches may carry a variant ordinal suffix
+# ``_1`` / ``_2`` (e.g. v04ab_1) — the parameter-variant series for one
+# strategy. Letter suffixes (v02a/v04ab) remain the AI-identity axis.
+_BRANCH_NAME_RE = re.compile(r"^v\d+[a-z]*(_\d+)?$")
 # direction/track/branch/run identifiers are single path components: no
 # separators, no dot segments (H4 — a "../x" direction would escape the
 # workspace root).

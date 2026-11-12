@@ -730,3 +730,16 @@ def test_h9_default_runs_does_not_conflict_with_canonical(tmp_path, monkeypatch)
     assert out.exit_code == 0, out.output
     # the canonical version on the remote is preserved (not overwritten)
     assert rec.objects[rel] == b"canonical-version"
+
+
+def test_o12_variant_ordinal_suffixes_classify_immutable():
+    """O12 (user ruling): variant ordinal ``_1``/``_2`` after the letter
+    suffix is part of the branch-name contract (v04ab_1 / v04ab_2)."""
+    from lyra import oci_push
+
+    assert oci_push.classify_path("strategies/fx-trend/v04ab_1.yaml") == "immutable"
+    assert oci_push.classify_path("strategies/fx-trend/v02a_2.yaml") == "immutable"
+    # illegal suffixes stay unclassified (fail-closed)
+    assert oci_push.classify_path("strategies/fx-trend/v04ab_x.yaml") == "unclassified"
+    assert oci_push.classify_path("strategies/fx-trend/v04ab_1b.yaml") == "unclassified"
+    assert oci_push.classify_path("strategies/fx-trend/v04a1.yaml") == "unclassified"

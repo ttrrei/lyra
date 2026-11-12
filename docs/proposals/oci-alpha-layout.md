@@ -2,7 +2,12 @@
 
 > **English**: [oci-alpha-layout.en.md](./oci-alpha-layout.en.md)
 >
-> **状态**：提案（Proposal），待 review。
+> **状态**：提案（Proposal）。**目录布局部分已被 0002/0007 实际实现取代**
+> （2026-11-11 review 处置）：实际采用 4 bucket 模型
+> `lyra-data/raw_zips`、`lyra-features/<instrument>.parquet`、
+> `lyra-strategies/<direction>/…`、`lyra-runs/runs/<direction>/<track>/<run>/`；
+> 本文件的布局章节（`lyra/data/…`、`lyra/alpha/features/…` 等）仅作历史参考，
+> **不再是规范**。alpha 边界、B 规则等设计原则仍有效。
 > **版本**：v0.9 | **日期**：2026-11-05
 > **Owner**：ttrrei
 > **Related**：`docs/decisions/0001-repo-and-oci-split.md`

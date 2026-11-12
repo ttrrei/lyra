@@ -38,7 +38,9 @@ _CHUNK = 1 << 20
 # H5 (batch2): sibling-suffix naming per requirements.md §0.2
 # (v02a / v02b / v04ab) — the class key is still "immutable file"; only the
 # allowed branch slug set widens from plain vNN to vNN[a-z]*.
-_VNN_RE = re.compile(r"^v\d+[a-z]*\.yaml$")
+# O12 (user ruling): variant ordinal ``_1``/``_2`` after the letter suffix
+# is part of the branch-name contract (must match workflow._BRANCH_NAME_RE).
+_VNN_RE = re.compile(r"^v\d+[a-z]*(_\d+)?\.yaml$")
 
 
 class PushTransport(Protocol):

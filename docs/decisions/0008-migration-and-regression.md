@@ -146,9 +146,7 @@ SPX 115 根/周、3 根/2 天"是 nova parquet 本地时区（AEST/AEDT）显示
 （rsi_14 版如需精确复现，属 0010 对 temp/ 24 条 rsi_14 实验的处置范围。）
 
 **结论**：0008 §3 回归门禁按修订后范围完成；cross-check 的残余差异全部
-（归因见上：97.6% 聚合规则 + 2.4% 窗口尾部，O18 已关闭——以 lyra bar 集为准）。0008 可签收。
-归因于数据层 bar 覆盖差异（O18，**2026-11-11 已深挖并关闭**——深挖报告 `0008-bar-coverage-analysis.md`：raw 逐字节同源、差异 100% 来自 nova `source_bars<60` 过滤器 + 显示时区假象；**用户裁决以 lyra bar 集为准**，nova 侧结果进入 lyra 必须重算），非 0008 代码
-缺陷。0008 可签收。
+归因于数据层 bar 覆盖差异（O18，**2026-11-11 已深挖并关闭**——深挖报告 `0008-bar-coverage-analysis.md`：raw 逐字节同源、差异 183,909 = 179,550（97.6% 聚合规则）+ 4,359（2.4% 窗口尾部）；**用户裁决以 lyra bar 集为准**，nova 侧结果进入 lyra 必须重算），非 0008 代码缺陷。0008 可签收。
 
 ## 4. temp/ 门禁（不进回归集）
 
@@ -168,7 +166,7 @@ moneta_s_series/(_index.json)}`。
 - moneta 200 研究批次（确认无迁移价值，档案留 moneta）
 - moneta S 系列代码重写（Python 库；0010 triage 只对"值得保留"的
   少数做 YAML 重表达，不在本 feature）
-- R10 真实桶验收（维持挂起，#98）
+- R10 真实桶验收（**已通过并签收 #105/#106，2026-11-12**：4 桶 PAR list/read/write 验收 + OANDA token 验证 + 1.28 GB 基线迁移至 `lyra-data`）
 
 ## 修订记录
 
@@ -176,4 +174,5 @@ moneta_s_series/(_index.json)}`。
 |---|---|---|
 | 2026-11-10 | 0.1 | 范围修订稿：勘误"332"口径；O16 20 缺口 B/C 重分类（**B 10 alias + C 10 新增**）；补 ATR 归一化基（14 vs 24）已知分歧注；`close_*_distance_atr` 两条入 C 类；temp/ 骨架引用；0010 拆分。 |
 | 2026-11-11 | 0.2 | **用户三裁决最终版**（取代 v0.1 推荐预填）：① B 类 10 个**改名**注册（nova 名规范，无 alias 表，moneta 名不映射）；② `rsi_14` **不新增**，受影响 3 个方向文件（momentum_exhaustion/pullback_reentry/session_temporal）改写 rsi_12 重跑（TODO）；③ ATR 归一化基 **24→12**（替代语料 ATR(14)，K6 基变更；C 类距离特征同基）。C 类 10→**9**。注册数 134→**143**；FEATURE_VERSION 4→5。 |
-| 2026-11-11 | 0.3 | 回归收尾：§3.1 门禁 1/2/3 执行结果入档（validate 12/12；run 12×21 全 OK；cross-check：direction/exit_reason 100% 一致，entry_price 97% 一致、残余归因数据层 bar 覆盖差异→挂起 O18；rsi_12 漂移量化入档）。 |
+| 2026-11-11 | 0.3 | 回归收尾：§3.1 门禁 1/2/3 执行结果入档（validate 12/12；run 12×21 全 OK；cross-check：direction/exit_reason 100% 一致，entry_price 97% 一致、残余归因数据层 bar 覆盖差异→挂起 O18；rsi_12 漂移量化入档）。*（当时快照：O18 当日已由用户裁决关闭。)* |
+| 2026-11-12 | 0.4 | overall-design review R10 处置：§3.1 O18 段落统一为"183,909 = 179,550（97.6% 聚合）+ 4,359（2.4% 窗口尾部）"口径（修复英文版"100%"旧措辞与中文版结论段重复/断裂行）；§5 R10 真实桶验收状态由"挂起"更新为"#105/#106 已签收"；revlog 0.3 标注为收口前历史快照。 |

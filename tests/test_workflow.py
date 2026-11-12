@@ -432,3 +432,18 @@ def test_h10_track_index_is_jsonl_append_only(tmp_path):
     # replay still yields the right active set
     events = wf.read_index_events(tmp_path, "fx-trend", "alpha")
     assert "v02" in wf.active_branches_of(events)
+
+
+def test_o12_variant_ordinal_branch_names_accepted():
+    """O12 (user ruling): vNN[a-z]*_1/_2 variant ordinals are legal branch
+    names; the workflow regex must accept them (mirror of the push
+    classifier contract)."""
+    from lyra.workflow import _BRANCH_NAME_RE
+
+    assert _BRANCH_NAME_RE.match("v04ab_1")
+    assert _BRANCH_NAME_RE.match("v04ab_2")
+    assert _BRANCH_NAME_RE.match("v01_1")
+    assert _BRANCH_NAME_RE.match("v02a")
+    assert not _BRANCH_NAME_RE.match("v04ab_x")
+    assert not _BRANCH_NAME_RE.match("v04a1")
+    assert not _BRANCH_NAME_RE.match("b0")
