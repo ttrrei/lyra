@@ -447,3 +447,118 @@ def test_o12_variant_ordinal_branch_names_accepted():
     assert not _BRANCH_NAME_RE.match("v04ab_x")
     assert not _BRANCH_NAME_RE.match("v04a1")
     assert not _BRANCH_NAME_RE.match("b0")
+
+
+# --- 0009 D1: hypothesis content snapshot (R1) ------------------------------
+
+
+def test_d1_track_freezes_full_hypothesis_text(tmp_path):
+    """0009 D1: create_track stores the hypothesis FULL text (not just the
+    hash), so the frozen baseline is stable against later edits (R1)."""
+    d = _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    rec = wf.get_track(tmp_path, "fx-trend", "alpha")
+    bl = rec["baseline"]
+    assert bl["hypothesis_snapshot"] == (d / "hypothesis.md").read_text(encoding="utf-8")
+    assert bl["hypothesis_sha256"]
+
+
+def test_d1_context_uses_frozen_snapshot_after_drift(tmp_path):
+    """0009 D1: render_context shows the FROZEN hypothesis text, flags drift
+    when the live file has changed, and still shows the live file separately."""
+    d = _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    # mutate the live hypothesis after the track froze it
+    (d / "hypothesis.md").write_text("# hypothesis\nCHANGED after track creation\n",
+                                     encoding="utf-8")
+    text = wf.render_context(tmp_path, "fx-trend", track="alpha")
+    assert "trend on 1h" in text                # frozen snapshot still present
+    assert "CHANGED after track creation" in text  # live file shown too
+    assert "drifted" in text                     # drift is flagged
+
+
+def test_d1_context_without_track_shows_live_labelled(tmp_path):
+    """0009 D1: direction-level context (no track) shows the live file,
+    clearly labelled as not a frozen baseline."""
+    _mk_direction(tmp_path)
+    text = wf.render_context(tmp_path, "fx-trend")
+    assert "not a frozen baseline" in text
+
+
+# --- 0009 D2/D3: run identity + comparability (R2/R9) -----------------------
+
+
+def _mk_run_with_meta(ws, direction, branch, track, run_id, snapshot=None):
+    import json as _json
+
+    run_dir = ws / "runs" / f"{branch}-{run_id}" / "20261110" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "metrics.json").write_text(_json.dumps({
+        "spec_id": f"directions_{direction}",
+        "run_id": run_id,
+        "feature_snapshot_id": snapshot,
+        "per_instrument": {"EURUSD": {"trade_count": 5, "annualized": 0.1,
+                                       "win_rate": 0.6, "net_return": 0.02}},
+    }), encoding="utf-8")
+    (run_dir / "run_meta.json").write_text(_json.dumps({
+        "direction": direction, "branch": branch, "track_id": track,
+        "spec_id": f"directions_{direction}", "run_id": run_id,
+    }), encoding="utf-8")
+    return run_dir
+
+
+def test_d2_runs_for_branch_uses_run_meta_identity(tmp_path):
+    """0009 D2: _runs_for_branch matches by run_meta.json identity (the
+    direction + branch the CLI recorded), NOT by spec_id naming — so the
+    official ``directions_<name>`` spec_id still joins to branch v01."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "run001")
+    got = wf._runs_for_branch(tmp_path, "fx-trend", "v01")
+    assert [r["run_id"] for r in got] == ["run001"]
+    # a run recorded under a DIFFERENT direction must not leak in
+    _mk_run_with_meta(tmp_path, "other-dir", "v01", "beta", "run002")
+    got = wf._runs_for_branch(tmp_path, "fx-trend", "v01")
+    assert [r["run_id"] for r in got] == ["run001"]
+
+
+def test_d2_legacy_spec_id_fallback_still_works(tmp_path):
+    """0009 D2: runs without a run_meta.json sidecar still match via the
+    spec_id fallback (H7 exact-match rule)."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    run_dir = tmp_path / "runs" / "legacy" / "20261110" / "leg001"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "metrics.json").write_text(json.dumps({
+        "spec_id": "v01", "run_id": "leg001",
+        "per_instrument": {"X": {"trade_count": 1, "annualized": 0.0,
+                                  "win_rate": 0.5, "net_return": 0.01}}}),
+        encoding="utf-8")
+    got = wf._runs_for_branch(tmp_path, "fx-trend", "v01")
+    assert [r["run_id"] for r in got] == ["leg001"]
+
+
+def test_d3_compare_marks_incomparable_across_generations(tmp_path):
+    """0009 D3/R9: runs over different feature generations (different
+    feature_snapshot_id) are flagged comparable=false rather than silently
+    side-by-side."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "runA", snapshot="snap1")
+    _mk_run_with_meta(tmp_path, "fx-trend", "v02", "alpha", "runB", snapshot="snap2")
+    result = wf.compare_siblings(tmp_path, "fx-trend", ["v01", "v02"])
+    assert result["comparable"] is False
+    assert result["distinct_feature_generations"] == 2
+
+    # same generation -> comparable (fresh workspace for a clean pair)
+    tmp_path2 = tmp_path / "same"
+    tmp_path2.mkdir()
+    d2 = tmp_path2 / "strategies" / "fx-trend"
+    d2.mkdir(parents=True, exist_ok=True)
+    (d2 / "hypothesis.md").write_text("h", encoding="utf-8")
+    wf.create_track(tmp_path2, "fx-trend", "alpha")
+    _mk_run_with_meta(tmp_path2, "fx-trend", "v01", "alpha", "runC", snapshot="snapX")
+    _mk_run_with_meta(tmp_path2, "fx-trend", "v02", "alpha", "runD", snapshot="snapX")
+    result3 = wf.compare_siblings(tmp_path2, "fx-trend", ["v01", "v02"])
+    assert result3["comparable"] is True
+    assert result3["distinct_feature_generations"] == 1

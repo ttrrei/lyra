@@ -121,6 +121,18 @@ def _data_digest(con: duckdb.DuckDBPyConnection, view: str,
     return h.hexdigest()
 
 
+def _generation_present(data_dir: str | Path, view: str) -> bool:
+    """0009 D6: does the layer backing ``view`` (ohlcv_5m/ohlcv_1h) have a
+    generation manifest under features/<layer>/ ?"""
+    from .features import GENERATION_FILENAME
+
+    view_to_layer = {"ohlcv_5m": "5m", "ohlcv_1h": "1h"}
+    layer = view_to_layer.get(view)
+    if layer is None:
+        return False
+    return (Path(data_dir) / "features" / layer / GENERATION_FILENAME).exists()
+
+
 def _counter_fingerprint(trading_days_for: Any) -> str:
     """批次1-H2: behavioral fingerprint of the per-trade trading-day counter.
 
@@ -134,6 +146,13 @@ def _counter_fingerprint(trading_days_for: Any) -> str:
     if trading_days_for is None:
         return "natural"
     import datetime as _dt
+
+    # 0009 D5: a named/versioned counter self-identifies via
+    # ``__lyra_identity__`` ("name/version"); the identity (not the behavior)
+    # is what makes the fingerprint stable and meaningful.
+    identity = getattr(trading_days_for, "__lyra_identity__", None)
+    if identity and isinstance(identity, str) and identity.strip():
+        return f"counter:{identity.strip()}"
 
     def _probe(a: _dt.datetime, b: _dt.datetime) -> str:
         try:
@@ -149,7 +168,10 @@ def _counter_fingerprint(trading_days_for: Any) -> str:
 
     a = _dt.datetime(2024, 1, 1, tzinfo=_dt.timezone.utc)
     b = _dt.datetime(2024, 1, 8, tzinfo=_dt.timezone.utc)
-    return f"counter:{_probe(a, b)},{_probe(a, a)}"
+    # No identity → behavior fingerprint only, explicitly labelled
+    # "unidentified" (D5: two anonymous counters may collide here; an
+    # identity-bearing counter never goes through this path).
+    return f"counter:unidentified:{_probe(a, b)},{_probe(a, a)}"
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +276,18 @@ def run_strategy(
         raise FileNotFoundError(
             f"catalog not found at {cat.path}; run `lyra build` first (R6)."
         )
+    views_list = sorted(cat.views(), key=lambda d: str(d.get("view")))
+    # 0009 D6: the snapshot is now a *data identity*, not just a name list —
+    # it carries the 0009 D4 generation digest (per-file SHA256 map via
+    # _generation.json) for the layer this strategy consumes. Absent
+    # generation manifest (legacy data) → legacy marker, no full re-hash.
+    feature_snapshot_id = features_mod.feature_snapshot_digest(data_dir)
     feature_catalog_snapshot = json.dumps(
-        sorted(cat.views(), key=lambda d: str(d.get("view"))),
+        {
+            "views": views_list,
+            "feature_snapshot_digest": feature_snapshot_id,
+            "digest_source": "generation_manifest" if _generation_present(data_dir, spec.view) else "legacy",
+        },
         sort_keys=True, default=str,
     )
     plan = compiler_mod.compile_strategy(
@@ -320,6 +352,7 @@ def run_strategy(
         trading_days_basis="trading" if trading_days_for else "calendar",
         counter_fingerprint=_counter_fingerprint(trading_days_for),
         data_digest=data_digest,
+        feature_snapshot_digest=feature_snapshot_id,
         schema_version=spec.version,
         spec_id=spec.id,
         direction=spec.direction,
@@ -376,6 +409,7 @@ def _compute_run_id(
     trading_days_basis: str,
     counter_fingerprint: str,
     data_digest: str,
+    feature_snapshot_digest: str,
     schema_version: int,
     spec_id: str,
     direction: str | None,
@@ -403,6 +437,7 @@ def _compute_run_id(
         "engine_version": engine_version,
         "duckdb_version": duckdb_version,
         "data_digest": data_digest,
+        "feature_snapshot_digest": feature_snapshot_digest,
     }
     return _sha256_bytes(_canonical(payload).encode("utf-8"))
 

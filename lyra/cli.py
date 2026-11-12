@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 import typer
+
+import yaml as _yaml
 
 from pathlib import Path
 
@@ -306,6 +309,49 @@ def compile(
     typer.echo(plan.sql)
 
 
+def _write_run_meta(strategy_path: Path, run_dir: Path,
+                    track: str | None) -> None:
+    """0009 D2: identity sidecar for a finished run.
+
+    ``{direction, branch, track_id, spec_id, strategy_path, run_id}`` — the
+    R12 workflow (``_runs_for_branch`` / ``compare_siblings``) reads this
+    first, so run→direction/branch/track attribution no longer depends on
+    spec_id naming conventions.
+    """
+    import json as _json
+
+    spec_id: object = None
+    direction: object = None
+    try:
+        data = _yaml.safe_load(strategy_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            spec_id = data.get("id")
+            direction = data.get("direction") or data.get("family")
+    except Exception:
+        pass
+    # branch = the strategy file's own name (v01 / v04ab_1 / …); the R12
+    # workflow's identity axis, NOT the spec id (directions_<name>).
+    branch = (strategy_path.name[:-5]
+              if strategy_path.name.endswith(".yaml")
+              else strategy_path.name)
+    run_id = None
+    try:
+        manifest = _json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        run_id = manifest.get("run_id")
+    except Exception:
+        run_id = run_dir.name  # run_dir is already run_id-scoped
+    payload = {
+        "direction": direction,
+        "branch": branch,
+        "track_id": track,
+        "spec_id": spec_id,
+        "strategy_path": str(strategy_path),
+        "run_id": run_id,
+    }
+    (run_dir / "run_meta.json").write_text(
+        _json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
 def _registry_for(alpha_dir: str | None, config: str):
     """Build the feature registry (core + optional alpha extension point, R3.2/I16)."""
     from . import features as feat
@@ -329,19 +375,29 @@ def run(
     alpha_dir: str | None = typer.Option(None, "--alpha-dir", help="Alpha feature directory (R3.2); default = config local.alpha"),
     config: str = typer.Option("config/config.yml", "--config"),
     name: str | None = typer.Option(None, "--name", help="Run display name (default = strategy id)"),
-    out: str | None = typer.Option(None, "--out", help="Artifact root (default ~/.lyra/runs; B13 out-of-repo)"),
+    out: str | None = typer.Option(None, "--out", help="Artifact root (default <workspace>/runs; 0009 D2)"),
     strict: bool = typer.Option(False, "--strict", help="Fail if any instrument failed (I16)"),
+    track: str | None = typer.Option(None, "--track", help="Research track id to attribute this run to (0009 D2 run_meta)"),
 ) -> None:
     """Run a strategy end-to-end (0006): signals -> trade engine -> metrics.
 
     Per-instrument evaluation (I7, no cross-instrument synthesis), R5 metrics,
     a reproducibility manifest (I5), and a report.  Trade-level research only
     (I9: no sizing / $ PnL / account equity).
+
+    0009 D2: default artifact root is ``<workspace>/runs`` (0007 D7 canonical
+    layout, same tree ``push-runs`` scans) instead of the legacy
+    ``~/.lyra/runs``; a ``run_meta.json`` identity sidecar is written into
+    the run directory so the R12 workflow can attribute the run to its
+    direction / branch / track without relying on spec_id naming.
     """
     from . import runner as runner_mod
     from . import strategy_schema as schema_mod
 
     reg = _registry_for(alpha_dir, config)
+    if out is None:
+        ws = _workspace(config)
+        out = str(ws / "runs")
     try:
         # C2 (batch-4 review): the flat ``--financing-days`` scalar was
         # removed from the engine (it mischarged every trade the same day
@@ -357,6 +413,15 @@ def run(
     except (FileNotFoundError, RuntimeError) as exc:
         typer.secho(f"RUN FAILED: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
+
+    # 0009 D2: run_meta.json identity sidecar (CLI knows the workspace
+    # context the runner core intentionally stays agnostic about).
+    try:
+        _write_run_meta(Path(strategy), Path(result.out_dir), track)
+    except Exception as exc:  # sidecar failure must not hide a successful run
+        typer.secho(f"warn: run_meta.json not written: {exc}",
+                    fg=typer.colors.YELLOW, err=True)
+
     typer.secho(f"OK: run {result.run_id[:12]} -> {result.out_dir}",
                 fg=typer.colors.GREEN)
     for inst in sorted(result.metrics):
@@ -690,7 +755,7 @@ def push_runs(
     track: str = typer.Option(..., "--track", help="Owning track (0007 D7: injected into the OCI path)"),
     config: str = typer.Option("config/config.yml", "--config"),
     runs_root: str | None = typer.Option(None, "--runs-root",
-                                        help="Local runs root (default ~/.lyra/runs, matching 0006 run)"),
+                                        help="Local runs root (default <workspace>/runs, matching `lyra run`; 0009 D2)"),
     force_push: bool = typer.Option(False, "--force-push"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
@@ -715,13 +780,23 @@ def push_runs(
             typer.secho(str(exc), fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2)
 
-    # 0006 `lyra run` defaults to ~/.lyra/runs (B13, no workspace in path);
-    # --runs-root overrides for co-located setups.
-    base = Path(runs_root).expanduser() if runs_root else Path.home() / ".lyra" / "runs"
-    run_root = base / run
-    manifests = sorted(run_root.glob("*/*/manifest.json"))  # <name>/<YYYYMMDD>/<run_id>/
+    # 0009 D2: `lyra run` now defaults to <workspace>/runs (0007 D7 tree);
+    # --runs-root overrides, and the legacy ~/.lyra/runs (pre-0009 runs)
+    # stays reachable as a one-version compatibility fallback.
+    if runs_root:
+        bases = [Path(runs_root).expanduser()]
+    else:
+        ws = _workspace(config)
+        bases = [ws / "runs", Path.home() / ".lyra" / "runs"]
+    manifests: list[Path] = []
+    for base in bases:
+        found = sorted((base / run).glob("*/*/manifest.json"))  # <name>/<YYYYMMDD>/<run_id>/
+        if found:
+            manifests = found
+            break
     if not manifests:
-        typer.secho(f"no manifest.json under {run_root} — run the strategy first (0006)",
+        searched = ", ".join(str(b / run) for b in bases)
+        typer.secho(f"no manifest.json under {searched} — run the strategy first (0006)",
                     fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
     manifest = manifests[0]
@@ -1006,6 +1081,137 @@ def synthesize_cmd(
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
     typer.secho(f"synthesis report: {path}", fg=typer.colors.GREEN)
+
+
+#: 0009 D10: doctor severity levels — hard failures exit 1, warnings only
+#: keep the exit code at 0 (doctor must stay usable as an environment
+#: readiness probe before the user has run `lyra pull`).
+_DOCTOR_MIN_PY = (3, 11)
+_DOCTOR_MAX_PY = (3, 13)
+
+
+@app.command(name="doctor")
+def doctor(
+    config: str = typer.Option("config/config.yml", "--config"),
+    data_dir: str | None = typer.Option(None, "--data-dir", help="Data root to check (default: config local.data under ~/.lyra/<workspace>)"),
+    strategy: str | None = typer.Option(None, "--strategy", help="A strategy YAML for the compile smoke check (default: bundled example)"),
+    alpha_dir: str | None = typer.Option(None, "--alpha-dir", help="Alpha feature directory (default: config local.alpha)"),
+) -> None:
+    """Read-only environment self-check (0009 D10; R10 acceptance).
+
+    Hard failures (exit 1): Python version policy, core dependency imports,
+    config parsing + OCI slot presence.
+    Warnings (exit 0, WARN count printed): catalog/views presence,
+    feature-generation integrity (D4 gate), one compile smoke.
+    """
+    failures: list[str] = []
+    warnings: list[str] = []
+
+    # --- hard: python version ---------------------------------------------
+    if not (_DOCTOR_MIN_PY <= sys.version_info[:2] < _DOCTOR_MAX_PY):
+        failures.append(
+            f"python {sys.version_info.major}.{sys.version_info.minor} outside "
+            f"policy {'.'.join(map(str, _DOCTOR_MIN_PY))}–"
+            f"{'.'.join(map(str, _DOCTOR_MAX_PY))} (exclusive)"
+        )
+    else:
+        typer.echo(f"PASS python {sys.version.split()[0]} (policy >=3.11,<3.13)")
+
+    # --- hard: core deps importable ----------------------------------------
+    for mod, pkg in (("duckdb", "duckdb"), ("pyarrow", "pyarrow"),
+                     ("pydantic", "pydantic"), ("yaml", "pyyaml"),
+                     ("typer", "typer"), ("requests", "requests")):
+        try:
+            __import__(mod)
+            typer.echo(f"PASS import {pkg}")
+        except Exception as exc:
+            failures.append(f"core dependency {pkg} not importable: {exc}")
+
+    # --- hard: config + OCI slots ------------------------------------------
+    try:
+        from .config import load_config, local_from_dict, oci_from_dict
+
+        data = load_config(config)
+        oci = oci_from_dict(data)
+        local = local_from_dict(data)
+        for slot in ("data_par_url", "features_par_url",
+                     "strategies_par_url", "runs_par_url"):
+            val = getattr(oci, slot, None)
+            if val:
+                typer.echo(f"PASS config slot {slot} set")
+            else:
+                warnings.append(f"config slot {slot} not set (OCI sync unavailable)")
+        typer.echo("PASS config parses")
+    except Exception as exc:
+        failures.append(f"config unreadable at {config}: {exc}")
+        local = None  # type: ignore[assignment]
+
+    # --- warn: catalog + views ---------------------------------------------
+    data_root = None
+    if data_dir:
+        data_root = Path(data_dir).expanduser()
+    elif local is not None:
+        from .config import resolve_data_root
+
+        data_root = resolve_data_root(local, None)
+    cat_file = Path(data_root) / "catalog.duckdb" if data_root is not None else None
+    if cat_file is not None and cat_file.exists():
+        try:
+            from .catalog import Catalog
+
+            views = {str(v.get("view")) for v in Catalog(cat_file).views()}
+            have = views & {"bronze", "features_5m", "features_1h"}
+            typer.echo(f"PASS catalog.duckdb present (views: {sorted(views) or 'none'})")
+            if not have:
+                warnings.append("catalog has no bronze/features views yet (run `lyra build`)")
+        except Exception as exc:
+            warnings.append(f"catalog present but unreadable: {exc}")
+    else:
+        warnings.append("no catalog.duckdb found (run `lyra pull` + `lyra build`)")
+
+    # --- warn: feature generation integrity (D4) ----------------------------
+    if data_root is not None and (data_root / "features").is_dir():
+        try:
+            from . import features as feat
+
+            checked = feat.validate_generation(data_root)
+            typer.echo(f"PASS feature generation consistent ({len(checked)} files)")
+        except Exception as exc:
+            warnings.append(f"feature generation check failed: {exc}")
+
+    # --- warn: compile smoke -------------------------------------------------
+    try:
+        reg = _registry_for(alpha_dir, config)
+        s = strategy or _default_example_strategy()
+        from . import compiler as compiler_mod
+        from . import strategy_schema as schema_mod
+
+        spec = schema_mod.parse_strategy(s, reg)
+        plan = compiler_mod.compile_strategy(spec, reg, feature_catalog_snapshot="[]")
+        typer.echo(f"PASS compile smoke ({spec.id} -> view {plan.view})")
+    except Exception as exc:
+        warnings.append(f"compile smoke failed: {exc}")
+
+    if warnings:
+        for w in warnings:
+            typer.secho(f"WARN {w}", fg=typer.colors.YELLOW)
+    if failures:
+        for f in failures:
+            typer.secho(f"FAIL {f}", fg=typer.colors.RED, err=True)
+        typer.secho(f"DOCTOR FAILED: {len(failures)} failure(s), {len(warnings)} warning(s)",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    typer.secho(f"DOCTOR OK: 0 failures, {len(warnings)} warning(s)",
+                fg=typer.colors.GREEN)
+
+
+def _default_example_strategy() -> str:
+    """The bundled example strategy (0003/0004 fixtures) for the smoke test."""
+    # strategies/ lives at the repo root, next to the lyra package.
+    pkg_root = Path(__file__).resolve().parent.parent
+    for cand in sorted((pkg_root / "strategies").glob("examples/*/v01.yaml")):
+        return str(cand)
+    raise FileNotFoundError("no bundled example strategy found under strategies/examples/")
 
 
 @app.command()

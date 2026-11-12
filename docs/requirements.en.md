@@ -278,6 +278,13 @@ Lyra's **primary function** is to stay in sync with OCI:
   baseline, superseded by #99/#100).
 - OCI pull/push passes one end-to-end run on a real bucket.
 
+> **R10 sign-off (0009 complete, 2026-11-11)**: `pytest -q` 323 all green;
+> `lyra-doctor` exit 0 (incl. `feature_generation` / catalog / compile checks,
+> 0 hard fail, 1 WARN — the WARN is only the feat-6 legacy tables lacking a
+> generation manifest, expected); 12 directions pass `validate`; real OCI
+> buckets (raw_zips/oci-alpha) read+write verified end-to-end. `lyra-doctor`
+> added by 0009 (see `docs/decisions/0009-polish.md`).
+
 ## R11. Compatibility
 
 - **Backward-compatible with Nova** (0008 scope, #99/#100): the 12 official

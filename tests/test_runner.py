@@ -438,3 +438,29 @@ def test_run_monthly_zero_openings_counted(env):
     by_month = {r["month"]: r for r in monthly}
     assert "2024-01" in by_month
     assert by_month["2024-01"]["actual_entries"] >= 0
+
+
+# --- 0009 D5: counter identity token (R8) ---------------------------------
+
+
+def test_d5_counter_identity_enters_fingerprint():
+    """0009 D5: a counter that self-identifies via __lyra_identity__ records
+    that identity (stable + meaningful) rather than a behavior probe."""
+    from lyra.runner import _counter_fingerprint
+
+    def counter(a, b):
+        return 1
+
+    counter.__lyra_identity__ = "trading-calendar/1.0"
+    fp = _counter_fingerprint(counter)
+    assert fp == "counter:trading-calendar/1.0"
+
+    # an anonymous (identity-less) counter falls back to the behavior
+    # fingerprint, explicitly labelled "unidentified"
+    def anon(a, b):
+        return 1
+
+    fp2 = _counter_fingerprint(anon)
+    assert fp2.startswith("counter:unidentified:")
+    # None (natural days) unchanged
+    assert _counter_fingerprint(None) == "natural"

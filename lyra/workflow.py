@@ -101,9 +101,16 @@ def _baseline_for_direction(workspace: Path, direction: str) -> dict[str, Any]:
 
     hyp = d / "hypothesis.md"
     if hyp.exists():
-        baseline["hypothesis_sha256"] = hashlib.sha256(hyp.read_bytes()).hexdigest()
+        hbytes = hyp.read_bytes()
+        baseline["hypothesis_sha256"] = hashlib.sha256(hbytes).hexdigest()
+        # 0009 D1: freeze the FULL hypothesis text, not just its hash — the
+        # frozen baseline must survive later edits to hypothesis.md
+        # (overall-design review R1: hash-only "freezing" meant context
+        # rendering silently drifted with the live file).
+        baseline["hypothesis_snapshot"] = hbytes.decode("utf-8", errors="replace")
     else:
         baseline["hypothesis_sha256"] = None
+        baseline["hypothesis_snapshot"] = None
 
     # M1 (batch2): the real feature catalog is the DuckDB file under the data
     # root (``lyra/catalog.py`` → ``<data_dir>/catalog.duckdb``), NOT the
@@ -484,16 +491,53 @@ def render_context(
     d = workspace / "strategies" / direction
 
     # --- hypothesis: FULL text (not just a path/hash) + its hash ----------
+    # 0009 D1 / R1: a track's baseline froze the hypothesis *text* at creation;
+    # the context renders that frozen snapshot (not the live file) and flags
+    # drift when the live file has since changed. Direction-level context
+    # (no ``track``) still shows the live text, labelled as such.
     hyp = d / "hypothesis.md"
-    out.append("\n## hypothesis")
-    if hyp.exists():
-        h = hashlib.sha256(hyp.read_bytes()).hexdigest()
-        out.append(f"(sha256 {h[:16]}…)")
-        out.append("```")
-        out.append(hyp.read_text(encoding="utf-8").rstrip("\n"))
-        out.append("```")
+    live_text = hyp.read_text(encoding="utf-8").rstrip("\n") if hyp.exists() else None
+    live_sha = hashlib.sha256(hyp.read_bytes()).hexdigest() if hyp.exists() else None
+
+    tracks_list = list_tracks(workspace, direction)
+    if track is not None:
+        tracks_list = [t for t in tracks_list if t["track_id"] == track]
+        if not tracks_list:
+            raise WorkflowError(f"unknown track: {direction}/{track}")
+        bl = tracks_list[0].get("baseline", {})
+        snap = bl.get("hypothesis_snapshot")
+        snap_sha = bl.get("hypothesis_sha256")
+        out.append("\n## hypothesis (frozen at track creation)")
+        if snap is None:
+            out.append("(no hypothesis present when the track was created)")
+            if live_text is not None:
+                out.append("(live file since created; shown for reference — NOT the frozen baseline)")
+                out.append(f"(live sha256 {live_sha[:16]}…)")
+                out.append("```")
+                out.append(live_text)
+                out.append("```")
+        else:
+            out.append(f"(frozen sha256 {str(snap_sha)[:16]}…)")
+            if live_sha is not None and snap_sha is not None and live_sha != snap_sha:
+                out.append("⚠ hypothesis has drifted since track creation — the frozen snapshot below is what this track's baseline references; the live file is shown separately for reference")
+            out.append("```")
+            out.append(snap.rstrip("\n"))
+            out.append("```")
+            if live_sha is not None and snap_sha is not None and live_sha != snap_sha:
+                out.append("(live file, NOT the frozen baseline; sha256 "
+                           f"{live_sha[:16]}…)")
+                out.append("```")
+                out.append(live_text)
+                out.append("```")
     else:
-        out.append("(none)")
+        out.append("\n## hypothesis")
+        if live_text is not None:
+            out.append(f"(sha256 {live_sha[:16]}…; live file — no track selected, so this is not a frozen baseline)")
+            out.append("```")
+            out.append(live_text)
+            out.append("```")
+        else:
+            out.append("(none)")
 
     # --- feature list (R12: context includes the feature list) ------------
     out.append("\n## features")
@@ -502,14 +546,8 @@ def render_context(
     out.append(f"FEATURE_VERSION={FEATURE_VERSION}; {len(feats)} registered features:")
     out.append(", ".join(feats))
 
-    tracks = list_tracks(workspace, direction)
-    if track is not None:
-        tracks = [t for t in tracks if t["track_id"] == track]
-        if not tracks:
-            raise WorkflowError(f"unknown track: {direction}/{track}")
-
     shared_lessons = d / "lessons.md"
-    for t in tracks:
+    for t in tracks_list:
         tid = t["track_id"]
         out.append(f"\n## track {tid}")
         bl = t.get("baseline", {})
@@ -564,8 +602,15 @@ def render_context(
 
 
 def _runs_for_branch(workspace: Path, direction: str, branch: str) -> list[dict[str, Any]]:
-    """Read 0006 metrics.json artifacts referencing this branch (read-only)."""
+    """Read 0006 run artifacts referencing this branch (read-only).
+
+    0009 D2/D3: identity comes first from the CLI-written ``run_meta.json``
+    sidecar (explicit direction + branch + track, immune to spec_id naming
+    conventions); legacy runs without a sidecar fall back to the spec_id
+    suffix match (H7 exact-match rule unchanged).
+    """
     out: list[dict[str, Any]] = []
+    seen: set[str] = set()
     runs_root = workspace / "runs"
     if not runs_root.is_dir():
         return out
@@ -574,9 +619,28 @@ def _runs_for_branch(workspace: Path, direction: str, branch: str) -> list[dict[
             m = _load_json(mf)
         except Exception:
             continue
-        # exact branch identity only (H7: "v1" must not match spec v10)
         spec = str(m.get("spec_id", ""))
-        if spec != branch and not spec.endswith(f"/{branch}") and not spec.endswith(f"/{branch}.yaml"):
+        meta_path = mf.parent / "run_meta.json"
+        meta: dict[str, Any] = {}
+        if meta_path.exists():
+            try:
+                meta = _load_json(meta_path)
+            except Exception:
+                meta = {}
+            matched = (
+                str(meta.get("direction", "")) == direction
+                and (str(meta.get("branch", "")) == branch
+                     or str(meta.get("branch", "")) == f"{branch}.yaml")
+            )
+        else:
+            # legacy fallback: exact branch identity only (H7: "v1" must not
+            # match spec v10)
+            matched = (
+                spec == branch
+                or spec.endswith(f"/{branch}")
+                or spec.endswith(f"/{branch}.yaml")
+            )
+        if not matched:
             continue
         per = m.get("per_instrument", {})
         if not per:
@@ -589,8 +653,17 @@ def _runs_for_branch(workspace: Path, direction: str, branch: str) -> list[dict[
              "net_return": v.get("net_return")}
             for inst, v in sorted(per.items()) if isinstance(v, dict)
         ]
+        run_id = str(m.get("run_id", mf.parent.name))
+        if run_id in seen:
+            continue
+        seen.add(run_id)
+        track_id = meta.get("track_id") if meta else None
         out.append({
-            "run_id": m.get("run_id", mf.parent.name),
+            "run_id": run_id,
+            "direction": direction,
+            "track_id": str(track_id) if track_id else None,
+            "spec_id": spec or None,
+            "feature_snapshot_id": m.get("feature_snapshot_id"),
             "instruments": per_list,
         })
     return out
@@ -609,16 +682,36 @@ def compare_siblings(workspace: Path, direction: str, branches: list[str]) -> di
     if len(branches) < 1:
         raise WorkflowError("compare needs at least one branch (use --siblings to pass 2+)")
     rows = []
+    all_snapshot_ids: list[str | None] = []
     for b in branches:
         runs = _runs_for_branch(workspace, direction, b)
         # best = highest per-instrument net_return across the run's instruments
         best = None
         for r in runs:
+            all_snapshot_ids.append(r.get("feature_snapshot_id"))
             for inst in r.get("instruments", []):
                 if best is None or (inst.get("net_return") or -1) > (best.get("net_return") or -1):
                     best = inst
         rows.append({"branch": b, "runs": runs, "best": best})
-    return {"direction": direction, "siblings": rows}
+    # 0009 D3 / R9: comparability is a property of the DATA, not of the
+    # strategy — runs over different feature generations (different
+    # feature_snapshot_id) are not directly comparable. Runs without a
+    # digest (legacy) are conservatively marked incomparable too.
+    known = [s for s in all_snapshot_ids if s]
+    if not known:
+        comparable = None  # no data to judge (e.g. no runs at all)
+    elif len(set(known)) > 1:
+        comparable = False
+    else:
+        comparable = True
+    incomparable_runs = sum(1 for s in all_snapshot_ids if s not in known)
+    return {
+        "direction": direction,
+        "siblings": rows,
+        "comparable": comparable,
+        "distinct_feature_generations": len(set(known)),
+        "runs_without_data_identity": incomparable_runs,
+    }
 
 
 def merge(

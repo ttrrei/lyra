@@ -916,6 +916,121 @@ def feature_path(data_root: str | Path, minutes: int, instrument: str) -> Path:
     return path
 
 
+# ---------------------------------------------------------------------------
+# 0009 D4: generation manifest + consistency gate (atomic publish)
+# ---------------------------------------------------------------------------
+
+GENERATION_FILENAME = "_generation.json"
+
+
+def _sha256_file_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _write_generation(layer_dir: Path, version_str: str,
+                      file_sha256: dict[str, str]) -> None:
+    import json as _json
+    from datetime import datetime, timezone
+
+    payload = {
+        "version_string": version_str,
+        "file_sha256": dict(sorted(file_sha256.items())),
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    (layer_dir / GENERATION_FILENAME).write_text(
+        _json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def read_generation(layer_dir: Path) -> dict[str, Any] | None:
+    """Read ``features/<layer>/_generation.json`` (None if absent)."""
+    import json as _json
+
+    p = layer_dir / GENERATION_FILENAME
+    if not p.exists():
+        return None
+    try:
+        return _json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def feature_snapshot_digest(data_root: str | Path) -> str:
+    """0009 D6: canonical digest of the feature-layer data identity.
+
+    Digests every ``<layer>/_generation.json`` (per-file SHA256 map +
+    version_string) into one canonical JSON SHA256 — zero extra hashing of
+    the large Parquet tables (D4 already computed the per-file shas).
+    Layers without a generation manifest fall back to a ``legacy`` marker
+    so the digest still distinguishes them (legacy data ⇒ different digest
+    than a freshly published one).
+    """
+    import json as _json
+
+    root = Path(data_root)
+    parts: list[dict[str, Any]] = []
+    for layer in _MINUTES_TO_VIEW.values():
+        gen = read_generation(root / "features" / layer)
+        if gen is None:
+            parts.append({"layer": layer, "legacy": True})
+        else:
+            parts.append({
+                "layer": layer,
+                "legacy": False,
+                "version_string": gen.get("version_string"),
+                "file_sha256": dict(sorted(gen.get("file_sha256", {}).items())),
+            })
+    canonical = _json.dumps({"features": sorted(parts, key=lambda d: d["layer"])},
+                            sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def validate_generation(data_root: str | Path) -> list[Path]:
+    """0009 D4 gate: every ``features/<layer>/*.parquet`` must appear in the
+    current ``_generation.json`` sha table with a matching actual SHA256,
+    else FeaturesError (fail-closed). Returns the checked file list.
+    """
+    root = Path(data_root)
+    checked: list[Path] = []
+    for layer in _MINUTES_TO_VIEW.values():
+        layer_dir = root / "features" / layer
+        if not layer_dir.is_dir():
+            continue
+        gen = read_generation(layer_dir)
+        if gen is None:
+            files = sorted(layer_dir.glob("*.parquet"))
+            if files:
+                raise FeaturesError(
+                    f"{layer_dir} has {len(files)} parquet file(s) but no "
+                    f"{GENERATION_FILENAME}; re-run `lyra features` "
+                    "(or delete the layer and recompute)"
+                )
+            continue
+        expected = gen.get("file_sha256", {})
+        files = sorted(layer_dir.glob("*.parquet"))
+        for f in files:
+            actual = _sha256_file_bytes(f.read_bytes())
+            if f.stem not in expected:
+                raise FeaturesError(
+                    f"{f} is not in the generation manifest {layer_dir}/{GENERATION_FILENAME} "
+                    "(mixed generations?)"
+                )
+            if expected[f.stem] != actual:
+                raise FeaturesError(
+                    f"{f} sha256 {actual[:12]}… != manifest {expected[f.stem][:12]}… "
+                    "(feature file modified after publish)"
+                )
+            checked.append(f)
+        # every manifest entry must exist on disk
+        on_disk = {f.stem for f in files}
+        for stem in expected:
+            if stem not in on_disk:
+                raise FeaturesError(
+                    f"{layer_dir}/{stem}.parquet listed in {GENERATION_FILENAME} "
+                    "but missing on disk"
+                )
+    return checked
+
+
 @dataclass
 class FeatureRunResult:
     minutes: int
@@ -980,23 +1095,51 @@ def run_features(
     if not instruments:
         raise FeaturesError(f"no instruments found in {view}")
 
-    paths: list[Path] = []
-    total_rows = 0
-    for inst in instruments:
-        built = build_instrument(con, inst, minutes, reg)
-        table, meta = _build_table(inst, built, reg, version_str, minutes)
-        out_path = feature_path(root, minutes, inst)
-        write_parquet(table, meta, out_path)
-        paths.append(out_path)
-        total_rows += built["n"]
-        del built  # release per-instrument working set (D5)
+    # 0009 D4: atomic publish — compute into a staging dir on the same
+    # filesystem, then rename every file into place and write a
+    # _generation.json manifest. A mid-run failure leaves the previous
+    # complete generation untouched (never half-new-half-old).
+    staging_root = root / ".features_staging"
+    staging_layer_dir = staging_root / view
+    if staging_root.exists():
+        import shutil
+        shutil.rmtree(staging_root)  # residue from a prior failed run
+    staging_layer_dir.mkdir(parents=True, exist_ok=True)
+    target_layer_dir = root / "features" / view
+    target_layer_dir.mkdir(parents=True, exist_ok=True)
 
-    if own_con:
-        con.close()
+    staged_paths: list[Path] = []
+    total_rows = 0
+    try:
+        for inst in instruments:
+            built = build_instrument(con, inst, minutes, reg)
+            table, meta = _build_table(inst, built, reg, version_str, minutes)
+            staged = staging_layer_dir / f"{inst}.parquet"
+            write_parquet(table, meta, staged)
+            staged_paths.append(staged)
+            total_rows += built["n"]
+            del built  # release per-instrument working set (D5)
+    finally:
+        if own_con:
+            con.close()
+
+    # Promote: every file built successfully, so the generation is complete.
+    file_sha256: dict[str, str] = {}
+    final_paths: list[Path] = []
+    for staged, inst in zip(staged_paths, instruments):
+        final = target_layer_dir / staged.name
+        if final.exists() or final.is_symlink():
+            final.unlink()
+        staged.rename(final)
+        file_sha256[inst] = _sha256_file_bytes(final.read_bytes())
+        final_paths.append(final)
+    _write_generation(target_layer_dir, version_str, file_sha256)
+    import shutil
+    shutil.rmtree(staging_root, ignore_errors=True)
     return FeatureRunResult(
         minutes=minutes,
         instruments=instruments,
         total_rows=total_rows,
-        paths=paths,
+        paths=final_paths,
         version_string=version_str,
     )

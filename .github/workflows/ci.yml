@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 0009 D9: Python version policy matrix (>=3.11,<3.13 per pyproject.toml;
+# 3.12 is the validated dev baseline).
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      # TA-Lib (a core dep) ships manylinux wheels for cp311/cp312, so this
+      # is a pure pip install — no system build step needed.
+      - name: Install pinned environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+
+      - name: Lint (pyflakes)
+        run: python -m pyflakes lyra tests
+
+      - name: Test
+        run: python -m pytest -q

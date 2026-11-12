@@ -11,193 +11,169 @@ actually happened, trade by trade and instrument by instrument.
 
 ## What Lyra is not
 
-- **Not a product.** No multi-tenant, no Web UI, no cloud deployment, no
-  SLA. It is a tool for one person, used in spare time, on a small AI
-  budget.
-- **Not an accounting / compliance / audit system.** No cryptographic
-  reproducibility ceremony, no per-run artifact-hash manifests, no frozen
-  core guard. Tests pin the semantics of features and the trade engine,
-  and run reports show what happened. That is the whole audit story.
+- **Not a product.** No multi-tenant, no Web UI, no cloud deployment, no SLA.
+- **Not an accounting / compliance / audit system.** No per-account equity,
+  CAGR, HWM, Sharpe or margin. Reports show trade-level results.
 - **Not a live-trading broker integration.** It produces trade records and
   per-instrument scores, nothing else.
 - **Not an open-source alpha repository.** Alpha — custom features, strategy
-  definitions, run results — lives in OCI Object Storage, not in this
-  repository. See the [git / OCI split](docs/decisions/0001-repo-and-oci-split.md)
-  for the rules.
+  definitions, run results — lives in OCI Object Storage, not here. See the
+  [git / OCI split](docs/decisions/0001-repo-and-oci-split.md).
 
-## Current status
+## Status
 
-This repository is in the **documentation phase**: the requirements, the
-target architecture, the OCI alpha-layout proposal and the decision log are
-being written and reviewed. No source code is committed yet.
+**0001–0009 implemented and verified** (per [hld §8](docs/hld.md)); 0010
+(temp/ triage) is next. The single source of truth for build order is
+[hld.md §8](docs/hld.md) (EN: [hld.en.md §8](docs/hld.en.md)). Each step =
+one decision doc + one commit + a test set.
 
-**The single source of truth for build order is
-[hld.md §8](docs/hld.md) (EN: [hld.en.md §8](docs/hld.en.md)).**
-Each step = one decision doc (written **before** the code) + one commit +
-a test set. In short:
-
-1. **0001 repo + OCI split** — the boundary rule set (done in docs)
-2. **0002 OCI pull + clean + aggregate** — the first *code* component:
-   data sync is the repo's primary function (R7)
-3. **0003 Feature builder** → **0004 YAML compiler** → **0005 Trade
-   engine** → **0006 Metrics & runner** — the four validated core
-   components, ported semantics-intact from Nova, each on fixture data
-   first, then real OCI data
-4. **0007 OCI push + backup** — the other half of the core feature
-5. **0008 332-strategy migration + regression** → **0009 Polish**
-
-## How it works (target design)
+## How it works
 
 ```
-OCI (PAR) ──download──► local OHLCV ──aggregate──► 1m / 5m / 60m Parquet
-                                                            │
-                                                            ▼
-                              Registered causal features (fixed params)
-                                                            │
-                                                            ▼
-                              YAML strategy ──► past-only SQL (DuckDB)
-                                                            │
-                                                            ▼
-                              Per-bar trade state machine (2% stop, next-open)
-                                                            │
-                                                            ▼
-                              Per-instrument, per-month score (full calendar)
+OCI (PAR) ──pull──► raw_zips ──clean──► bronze ──aggregate──► ohlcv_5m / ohlcv_1h
+                                                                    │
+                                                                    ▼
+                                   registered causal features (fixed params)
+                                                                    │
+                                                                    ▼
+                                   YAML strategy ──► past-only SQL (DuckDB)
+                                                                    │
+                                                                    ▼
+                                   per-bar trade state machine (2% stop, next-open)
+                                                                    │
+                                                                    ▼
+                                   per-instrument, per-month score (full calendar)
 ```
 
-A single strategy file looks like this (illustrative, full grammar defined
-in the compiler design doc):
+A strategy file (illustrative):
 
 ```yaml
 version: 1
 id: ema_pullback
+direction: trend_continuation
 timeframe_minutes: 60
 entry:
   long:
-    held_for:
-      bars: 3
-      condition: {feature: sma_alignment_6_24, op: eq, value: 1}
+    held_for: {bars: 3, condition: {feature: sma_alignment_6_24, op: eq, value: 1}}
   short:
-    held_for:
-      bars: 3
-      condition: {feature: sma_alignment_6_24, op: eq, value: -1}
+    held_for: {bars: 3, condition: {feature: sma_alignment_6_24, op: eq, value: -1}}
 exit:
-  feature:
-    when: {feature: rsi_14, op: gt, value: 70}
+  feature: {when: {feature: rsi_12, op: gt, value: 70}}
   time_bars: 24
 ```
 
-Rules that are non-negotiable (see `AGENTS.md`):
+Non-negotiable rules (see `AGENTS.md`):
 
-- **YAML is the only strategy language.** No SQL, no Python, no eval, no
-  callbacks inside strategy files.
-- **Feature parameters are fixed.** Parameters are registered per feature.
-  New features are added; parameters are not swept.
+- **YAML is the only strategy language.** No SQL, no Python, no eval, no callbacks.
+- **Feature parameters are fixed** per feature; new features are added, parameters are not swept.
 - **Feature-vs-feature comparison is allowed; feature arithmetic is not.**
-- **2% mandatory adverse-price stop** from each actual entry fill. Gap and
-  slippage losses may exceed 2% — this is a trigger, not a guarantee of
-  final net loss.
-- **One trade per instrument.** No pyramiding, no reversal, no same-bar
-  re-entry.
+- **2% mandatory adverse-price stop** from each entry fill (gap/slippage may exceed it).
+- **One trade per instrument.** No pyramiding, reversal, or same-bar re-entry.
 - **Signals confirm at close, execute at the next observed open.**
-- **Monthly opportunities are actual openings**, including zero-entry
-  months. Annualized score = arithmetic sum of net trade returns ÷ full
-  calendar years (365.25 days).
+- **Monthly opportunities are actual openings**, including zero-entry months.
+- **Annualized score = Σ net trade returns ÷ full calendar years (365.25 days).**
 - **Per-instrument reporting; never sum returns into a portfolio.**
 
 ## Repository layout
 
 ```
 lyra/
-├── README.md                 ← this file (English)
-├── LICENSE                   Apache-2.0
+├── README.md                 ← this file
 ├── AGENTS.md                 working contract for AI contributors
-├── pyproject.toml
-├── requirements.lock
+├── pyproject.toml            deps + Python policy (>=3.11,<3.13)
+├── requirements.lock         pinned environment (single lock; no requirements.txt)
 ├── config/
 │   └── config_example.yml    in git (documented template, no secrets)
 ├── docs/
-│   ├── requirements.md       功能需求
-│   ├── background.md         背景：moneta → nova → lyra 的演进
-│   ├── hld.md                高层设计决策
-│   ├── proposals/            待讨论方案（OCI 布局、alpha 边界、…）
-│   ├── decisions/            决策记录（按 feature 逐条推进）
-│   │   ├── 0001-repo-and-oci-split.md
-│   │   ├── TEMPLATE.md       后续每个功能一个决策文档
-│   │   └── 0002-ohlcv-data-sync.md   (placeholder — 待写)
-│   │   └── 0003-feature-builder.md   (placeholder — 待写)
-│   └── open-questions.md     当前待回答的问题清单
-├── src/                      (未开始)
-├── tests/                    (未开始)
-├── strategies/examples/      (未开始 — 仅开源示例，alpha 全在 OCI)
-└── scripts/                  (未开始)
+│   ├── requirements.md / hld.md / background.md   (+ .en.md pairs)
+│   ├── decisions/            one decision doc per feature (0001–0009, + .en.md)
+│   ├── proposals/ / review/ / reviews/ / open-questions.md
+│   └── ACTION_LOG.md         central timeline (+ .en.md)
+├── lyra/                     runtime package (pull, clean, aggregate, features,
+│   │                         compiler, trade_engine, metrics, runner, oci_*,
+│   │                         workflow, cli, …)
+├── strategies/
+│   ├── directions/           12 formal direction families (v01.yaml each)
+│   ├── examples/             open-source example strategies
+│   └── temp/                 0008 corpus snapshots, read-only (0010 triage target)
+├── tests/                    full test suite (pytest)
+├── scripts/make_lock.sh      regenerate requirements.lock
+└── .github/workflows/ci.yml  py3.11+3.12 CI (pyflakes + pytest)
 ```
 
-## Getting started (when code lands)
+## Getting started
 
-Python 3.12+ is required.
+Python **3.11 or 3.12** (policy `>=3.11,<3.13`; 3.12 is the validated baseline).
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.lock
-.venv/bin/python -m pip install -e . --no-deps --no-build-isolation
-.venv/bin/python -m pytest -q
+.venv/bin/pip install --upgrade pip
+.venv/bin/pip install -r requirements.lock      # pinned environment (TA-Lib wheels included)
+.venv/bin/pip install -e . --no-deps --no-build-isolation
+.venv/bin/pytest -q                             # or: python -m pytest -q
 ```
 
-`lyra-doctor` will verify environment, dependencies, OCI reachability
-(when configured) and sample data integrity before a run.
+Verify your environment with the self-check (hard failures exit 1, data-layer
+items are warnings only):
+
+```bash
+.venv/bin/lyra doctor --config config/config.yml
+```
+
+## CLI command groups
+
+**Data (0002/0003):** `pull`, `clean`, `aggregate`, `catalog`, `oanda`, `features`
+**Strategy (0004/0006):** `validate`, `compile`, `run`, `report`
+**OCI sync (0007):** `push`, `backup` (=`sync`), `push-strategy`, `push-direction`, `push-runs`, `list`
+**Research workflow (0007 R12):** `tracks`, `context`, `new-version`, `compare`, `merge`, `synthesize`
+**Meta (0009):** `doctor`, `version`
+
+Run `lyra <command> --help` for options. Data, strategy and run artifacts live
+outside the repo under `~/.lyra/<workspace>/…` (B13); alpha and the base market
+data live in OCI.
 
 ## Configuration
 
 | File | In git? | Purpose |
 |---|---|---|
 | `config/config_example.yml` | ✅ | Documented shape; no secrets |
-| `config/config.yml` | ❌ (gitignored) | Your OCI PAR URL, local paths, alpha feature dir |
-| `~/.lyra/credentials` (optional) | ❌ | OCI auth if not using PAR |
+| `config/config.yml` | ❌ (gitignored) | Your OCI PAR URLs + OANDA token + local workspace |
 
-OCI credentials and local paths never enter the repository.
+**Credential model (M3 ruling):** the ONLY credential path is a signed
+Prefix Access (PAR) URL. No OCI SDK, no `~/.lyra/credentials` — a target that
+cannot be mounted as a PAR produces an explicit push error rather than a
+silent fallback.
 
 ## License & alpha boundary
 
 Lyra source code: **Apache-2.0**. This license covers only the code in this
-repository. It does **not** cover:
-
-- Custom / alpha feature code (lives in OCI)
-- Strategy YAMLs (live in OCI)
-- Run results, trade records, analysis (live in OCI)
-- Market data (live in OCI)
-
-This split is deliberate and load-bearing: the alpha is the income source,
-and it must not be shared with enough people to be arbitraged away ("被均摊").
-
-See [docs/proposals/oci-alpha-layout.md](docs/proposals/oci-alpha-layout.md)
-for the proposed OCI directory structure and [docs/decisions/0001-repo-and-oci-split.md](docs/decisions/0001-repo-and-oci-split.md)
-for the rule set.
+repository. It does **not** cover custom/alpha feature code, strategy YAMLs,
+run results, or market data — all of which live in OCI. See
+[docs/decisions/0001-repo-and-oci-split.md](docs/decisions/0001-repo-and-oci-split.md).
 
 ## Lineage
 
 | Project | Status |
 |---|---|
 | [Moneta](https://github.com/ttrrei/moneta) | Original research rig; 200-strategy campaign; rich pipeline + OOS machinery. Preserved as read-only reference. |
-| [Nova](https://github.com/ttrrei/nova) | First "clean room" rebuild (Nov 2026). Validated the 4 core components and 332 in-grammar strategies, but retained too much over-engineering (SHA256 snapshot dirs, FROZEN_CORE, artifact manifests). |
-| **Lyra (this repo)** | Second rebuild: keep the validated core, drop the ceremony, add the OCI sync as a first-class feature. |
+| [Nova](https://github.com/ttrrei/nova) | First "clean room" rebuild. Validated the 4 core components and a strategy corpus, but retained over-engineering (snapshot dirs, FROZEN_CORE, artifact manifests). |
+| **Lyra (this repo)** | Second rebuild: keep the validated core, drop the ceremony, add OCI sync as a first-class feature. |
 
 ## Docs
 
-Each doc below ships in two versions: the **Chinese** version (default)
-keeps English technical terms inline, and the **English** version
-(`*.en.md`) is a full translation.
+Each doc ships in two versions: the **Chinese** version (default) keeps
+English technical terms inline, and the **English** version (`*.en.md`) is a
+full translation.
 
-- [Background: moneta → nova → lyra](docs/background.md) · [EN](docs/background.en.md)
-- [Requirements (中文)](docs/requirements.md) · [EN](docs/requirements.en.md)
-- [High-level design decisions](docs/hld.md) · [EN](docs/hld.en.md)
-- [Decision log](docs/decisions/) · [TEMPLATE](docs/decisions/TEMPLATE.md) · [EN](docs/decisions/TEMPLATE.en.md)
-- [Action log (central timeline)](docs/ACTION_LOG.md) · [EN](docs/ACTION_LOG.en.md)
+- [Background](docs/background.md) · [EN](docs/background.en.md)
+- [Requirements](docs/requirements.md) · [EN](docs/requirements.en.md)
+- [High-level design](docs/hld.md) · [EN](docs/hld.en.md)
+- [Decision log](docs/decisions/) · [TEMPLATE](docs/decisions/TEMPLATE.md)
+- [Action log (timeline)](docs/ACTION_LOG.md) · [EN](docs/ACTION_LOG.en.md)
 - [Open questions](docs/open-questions.md) · [EN](docs/open-questions.en.md)
-- [OCI alpha layout proposal](docs/proposals/oci-alpha-layout.md) · [EN](docs/proposals/oci-alpha-layout.en.md)
 
 ## Contributing
 
-Personal project. External contributions are welcome for **bug fixes,
-test coverage improvements, and documentation** on the core engine.
-Alpha-related code and strategies are closed-source by design and are not
-accepted here.
+Personal project. External contributions are welcome for **bug fixes, test
+coverage, and documentation** on the core engine. Alpha-related code and
+strategies are closed-source by design.

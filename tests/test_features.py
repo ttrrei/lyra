@@ -591,3 +591,129 @@ def test_feature_path_rejects_instrument_traversal(tmp_path):
     # legal instruments still resolve inside the root
     ok = feature_path(tmp_path, 60, "EUR_USD").resolve()
     assert str(ok).startswith(str(tmp_path.resolve()))
+
+
+# --- 0009 D4: atomic feature publication + generation gate ------------------
+
+def _fake_build_instrument(monkey_fail=()):
+    """Stand-in build_instrument: returns a tiny table for every instrument,
+    raises for instruments in ``monkey_fail`` (to simulate mid-run failure)."""
+
+    def _b(con, instrument, minutes, reg):
+        if instrument in monkey_fail:
+            raise RuntimeError(f"simulated failure for {instrument}")
+        n = 40
+        t = np.datetime64("2020-01-01", "us") + np.arange(n, dtype=np.int64) * np.timedelta64(1, "h")
+        arr = np.full(n, 1.0)
+        input_rows = {
+            "instrument": np.full(n, instrument, dtype=object),
+            "time": t,
+            "mid_o": arr.copy(), "mid_h": arr.copy(),
+            "mid_l": arr.copy(), "mid_c": arr.copy(),
+            "volume": arr.copy(), "n_bars": np.ones(n, dtype=np.int64),
+        }
+        built = {"n": n, "cols": {name: np.zeros(n) for name in reg.names()},
+                 "input": input_rows}
+        return built
+    return _b
+
+
+def _gen_con(instruments=("AAA", "BBB")):
+    """Stand-in connection: answers ``list_instruments`` (DISTINCT query) —
+    returns one-row-per-instrument tuples, as DuckDB's fetchall does."""
+    class _Con:
+        def execute(self, sql, params=None):
+            class _R:
+                def fetchall(self):
+                    return [(inst,) for inst in instruments]
+            return _R()
+    return _Con()
+
+
+def test_atomic_publish_writes_generation(tmp_path, monkeypatch):
+    """0009 D4: run_features promotes staged files into features/<layer>/ and
+    writes _generation.json with per-file sha256."""
+    from lyra import features as feat
+
+    monkeypatch.setattr(feat, "build_instrument", _fake_build_instrument())
+    reg = feat.build_registry()
+    feat.run_features(tmp_path, 60, reg, con=_gen_con())
+    layer_dir = tmp_path / "features" / "ohlcv_1h"
+    gen = feat.read_generation(layer_dir)
+    assert gen is not None
+    assert set(gen["file_sha256"]) == {"AAA", "BBB"}
+    for inst in ("AAA", "BBB"):
+        f = layer_dir / f"{inst}.parquet"
+        assert f.exists()
+        assert gen["file_sha256"][inst] == feat._sha256_file_bytes(f.read_bytes())
+    # staging residue is cleaned up
+    assert not (tmp_path / ".features_staging").exists()
+
+
+def test_atomic_publish_failure_keeps_previous_generation(tmp_path, monkeypatch):
+    """0009 D4: a mid-run failure must NOT corrupt the previous complete
+    generation — target files for already-built instruments are not half-published."""
+    from lyra import features as feat
+
+    # first: a fully successful run establishes generation v1
+    monkeypatch.setattr(feat, "build_instrument", _fake_build_instrument())
+    reg = feat.build_registry()
+
+    feat.run_features(tmp_path, 60, reg, con=_gen_con())
+    v1 = (tmp_path / "features" / "ohlcv_1h" / "AAA.parquet").read_bytes()
+
+    # second: AAA succeeds, BBB fails mid-run
+    monkeypatch.setattr(feat, "build_instrument", _fake_build_instrument(monkey_fail=("BBB",)))
+    with pytest.raises(RuntimeError):
+        feat.run_features(tmp_path, 60, reg, con=_gen_con())
+    # the previous AAA.parquet is untouched (no atomic half-write clobbering it)
+    assert (tmp_path / "features" / "ohlcv_1h" / "AAA.parquet").read_bytes() == v1
+    # generation manifest still describes the v1 set (AAA + BBB) — never a partial one
+    gen = feat.read_generation(tmp_path / "features" / "ohlcv_1h")
+    assert set(gen["file_sha256"]) == {"AAA", "BBB"}
+
+
+def test_validate_generation_detects_tamper(tmp_path, monkeypatch):
+    """0009 D4 gate: a feature file modified after publish must fail closed."""
+    import pytest as _pt
+    from lyra import features as feat
+
+    monkeypatch.setattr(feat, "build_instrument", _fake_build_instrument())
+    reg = feat.build_registry()
+
+    feat.run_features(tmp_path, 60, reg, con=_gen_con(("AAA",)))
+    feat.validate_generation(tmp_path)  # consistent -> no error
+
+    f = tmp_path / "features" / "ohlcv_1h" / "AAA.parquet"
+    f.write_bytes(f.read_bytes() + b"TAMPER")
+    with _pt.raises(feat.FeaturesError):
+        feat.validate_generation(tmp_path)
+
+
+def test_validate_generation_detects_missing_manifest(tmp_path):
+    """0009 D4 gate: parquet files without a generation manifest fail closed."""
+    import pytest as _pt
+    from lyra import features as feat
+
+    layer_dir = tmp_path / "features" / "ohlcv_1h"
+    layer_dir.mkdir(parents=True)
+    (layer_dir / "AAA.parquet").write_bytes(b"x")
+    with _pt.raises(feat.FeaturesError):
+        feat.validate_generation(tmp_path)
+
+
+def test_feature_snapshot_digest_tracks_generation(tmp_path, monkeypatch):
+    """0009 D6: the snapshot digest is a function of the generation manifest
+    (per-file sha + version_string) — a new generation changes the digest."""
+    from lyra import features as feat
+
+    monkeypatch.setattr(feat, "build_instrument", _fake_build_instrument())
+    reg = feat.build_registry()
+
+    feat.run_features(tmp_path, 60, reg, con=_gen_con(("AAA",)))
+    d1 = feat.feature_snapshot_digest(tmp_path)
+    # legacy (no manifest) digest differs
+    d_legacy = feat.feature_snapshot_digest(tmp_path / "nonexistent")
+    assert d1 != d_legacy
+    # digest is stable
+    assert feat.feature_snapshot_digest(tmp_path) == d1
