@@ -80,7 +80,7 @@ def test_grid_only_windows():
 def test_feature_count_matches_r31(ctx, data):
     reg, cols = _compute(ctx)
     # R3.1 / §3.4 fixed list — 116 features (F1 drift guard)
-    assert len(reg) == 143   # 134 core + 9 corpus fills (0008/#99)
+    assert len(reg) == 146   # 137 core (incl. prior12 trio) + 9 corpus fills (0008/#99)
     # and every computed column is present in the wide table
     assert set(cols) == set(reg.names())
 
@@ -352,7 +352,7 @@ def test_wide_table_self_sufficient(ctx, data):
     names = set(table.column_names)
     for req in ("mid_o", "mid_h", "mid_l", "mid_c", "volume", "n_bars", "time"):
         assert req in names
-    assert len(table.column_names) == 143 + 8
+    assert len(table.column_names) == 146 + 8
 
 
 def _input_dict(data):
@@ -395,7 +395,7 @@ def test_per_instrument_streaming(ctx, data):
     built = features.build_instrument(_fake_con(data), "TEST", 60, reg)
     # the built working set holds exactly one instrument's row count
     assert built["n"] == data["n"]
-    assert len(built["cols"]) == 143
+    assert len(built["cols"]) == 146
 
 
 def _fake_con(data):
@@ -426,7 +426,7 @@ def test_universal_21_instruments(data):
     reg = features.build_registry()
     # every instrument runs against this one registry — no per-instrument
     # algorithm/parameter fork exists in the code path (D5 loop is uniform).
-    assert len(reg) == 143   # 134 core + 9 corpus fills (0008/#99)
+    assert len(reg) == 146   # 137 core (incl. prior12 trio) + 9 corpus fills (0008/#99)
     # and the compute functions are pure (same input → same output), so
     # instrument A and B differ only in their input data, never in the math.
     a = features.Ctx(o=np.full(50, 1.0), h=np.full(50, 1.0), l=np.full(50, 1.0),
@@ -571,5 +571,5 @@ def test_real_data_one_instrument(tmp_path):
     res = features.run_features(root, 60, reg, instruments=["SPX500_USD"])
     assert res.total_rows > 0
     t = pq.read_table(res.paths[0])
-    assert len(t.column_names) == 151   # 143 + 8
+    assert len(t.column_names) == 154   # 146 + 8
     assert t.schema.metadata[b"feature_version"] == str(features.FEATURE_VERSION).encode()

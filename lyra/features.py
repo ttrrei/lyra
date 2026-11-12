@@ -51,7 +51,7 @@ from .registry import FeatureKind, Registry, RegistryError
 # I13: any change to a registered feature's computation or parameters must
 # bump this. 0003 shipped v0.8 (+1 over the v0.7 baseline) and v0.9 (+1), so
 # the first implementation baseline is 2.
-FEATURE_VERSION = 5
+FEATURE_VERSION = 6
 
 #: The K8 window grid (0003 K8, aligned to moneta ``catalogue.py``).
 GRID = (6, 12, 24, 60, 120)
@@ -301,7 +301,7 @@ def build_registry() -> Registry:
     )
 
     # --- structural (vectorized; prior windows exclude the current bar) ----
-    for n in (24, 60):
+    for n in (12, 24, 60):
         reg_value(f"prior{n}_high", "structural", n, {"n": n}, (n,), lambda ctx, sp: _prior_high(ctx, sp.params["n"]), unit="price")
         reg_value(f"prior{n}_low", "structural", n, {"n": n}, (n,), lambda ctx, sp: _prior_low(ctx, sp.params["n"]), unit="price")
         reg_value(f"prior{n}_range", "structural", n, {"n": n}, (n,), lambda ctx, sp: _prior_range(ctx, sp.params["n"]), unit="price")
