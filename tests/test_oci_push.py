@@ -638,10 +638,14 @@ def test_h1_push_strategy_actually_uploads(tmp_path, monkeypatch):
 
     from lyra import cli
 
-    # workspace with a direction's strategy slice. The "workspace root" the
-    # push command uses is `resolve_data_root(...)` itself; strategies/ is a
-    # sibling of data/ *inside* it (B13 co-located layout: <root>/strategies,
-    # <root>/data).
+    # Canonical layout (0009 D2 / "A" ruling): the workspace root is the
+    # parent of the data dir, and strategies/ + runs/ live as siblings of
+    # data/ under it:
+    #   <workspace>/data/         raw_zips, ohlcv, ...
+    #   <workspace>/strategies/<dir>/…
+    #   <workspace>/runs/<dir>/…
+    # so `push-strategy` (like `run`, `push-runs`, and the generic `push`)
+    # reads from `<workspace>/strategies`, NOT from inside the data dir.
     ws = tmp_path / "ws"
     (ws / "data").mkdir(parents=True)
     d = ws / "strategies" / "fx-trend"
@@ -653,8 +657,9 @@ def test_h1_push_strategy_actually_uploads(tmp_path, monkeypatch):
     cfg.write_text(
         f"oci:\n  data_par_url: {PREFIX}\n  strategies_par_url: {PREFIX}\n"
         "local:\n  workspace: ws\n  data: data\n", encoding="utf-8")
-    # pin the data root under tmp so the workspace root is ws/ (not ~/)
-    monkeypatch.setenv("LYRA_DATA_ROOT", str(ws))
+    # pin the data root under tmp so the workspace root is ws/ (not ~/):
+    # data root = ws/data, workspace = ws
+    monkeypatch.setenv("LYRA_DATA_ROOT", str(ws / "data"))
     rec = FakeParRW(objects={})
     monkeypatch.setattr(cli, "_push_transport", lambda: rec)
     out = CliRunner().invoke(

@@ -90,14 +90,53 @@ All fixes are regression-verified (see the test plan); no outstanding P1/P2.
 
 ## 4. Acceptance (0009 done-criteria)
 
-- [ ] All five parked findings R1/R2/R7/R8/R9 implemented + regression-tested
-- [ ] README matches the real CLI (no `src/`, no placeholder commands)
-- [ ] `pyproject.toml` `requires-python` bounded above; `requirements.lock` exists and CI installs from it
-- [ ] `.github/workflows/ci.yml` green on GitHub Actions (or equivalent local verification)
-- [ ] `lyra-doctor` all green on the local dev environment
-- [ ] Full `pytest -q` green + pyflakes clean
-- [ ] `requirements.md` R10 bilingual sign-off annotation (D11)
-- [ ] ACTION_LOG state block + 0009 decision doc bilingual pair + HLD §8 row 9 refreshed
+- [x] All five parked findings R1/R2/R7/R8/R9 implemented + regression-tested
+- [x] README matches the real CLI (no `src/`, no placeholder commands)
+- [x] `pyproject.toml` `requires-python` bounded (`>=3.12,<3.13`); `requirements.lock` exists and CI installs from it
+- [x] `.github/workflows/ci.yml` locally verified (py3.12: lock install + editable install + `lyra` entry + pyflakes + pytest)
+- [x] `lyra doctor` all green on the local dev environment (real config, 0 hard fail + WARNs)
+- [x] Full `pytest -q` green + pyflakes clean (327 passed)
+- [x] `requirements.md` R10 sign-off annotation, both languages (D11)
+- [x] ACTION_LOG state block + 0009 decision doc bilingual pair + HLD §8 row 9 refreshed
+
+> **11-12 batch-1 review additions (after §3a)**: H3 consumer-side fail-closed generation gate implemented (`lyra run` validates before reading + regression tests); H4 doctor four-OCI-slot hard-fail (D10 semantics); H5 README clean-environment install switched to build isolation (verified in a clean venv); M1 doctor Python policy = 3.12 single-point + core deps numpy/TA-Lib; M2 checklist/HLD/ACTION_LOG synced; M3 command name `lyra doctor`, `lyra build`→real pipeline commands, compile-smoke built-in fallback; M4 run_meta write failure now hard-fails. See `docs/reviews/`.
+
+## 5. D12 / D13 — track-level candidate layout and per-run comparability (11-12 batch-1 H1/H2, user ruling 2026-11-13 "do it now", **landed in #112**: pytest 333 passed + 9 adversarial probes green + full CLI end-to-end verified)
+
+### D12. Candidate files belong to a track (H1)
+
+**Layout**:
+```
+strategies/<direction>/
+├── hypothesis.md                  ← direction-level shared (read-only baseline; frozen into each track's baseline)
+├── lessons.md                     ← direction-level shared lessons
+├── v01.yaml                       ← direction-level baseline (legacy read-only; shared starting point)
+├── index/t<track>.jsonl           ← track event log (unchanged)
+├── <track_a>/v02a.yaml            ← track-owned (new layer, H1)
+├── <track_a>/v03.yaml
+└── <track_b>/v02a.yaml            ← coexists with track_a's v02a (the H1 core)
+```
+
+**Rules**:
+1. **Direction-level vNN.yaml = shared baseline, read-only semantics**: `new_version`/`merge` no longer write direction-level; direction-level files remain readable (as parent / baseline) and pushable. The existing 12 directions' `v01.yaml` stay in place (zero migration: `~/.lyra/default` has an empty tracks dir, no track data).
+2. **Duplicate check becomes track-scoped**: `new_version`'s "branch exists" check now rejects only if it exists **inside this track's directory**; same-named branches across tracks are legal (`strategies/<direction>/<track>/v02a.yaml` no longer conflicts).
+3. **`_branch_file` resolution**: prefer `<track>/<branch>.yaml`, fall back to direction-level (baseline); `--from` parent likewise (the direction-level baseline is always a valid parent).
+4. **Runs isolation**: `_runs_for_branch` gains a `track` parameter — matches `run_meta.track_id` (without the parameter the old behavior is preserved, for `synthesize` to read cross-track with labelled provenance). `context --track` lists only this track's runs (the H1 core requirement).
+5. **merge**: target file written into this track's directory; the auto-name (next free vNN) computes the free number over **this track + direction-level** sets.
+6. **OCI compatibility**: `classify_path` classifies by file name (`_VNN_RE` on the last segment), so `strategies/<dir>/<track>/vNN.yaml` is still immutable — **no oci_push change needed** (verified).
+7. **cap/event log**: unchanged (already track-level).
+
+### D13. compare per-run identity criteria (H2)
+
+1. **Identity fields**: `metrics.json` and `manifest.json` gain `data_digest` (already computed by the runner, previously only in the run_id payload) and `feature_version` (already in the manifest). `run_meta.json` unchanged (identity=attribution; data identity lives in metrics).
+2. **Judgment**: `compare_siblings` decides `comparable` over the compared run set = all runs share the same `data_digest` **and** `feature_version` **and** `feature_snapshot_digest` (the existing 0009 D3 dimension kept as the third). Any run missing a field (legacy) → `comparable=None` (unknown, not presumed comparable) + listed in `runs_without_data_identity`; fields present but differing → `False` + per-run `incomparable_reason` (`data_digest`/`feature_version`/`feature_snapshot`).
+3. **Per-run output**: each run row carries `data_digest` / `feature_version` / `comparable`, so an AI can see *why* one run is not comparable with another.
+4. **synthesize**: cross-track synthesis explicitly lists track provenance + per-run identity fields (I22 explicit entry, not implicit mixing).
+
+### Test plan (new)
+- H1: two tracks each `new_version v02` succeed (direction-level exclusivity lifted); `context --track` does not read the other track's runs; `--from` pointing at the direction-level baseline works; OCI classification still immutable for the track subdir.
+- H2: two runs with same snapshot but different data_digest → `comparable=False` + reason; a legacy run missing data_digest → `comparable=None`; all three fields equal → `True`; metrics.json/manifest.json carry both fields.
+- Regression: existing track-semantics tests (`test_cap_is_per_track_not_global` etc.) stay green (the layout only adds a subdirectory layer and does not change existing assertion paths).
 
 ## Revision history
 

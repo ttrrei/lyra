@@ -334,17 +334,16 @@ def prune_branch(workspace: Path, direction: str, track_id: str, branch: str) ->
 # ---------------------------------------------------------------------------
 
 
-def _parent_file(workspace: Path, direction: str, parent: str) -> Path:
-    """Resolve a parent branch to its strategy file."""
-    if _BRANCH_RE.match(parent):
-        candidate = workspace / "strategies" / direction / f"{parent}.yaml"
-        if candidate.exists():
-            return candidate
-    # branch slug that is not a bare vNN → treat parent as a slug under the
-    # direction folder (user naming), e.g. strategies/<direction>/<parent>.yaml
-    candidate = workspace / "strategies" / direction / f"{parent}.yaml"
-    if candidate.exists():
-        return candidate
+def _parent_file(workspace: Path, direction: str, parent: str,
+                 track: str | None = None) -> Path:
+    """Resolve a parent branch to its strategy file.
+
+    0009 D12: a parent may live in this track's directory (``<track>/vNN.yaml``)
+    or at the direction level (the shared read-only baseline, e.g. ``v01.yaml``).
+    """
+    resolved = _branch_file(workspace, direction, parent, track)
+    if resolved is not None:
+        return resolved
     raise WorkflowError(f"parent branch '{parent}' not found under strategies/{direction}/")
 
 
@@ -375,22 +374,27 @@ def new_version(
             f"branch {branch!r} already exists on track {track} — duplicate id "
             f"(I18/D9 fail-fast: not overwriting, not auto-renaming)"
         )
-    d0 = workspace / "strategies" / direction
-    if (d0 / f"{branch}.yaml").exists():
+    # 0009 D12 (H1): the duplicate check is track-scoped — a same-named
+    # branch in ANOTHER track's directory is legal (each AI owns its own
+    # branch sequence). Only this track's directory is exclusive. The
+    # direction-level file is the shared read-only baseline and is never
+    # written by new_version.
+    track_dir = workspace / "strategies" / direction / track
+    if (track_dir / f"{branch}.yaml").exists():
         raise WorkflowError(
-            f"branch {branch!r} already exists (strategies/{direction}/{branch}.yaml) "
-            f"— duplicate id (I18/D9 fail-fast: not overwriting, not auto-renaming)"
+            f"branch {branch!r} already exists on track {track} "
+            f"(strategies/{direction}/{track}/{branch}.yaml) — duplicate id "
+            f"(I18/D9 fail-fast: not overwriting, not auto-renaming)"
         )
     enforce_branch_cap(workspace, direction, track)
 
-    d = workspace / "strategies" / direction
-    d.mkdir(parents=True, exist_ok=True)
     slug = branch
-    target = d / f"{slug}.yaml"  # duplicate already rejected above (D9)
+    track_dir.mkdir(parents=True, exist_ok=True)
+    target = track_dir / f"{slug}.yaml"  # duplicate already rejected above (D9)
 
     parent_slug = None
     if parent is not None:
-        pfile = _parent_file(workspace, direction, parent)
+        pfile = _parent_file(workspace, direction, parent, track)
         parent_slug = pfile.stem  # e.g. v03 or the branch slug
 
     template_lines = [
@@ -423,8 +427,9 @@ def new_version(
     # Register as active on the track: append ONE event line (H10 — the
     # JSONL keeps every earlier line verbatim, so it remains an I17
     # append-only file after every fork).
+    rel = f"{track}/{slug}.yaml"  # path relative to strategies/<direction>/
     _append_index_event(workspace, direction, track, {
-        "op": "activate", "branch": slug, "file": target.name,
+        "op": "activate", "branch": slug, "file": rel,
         "parent": parent_slug, "driven_by_lesson": driven_by_lesson,
         "at": _now_iso(),
     })
@@ -433,7 +438,7 @@ def new_version(
     tp = track_path(workspace, direction, track)
     rec2 = _load_json(tp)
     rec2.setdefault("branches", {})[slug] = {
-        "file": target.name,
+        "file": rel,
         "parent": parent_slug,
         "driven_by_lesson": driven_by_lesson,
     }
@@ -453,18 +458,33 @@ def track_lessons_path(workspace: Path, direction: str, track_id: str) -> Path:
     return workspace / "tracks" / direction / f"{track_id}.lessons.md"
 
 
-def _branch_file(workspace: Path, direction: str, branch: str) -> Path | None:
+def _branch_file(workspace: Path, direction: str, branch: str,
+                 track: str | None = None) -> Path | None:
+    """Resolve a branch to its YAML (0009 D12).
+
+    Track-level layout: ``strategies/<direction>/<track>/<branch>.yaml``
+    (track-owned, H1) takes precedence; the direction-level
+    ``strategies/<direction>/<branch>.yaml`` remains the shared read-only
+    baseline (e.g. the legacy v01) and is the fallback.
+    """
     d = workspace / "strategies" / direction
+    if track is not None:
+        cand = d / track / f"{branch}.yaml"
+        if cand.exists():
+            return cand
     cand = d / f"{branch}.yaml"
     if cand.exists():
         return cand
     m = _VNN_FILE_RE.match(branch + ".yaml")
     if m:
         # legacy zero-padding variant (v1 -> v01.yaml)
-        for p in d.glob("*.yaml"):
-            pm = _VNN_FILE_RE.match(p.name)
-            if pm and int(pm.group(1)) == int(m.group(1)):
-                return p
+        for root in (d / track, d) if track is not None else (d,):
+            if not root.is_dir():
+                continue
+            for p in root.glob("*.yaml"):
+                pm = _VNN_FILE_RE.match(p.name)
+                if pm and int(pm.group(1)) == int(m.group(1)):
+                    return p
     return None
 
 
@@ -579,16 +599,24 @@ def render_context(
         active = _track_active(workspace, direction, tid)
         out.append(f"\n### active branches: {', '.join(active) if active else '(none)'}")
         for b in active:
-            bfile = _branch_file(workspace, direction, b)
+            bfile = _branch_file(workspace, direction, b, track=tid)
             if bfile is None:
                 out.append(f"  - {b} (YAML missing)")
                 continue
             # full YAML text (H6: not just the file name)
-            out.append(f"#### {bfile.name}")
+            rel = bfile.name
+            try:
+                rel = bfile.relative_to(workspace / "strategies" / direction).as_posix()
+            except ValueError:
+                pass
+            out.append(f"#### {rel}")
             out.append("```yaml")
             out.append(bfile.read_text(encoding="utf-8").rstrip("\n"))
             out.append("```")
-            runs = _runs_for_branch(workspace, direction, b)
+            # 0009 D12 (H1): track-scoped run reads — this track's evidence
+            # only (a baseline branch shared from the direction level still
+            # shows this track's own runs, never another track's).
+            runs = _runs_for_branch(workspace, direction, b, track=tid)
             for r in runs:
                 parts = "  ".join(
                     f"{i['instrument']}: trades={i['trade_count']} ann={i['annualized']} "
@@ -601,13 +629,20 @@ def render_context(
     return "\n".join(out) + "\n"
 
 
-def _runs_for_branch(workspace: Path, direction: str, branch: str) -> list[dict[str, Any]]:
+def _runs_for_branch(workspace: Path, direction: str, branch: str,
+                     track: str | None = None) -> list[dict[str, Any]]:
     """Read 0006 run artifacts referencing this branch (read-only).
 
     0009 D2/D3: identity comes first from the CLI-written ``run_meta.json``
     sidecar (explicit direction + branch + track, immune to spec_id naming
     conventions); legacy runs without a sidecar fall back to the spec_id
     suffix match (H7 exact-match rule unchanged).
+
+    0009 D12 (H1): when ``track`` is given, only runs attributed to that
+    track (``run_meta.track_id``) are returned — track A's context never
+    mixes in track B's runs. Without ``track`` (e.g. cross-track
+    ``synthesize``) all matching runs are returned and each row carries its
+    ``track_id`` for provenance.
     """
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -658,12 +693,23 @@ def _runs_for_branch(workspace: Path, direction: str, branch: str) -> list[dict[
             continue
         seen.add(run_id)
         track_id = meta.get("track_id") if meta else None
+        track_id = str(track_id) if track_id else None
+        # H1: track-scoped reads filter by the sidecar's track_id. Legacy
+        # runs (no sidecar) have no track — they are excluded from a
+        # track-scoped read (a track's context is its own evidence only) and
+        # kept for cross-track reads.
+        if track is not None and track_id != track:
+            continue
         out.append({
             "run_id": run_id,
             "direction": direction,
-            "track_id": str(track_id) if track_id else None,
+            "track_id": track_id,
             "spec_id": spec or None,
             "feature_snapshot_id": m.get("feature_snapshot_id"),
+            # 0009 D13 (H2): per-run data identity fields (judged in
+            # compare_siblings; legacy runs carry None).
+            "data_digest": m.get("data_digest"),
+            "feature_version": m.get("feature_version"),
             "instruments": per_list,
         })
     return out
@@ -674,43 +720,106 @@ def _runs_for_branch(workspace: Path, direction: str, branch: str) -> list[dict[
 # ---------------------------------------------------------------------------
 
 
-def compare_siblings(workspace: Path, direction: str, branches: list[str]) -> dict[str, Any]:
+def _run_comparable_reason(a: dict[str, Any], b: dict[str, Any]) -> str | None:
+    """0009 D13 (H2): the reason two runs are NOT comparable, or None if they
+    are comparable. Three independent identity dimensions — any mismatch is a
+    distinct reason (the first differing dimension is reported)."""
+    if a.get("data_digest") is None or b.get("data_digest") is None:
+        return "missing_data_digest"
+    if a["data_digest"] != b["data_digest"]:
+        return "data_digest"
+    if a.get("feature_version") is None or b.get("feature_version") is None:
+        return "missing_feature_version"
+    if a["feature_version"] != b["feature_version"]:
+        return "feature_version"
+    sa, sb = a.get("feature_snapshot_id"), b.get("feature_snapshot_id")
+    if sa is None or sb is None:
+        return "missing_feature_snapshot"
+    if sa != sb:
+        return "feature_snapshot"
+    return None
+
+
+def compare_siblings(workspace: Path, direction: str, branches: list[str],
+                     track: str | None = None) -> dict[str, Any]:
     """Read-only evidence table over sibling branches' 0006 metrics (I22/D8).
 
     Reads only; never writes any file.
+
+    0009 D13 (H2): comparability is judged per run-set on THREE identity
+    dimensions — ``data_digest`` (the feature values actually consumed),
+    ``feature_version`` (the feature-code generation), and
+    ``feature_snapshot_id`` (the 0009 D3 snapshot digest). A run missing any
+    field (legacy) is marked ``comparable=None`` (unknown — NOT presumed
+    comparable) and counted in ``runs_without_data_identity``; runs with all
+    fields present but differing across the set are ``comparable=False`` with
+    a per-run ``incomparable_reason``. Every run row carries its
+    ``data_digest`` / ``feature_version`` so an AI can see *why* two runs are
+    not directly comparable.
     """
     if len(branches) < 1:
         raise WorkflowError("compare needs at least one branch (use --siblings to pass 2+)")
     rows = []
-    all_snapshot_ids: list[str | None] = []
+    all_runs: list[dict[str, Any]] = []
     for b in branches:
-        runs = _runs_for_branch(workspace, direction, b)
+        runs = _runs_for_branch(workspace, direction, b, track=track)
         # best = highest per-instrument net_return across the run's instruments
         best = None
         for r in runs:
-            all_snapshot_ids.append(r.get("feature_snapshot_id"))
+            all_runs.append(r)
             for inst in r.get("instruments", []):
                 if best is None or (inst.get("net_return") or -1) > (best.get("net_return") or -1):
                     best = inst
         rows.append({"branch": b, "runs": runs, "best": best})
-    # 0009 D3 / R9: comparability is a property of the DATA, not of the
-    # strategy — runs over different feature generations (different
-    # feature_snapshot_id) are not directly comparable. Runs without a
-    # digest (legacy) are conservatively marked incomparable too.
-    known = [s for s in all_snapshot_ids if s]
-    if not known:
-        comparable = None  # no data to judge (e.g. no runs at all)
-    elif len(set(known)) > 1:
-        comparable = False
+
+    # --- H2: three-dimension per-run comparability -------------------------
+    def _identity_ok(r: dict[str, Any]) -> bool:
+        return (r.get("data_digest") is not None
+                and r.get("feature_version") is not None
+                and r.get("feature_snapshot_id") is not None)
+
+    runs_without = sum(1 for r in all_runs if not _identity_ok(r))
+    known = [r for r in all_runs if _identity_ok(r)]
+
+    # Per-run judgment (pairwise against every other fully-identified run):
+    #   - identity missing  -> comparable=None (unknown, never presumed True)
+    #   - any peer differs  -> comparable=False + first differing dimension
+    #   - all peers equal   -> comparable=True
+    for r in all_runs:
+        if not _identity_ok(r):
+            r["comparable"] = None
+            r["incomparable_reason"] = "unknown (missing identity field)"
+            continue
+        reason = None
+        for other in all_runs:
+            if other is r or not _identity_ok(other):
+                continue
+            reason = _run_comparable_reason(r, other)
+            if reason is not None:
+                break
+        r["comparable"] = reason is None
+        r["incomparable_reason"] = reason
+
+    if not all_runs:
+        comparable = None  # no runs at all
     else:
-        comparable = True
-    incomparable_runs = sum(1 for s in all_snapshot_ids if s not in known)
+        # set-level verdict: any unknown run → cannot assert (None);
+        # otherwise all runs must be mutually comparable.
+        states = {r["comparable"] for r in all_runs}
+        if None in states:
+            comparable = None
+        else:
+            comparable = (states == {True})
+
     return {
         "direction": direction,
+        "track": track,
         "siblings": rows,
         "comparable": comparable,
-        "distinct_feature_generations": len(set(known)),
-        "runs_without_data_identity": incomparable_runs,
+        "distinct_feature_generations": len({r["feature_snapshot_id"] for r in known}),
+        "distinct_data_digests": len({r["data_digest"] for r in known}),
+        "distinct_feature_versions": len({str(r["feature_version"]) for r in known}),
+        "runs_without_data_identity": runs_without,
     }
 
 
@@ -735,22 +844,28 @@ def merge(
         validate_ident(p, "parent branch")
     parent_shas: dict[str, str] = {}
     for p in parents:
-        pfile = _parent_file(workspace, direction, p)  # fail fast if missing
+        pfile = _parent_file(workspace, direction, p, track)  # fail fast if missing
         # C6: record the *sha256* of the source (audit chain must not depend
         # on the branch name surviving prunes).
         parent_shas[p] = hashlib.sha256(pfile.read_bytes()).hexdigest()
     # 0007 D2: merge candidates are vNN branches too (I17 immutable class).
     # Default to the next free vNN number; an explicit name must also be vNN.
+    # 0009 D12: the free number is computed over this track's directory AND
+    # the direction-level baseline set (the baseline is shared and read-only,
+    # so a merge must not shadow it).
+    d = workspace / "strategies" / direction
+    track_dir = d / track
     if not name:
-        existing = {
-            int(m.group(1))
-            for m in (
-                _VNN_FILE_RE.match(p.name)
-                for p in (workspace / "strategies" / direction).glob("*.yaml")
-                if p.is_file()
-            )
-            if m
-        }
+        existing: set[int] = set()
+        for root in (track_dir, d):
+            if not root.is_dir():
+                continue
+            for p in root.glob("*.yaml"):
+                if not p.is_file():
+                    continue
+                m = _VNN_FILE_RE.match(p.name)
+                if m:
+                    existing.add(int(m.group(1)))
         n = 1
         while n in existing:
             n += 1
@@ -764,8 +879,8 @@ def merge(
     get_track(workspace, direction, track)  # must exist (I18 identity)
     enforce_branch_cap(workspace, direction, track)
 
-    d = workspace / "strategies" / direction
-    target = d / f"{slug}.yaml"
+    track_dir.mkdir(parents=True, exist_ok=True)
+    target = track_dir / f"{slug}.yaml"
     if target.exists():
         raise WorkflowError(f"merge target exists: {target} — refusing to overwrite (D9)")
     lines = [
@@ -785,8 +900,9 @@ def merge(
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     # Register: append one event line (H10 — keeps the JSONL append-only).
+    rel = f"{track}/{slug}.yaml"  # path relative to strategies/<direction>/
     _append_index_event(workspace, direction, track, {
-        "op": "activate", "branch": slug, "file": target.name,
+        "op": "activate", "branch": slug, "file": rel,
         "parent": None, "parents": list(parents),
         "driven_by_lesson": None, "at": _now_iso(),
     })
@@ -812,11 +928,20 @@ def synthesize(workspace: Path, direction: str) -> Path:
         active = _track_active(workspace, direction, tid)
         lines.append(f"## track {tid}")
         for b in active:
-            runs = _runs_for_branch(workspace, direction, b)
+            runs = _runs_for_branch(workspace, direction, b, track=tid)
             for r in runs:
+                # 0009 D13 (H2): cross-track synthesis is EXPLICIT (I22) and
+                # must carry per-run identity so readers can see which runs
+                # are comparable and which track they came from.
+                ident = (
+                    f" track={r.get('track_id') or '?'} "
+                    f"digest={str(r.get('data_digest'))[:8] or '?'} "
+                    f"featver={r.get('feature_version') or '?'} "
+                    f"cmp={r.get('comparable')}"
+                )
                 for i in r.get("instruments", []):
                     lines.append(
-                        f"- {b}: run {r['run_id'][:12]} {i['instrument']} "
+                        f"- {b}: run {r['run_id'][:12]}{ident} {i['instrument']} "
                         f"trades={i['trade_count']} ann={i['annualized']} "
                         f"win={i['win_rate']} net={i['net_return']}"
                     )

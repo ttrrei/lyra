@@ -31,8 +31,13 @@ def _mk_catalog(ws):
     (c / "catalog.duckdb").write_bytes(b"FAKE-DUCKDB-CATALOG-BYTES")
 
 
-def _mk_run(ws, branch, *, trades=5, net=0.012, ann=0.10, win=0.6):
-    """A 0006 metrics.json artifact whose spec_id references the branch."""
+def _mk_run(ws, branch, *, trades=5, net=0.012, ann=0.10, win=0.6,
+            track=None, direction=None):
+    """A 0006 metrics.json artifact whose spec_id references the branch.
+
+    0009 D12 (H1): writes a ``run_meta.json`` sidecar so track-scoped reads
+    can attribute the run (``track=None`` keeps the pre-D12 legacy shape).
+    """
     run_dir = ws / "runs" / f"{branch}-r1" / "20261110" / "r1234567890abcdef"
     run_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -44,6 +49,12 @@ def _mk_run(ws, branch, *, trades=5, net=0.012, ann=0.10, win=0.6):
         },
     }
     (run_dir / "metrics.json").write_text(json.dumps(payload), encoding="utf-8")
+    if track is not None:
+        (run_dir / "run_meta.json").write_text(json.dumps({
+            "direction": direction or "fx-trend", "branch": branch,
+            "track_id": track, "spec_id": branch,
+            "run_id": "r1234567890abcdef",
+        }), encoding="utf-8")
     return run_dir
 
 
@@ -131,11 +142,46 @@ def test_new_version_duplicate_branch_fails(tmp_path):
     _mk_direction(tmp_path)
     wf.create_track(tmp_path, "fx-trend", "alpha")
     wf.new_version(tmp_path, "fx-trend", "v02", track="alpha")
-    # same slug again → duplicate id → fail-fast (no overwrite, no rename)
+    # same slug again on the SAME track → duplicate id → fail-fast (no
+    # overwrite, no rename)
     with pytest.raises(wf.WorkflowError, match="already exists"):
         wf.new_version(tmp_path, "fx-trend", "v02", track="alpha")
-    # the original file is untouched
-    assert (tmp_path / "strategies" / "fx-trend" / "v02.yaml").exists()
+    # the original file is untouched (0009 D12: track-level layout)
+    assert (tmp_path / "strategies" / "fx-trend" / "alpha" / "v02.yaml").exists()
+
+
+def test_new_version_parent_at_direction_baseline(tmp_path):
+    """0009 D12 (H1): a branch can derive from the direction-level baseline
+    (v01) even though its own file is track-scoped — the baseline is shared
+    and read-only, always a legal parent."""
+    _mk_direction(tmp_path)  # provides strategies/fx-trend/v01.yaml baseline
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    p = wf.new_version(tmp_path, "fx-trend", "v02", track="alpha", parent="v01")
+    assert p == tmp_path / "strategies" / "fx-trend" / "alpha" / "v02.yaml"
+    text = p.read_text(encoding="utf-8")
+    assert "parent: v01" in text
+    # the baseline file is untouched (read-only semantics)
+    baseline = tmp_path / "strategies" / "fx-trend" / "v01.yaml"
+    assert "parent: v01" not in baseline.read_text(encoding="utf-8")
+
+
+def test_new_version_same_branch_across_tracks_is_legal(tmp_path):
+    """0009 D12 (H1): each track owns its branch namespace — track beta can
+    create its own v02 while track alpha's v02 exists. No cross-track
+    collision, and each file lives under its own track directory."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    wf.create_track(tmp_path, "fx-trend", "beta")
+    a = wf.new_version(tmp_path, "fx-trend", "v02", track="alpha")
+    b = wf.new_version(tmp_path, "fx-trend", "v02", track="beta")
+    assert a == tmp_path / "strategies" / "fx-trend" / "alpha" / "v02.yaml"
+    assert b == tmp_path / "strategies" / "fx-trend" / "beta" / "v02.yaml"
+    assert a.exists() and b.exists()
+    # the two files are independent (editing one must not affect the other)
+    b.write_text("version: 1\nid: v02-beta-variant\ndirection: fx-trend\n",
+                 encoding="utf-8")
+    assert "beta-variant" in b.read_text(encoding="utf-8")
+    assert "beta-variant" not in a.read_text(encoding="utf-8")
 
 
 def test_new_version_rejects_non_vnn_slug(tmp_path):
@@ -157,7 +203,9 @@ def test_new_version_output_is_push_classifiable(tmp_path):
     _mk_direction(tmp_path)
     wf.create_track(tmp_path, "fx-trend", "alpha")
     wf.new_version(tmp_path, "fx-trend", "v02", track="alpha")
-    assert oci_push.classify_path("strategies/fx-trend/v02.yaml") == "immutable"
+    # 0009 D12: the branch now lives under the track subdir — the push
+    # classifier must STILL see it as immutable (classified by file name).
+    assert oci_push.classify_path("strategies/fx-trend/alpha/v02.yaml") == "immutable"
 
 
 # --- new-version template (0004 provenance reuse) ------------------------------
@@ -215,7 +263,7 @@ def test_context_contains_siblings_runs(tmp_path):
     _mk_direction(tmp_path)
     wf.create_track(tmp_path, "fx-trend", "alpha")
     wf.new_version(tmp_path, "fx-trend", "v02", track="alpha", parent="v01")
-    _mk_run(tmp_path, "v02", trades=7, net=0.02, ann=0.15, win=0.55)
+    _mk_run(tmp_path, "v02", trades=7, net=0.02, ann=0.15, win=0.55, track="alpha")
     ctx = wf.render_context(tmp_path, "fx-trend", track="alpha")
     assert "v02" in ctx
     assert "r123456789" in ctx  # run id surfaced
@@ -225,6 +273,41 @@ def test_context_contains_siblings_runs(tmp_path):
     # hypothesis + lessons included
     assert "hypothesis" in ctx
     assert "volume filter helped" in ctx
+
+
+def test_h1_context_does_not_leak_other_track_runs(tmp_path):
+    """0009 D12 (H1): track alpha's context must NOT show track beta's runs
+    for the same branch — each AI's evidence is its own."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    wf.create_track(tmp_path, "fx-trend", "beta")
+    # both tracks own a v02 (legal under D12); each ran it independently.
+    wf.new_version(tmp_path, "fx-trend", "v02", track="alpha")
+    wf.new_version(tmp_path, "fx-trend", "v02", track="beta")
+    # alpha's run has net=0.50; beta's run has a wildly different net=0.01
+    _mk_run(tmp_path, "v02", trades=9, net=0.50, ann=0.9, win=0.8, track="alpha")
+    # beta's run (same branch slug, different track) — must NOT leak into alpha
+    run_dir = tmp_path / "runs" / "v02-beta" / "20261110" / "beta0001"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "metrics.json").write_text(json.dumps({
+        "spec_id": "v02", "run_id": "beta0001",
+        "per_instrument": {"EURUSD": {"trade_count": 1, "annualized": 0.0,
+                                       "win_rate": 0.1, "net_return": 0.01}},
+    }), encoding="utf-8")
+    (run_dir / "run_meta.json").write_text(json.dumps({
+        "direction": "fx-trend", "branch": "v02", "track_id": "beta",
+        "spec_id": "v02", "run_id": "beta0001",
+    }), encoding="utf-8")
+
+    ctx_alpha = wf.render_context(tmp_path, "fx-trend", track="alpha")
+    assert "net=0.5" in ctx_alpha           # alpha's own run is shown (0.50 -> "0.5")
+    assert "net=0.01" not in ctx_alpha      # beta's run must NOT leak in
+    assert "beta0001" not in ctx_alpha
+
+    # cross-track read (synthesize-style, no track) sees BOTH, labelled
+    both = wf._runs_for_branch(tmp_path, "fx-trend", "v02")
+    tracks = {r["track_id"] for r in both}
+    assert tracks == {"alpha", "beta"}
 
 
 def test_context_unknown_track_fails(tmp_path):
@@ -263,18 +346,21 @@ def test_compare_empty_fails(tmp_path):
 
 def test_merge_adds_candidate_no_source_change(tmp_path):
     d = _mk_direction(tmp_path)
+    ta = d / "alpha"  # 0009 D12: track-level branch files
     wf.create_track(tmp_path, "fx-trend", "alpha")
     wf.new_version(tmp_path, "fx-trend", "v02", track="alpha", parent="v01")
     wf.new_version(tmp_path, "fx-trend", "v03", track="alpha", parent="v01")
     src_before = {}
     for name in ("v02.yaml", "v03.yaml", "v01.yaml"):
-        p = d / name
+        p = (ta if name != "v01.yaml" else d) / name
         src_before[name] = p.read_bytes()
 
     target = wf.merge(tmp_path, "fx-trend", ["v02", "v03"], track="alpha")
     assert target.exists()
+    assert target == ta / "v04.yaml"  # merge target is track-scoped (D12)
     for name, data in src_before.items():
-        assert (d / name).read_bytes() == data, f"source {name} was modified!"
+        p = (ta if name != "v01.yaml" else d) / name
+        assert p.read_bytes() == data, f"source {name} was modified!"
 
     text = target.read_text(encoding="utf-8")
     assert "parents:" in text
@@ -284,8 +370,8 @@ def test_merge_adds_candidate_no_source_change(tmp_path):
     import hashlib as _h
 
     assert "# parent_sha256" in text
-    v02_sha = _h.sha256((d / "v02.yaml").read_bytes()).hexdigest()
-    v03_sha = _h.sha256((d / "v03.yaml").read_bytes()).hexdigest()
+    v02_sha = _h.sha256((ta / "v02.yaml").read_bytes()).hexdigest()
+    v03_sha = _h.sha256((ta / "v03.yaml").read_bytes()).hexdigest()
     assert f"#   v02: {v02_sha}" in text
     assert f"#   v03: {v03_sha}" in text
 
@@ -403,8 +489,9 @@ def test_h5_sibling_suffix_new_version_accepted(tmp_path):
     wf.new_version(tmp_path, "fx-trend", "v02a", track="alpha")
     from lyra import oci_push
 
-    assert oci_push.classify_path("strategies/fx-trend/v02a.yaml") == "immutable"
-    assert (tmp_path / "strategies" / "fx-trend" / "v02a.yaml").exists()
+    # 0009 D12: track-level path; the classifier (by file name) is still immutable.
+    assert oci_push.classify_path("strategies/fx-trend/alpha/v02a.yaml") == "immutable"
+    assert (tmp_path / "strategies" / "fx-trend" / "alpha" / "v02a.yaml").exists()
 
 
 def test_h4_validate_ident_rejects_traversal(tmp_path):
@@ -488,18 +575,26 @@ def test_d1_context_without_track_shows_live_labelled(tmp_path):
 # --- 0009 D2/D3: run identity + comparability (R2/R9) -----------------------
 
 
-def _mk_run_with_meta(ws, direction, branch, track, run_id, snapshot=None):
+def _mk_run_with_meta(ws, direction, branch, track, run_id, snapshot=None,
+                      data_digest=None, feature_version=None):
     import json as _json
 
     run_dir = ws / "runs" / f"{branch}-{run_id}" / "20261110" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "metrics.json").write_text(_json.dumps({
+    payload = {
         "spec_id": f"directions_{direction}",
         "run_id": run_id,
         "feature_snapshot_id": snapshot,
         "per_instrument": {"EURUSD": {"trade_count": 5, "annualized": 0.1,
                                        "win_rate": 0.6, "net_return": 0.02}},
-    }), encoding="utf-8")
+    }
+    # 0009 D13 (H2): per-run data identity fields (legacy runs omit both →
+    # the comparability verdict degrades to unknown, which the tests assert).
+    if data_digest is not None:
+        payload["data_digest"] = data_digest
+    if feature_version is not None:
+        payload["feature_version"] = feature_version
+    (run_dir / "metrics.json").write_text(_json.dumps(payload), encoding="utf-8")
     (run_dir / "run_meta.json").write_text(_json.dumps({
         "direction": direction, "branch": branch, "track_id": track,
         "spec_id": f"directions_{direction}", "run_id": run_id,
@@ -541,11 +636,14 @@ def test_d2_legacy_spec_id_fallback_still_works(tmp_path):
 def test_d3_compare_marks_incomparable_across_generations(tmp_path):
     """0009 D3/R9: runs over different feature generations (different
     feature_snapshot_id) are flagged comparable=false rather than silently
-    side-by-side."""
+    side-by-side. (Runs carry full D13 identity so the verdict is a clean
+    False, not unknown.)"""
     _mk_direction(tmp_path)
     wf.create_track(tmp_path, "fx-trend", "alpha")
-    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "runA", snapshot="snap1")
-    _mk_run_with_meta(tmp_path, "fx-trend", "v02", "alpha", "runB", snapshot="snap2")
+    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "runA",
+                      snapshot="snap1", data_digest="digX", feature_version=6)
+    _mk_run_with_meta(tmp_path, "fx-trend", "v02", "alpha", "runB",
+                      snapshot="snap2", data_digest="digX", feature_version=6)
     result = wf.compare_siblings(tmp_path, "fx-trend", ["v01", "v02"])
     assert result["comparable"] is False
     assert result["distinct_feature_generations"] == 2
@@ -557,8 +655,75 @@ def test_d3_compare_marks_incomparable_across_generations(tmp_path):
     d2.mkdir(parents=True, exist_ok=True)
     (d2 / "hypothesis.md").write_text("h", encoding="utf-8")
     wf.create_track(tmp_path2, "fx-trend", "alpha")
-    _mk_run_with_meta(tmp_path2, "fx-trend", "v01", "alpha", "runC", snapshot="snapX")
-    _mk_run_with_meta(tmp_path2, "fx-trend", "v02", "alpha", "runD", snapshot="snapX")
+    _mk_run_with_meta(tmp_path2, "fx-trend", "v01", "alpha", "runC",
+                      snapshot="snapX", data_digest="digY", feature_version=6)
+    _mk_run_with_meta(tmp_path2, "fx-trend", "v02", "alpha", "runD",
+                      snapshot="snapX", data_digest="digY", feature_version=6)
     result3 = wf.compare_siblings(tmp_path2, "fx-trend", ["v01", "v02"])
     assert result3["comparable"] is True
     assert result3["distinct_feature_generations"] == 1
+
+
+def test_d13_compare_uses_data_digest_and_feature_version(tmp_path):
+    """0009 D13 (H2): comparability now also requires identical data_digest
+    and feature_version — same snapshot alone is NOT sufficient."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    # same snapshot, DIFFERENT data digest → not comparable (the H2 case)
+    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "runE",
+                      snapshot="snap1", data_digest="dig1", feature_version=6)
+    _mk_run_with_meta(tmp_path, "fx-trend", "v02", "alpha", "runF",
+                      snapshot="snap1", data_digest="dig2", feature_version=6)
+    result = wf.compare_siblings(tmp_path, "fx-trend", ["v01", "v02"])
+    assert result["comparable"] is False
+    assert result["distinct_data_digests"] == 2
+    # the per-run reason names the differing dimension
+    reasons = {r["incomparable_reason"] for row in result["siblings"]
+               for r in row["runs"]}
+    assert reasons == {"data_digest"}
+
+    # same snapshot + same digest, DIFFERENT feature version → not comparable
+    ws2 = tmp_path / "ws2"; ws2.mkdir()
+    _mk_direction(ws2)
+    wf.create_track(ws2, "fx-trend", "alpha")
+    _mk_run_with_meta(ws2, "fx-trend", "v01", "alpha", "runG",
+                      snapshot="snap1", data_digest="dig1", feature_version=5)
+    _mk_run_with_meta(ws2, "fx-trend", "v02", "alpha", "runH",
+                      snapshot="snap1", data_digest="dig1", feature_version=6)
+    result2 = wf.compare_siblings(ws2, "fx-trend", ["v01", "v02"])
+    assert result2["comparable"] is False
+    assert result2["distinct_feature_versions"] == 2
+    reasons2 = {r["incomparable_reason"] for row in result2["siblings"]
+                for r in row["runs"]}
+    assert reasons2 == {"feature_version"}
+
+
+def test_d13_legacy_run_makes_comparable_unknown(tmp_path):
+    """0009 D13 (H2): a run missing identity fields (legacy) → the verdict is
+    unknown (None), NEVER presumed comparable; it is counted separately."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "runI",
+                      snapshot="snap1")  # legacy: no data_digest/feature_version
+    _mk_run_with_meta(tmp_path, "fx-trend", "v02", "alpha", "runJ",
+                      snapshot="snap1", data_digest="dig1", feature_version=6)
+    result = wf.compare_siblings(tmp_path, "fx-trend", ["v01", "v02"])
+    assert result["comparable"] is None  # unknown — not False, not True
+    assert result["runs_without_data_identity"] == 1
+    legacy = [r for row in result["siblings"] for r in row["runs"]
+              if r["run_id"] == "runI"][0]
+    assert legacy["comparable"] is None
+
+
+def test_d13_compare_single_run_is_comparable(tmp_path):
+    """0009 D13 (H2): a single fully-identified run is comparable (True) —
+    nothing to disagree with."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "runK",
+                      snapshot="snap1", data_digest="dig1", feature_version=6)
+    result = wf.compare_siblings(tmp_path, "fx-trend", ["v01"])
+    assert result["comparable"] is True
+    row = result["siblings"][0]
+    assert row["runs"][0]["comparable"] is True
+    assert row["runs"][0]["incomparable_reason"] is None

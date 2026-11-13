@@ -677,9 +677,14 @@ def _staging_slice(source_root: Path, direction: str, *, include_runs: bool) -> 
     staging = Path(tempfile.mkdtemp(prefix=".lyra-push-dir-"))
     dstrat = staging / "strategies" / direction
     dstrat.mkdir(parents=True)
-    for f in (source_root / "strategies" / direction).iterdir():
+    # deep copy: the track-level layout nests strategies/<direction>/<track>/
+    # <branch>.yaml, so a shallow file copy would silently drop them.
+    for f in (source_root / "strategies" / direction).rglob("*"):
         if f.is_file():
-            shutil.copy2(f, dstrat / f.name)
+            rel = f.relative_to(source_root / "strategies" / direction)
+            dest = dstrat / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest)
     if include_runs:
         src_runs = source_root / "runs" / direction
         if src_runs.is_dir():
@@ -699,12 +704,16 @@ def push_strategy(
     force_push: bool = typer.Option(False, "--force-push"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    """Push a single direction's strategy folder (strategies/<direction>/)."""
-    from . import workflow
-    from .config import resolve_data_root
+    """Push a single direction's strategy folder (strategies/<direction>/).
 
-    oci, local = _cfg(config)
-    root = resolve_data_root(local, None)
+    Reads from the canonical workspace root (``~/.lyra/<ws>/strategies/<dir>``),
+    the same tree ``lyra run``/``context``/``new-version`` read and
+    ``pull-strategy`` downloads into — not the data dir, so the download→work→
+    upload loop stays on one path.
+    """
+    from . import workflow
+
+    root = _workspace(config)
     local_root = root / "strategies" / direction
     if not local_root.is_dir():
         typer.secho(f"no strategies/{direction}/ at {local_root}", fg=typer.colors.RED, err=True)
@@ -729,12 +738,14 @@ def push_direction(
     force_push: bool = typer.Option(False, "--force-push"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    """Push an entire direction: its strategies/ + runs/ slices (H1/H9)."""
-    from . import workflow
-    from .config import resolve_data_root
+    """Push an entire direction: its strategies/ + runs/ slices (H1/H9).
 
-    oci, local = _cfg(config)
-    root = resolve_data_root(local, None)
+    Reads from the canonical workspace root (``~/.lyra/<ws>/strategies/<dir>``
+    and ``~/.lyra/<ws>/runs/<dir>``), matching ``lyra run`` output and
+    ``pull-runs`` downloads — not the data dir."""
+    from . import workflow
+
+    root = _workspace(config)
     local_root = root / "strategies" / direction
     if not local_root.is_dir():
         typer.secho(f"no strategies/{direction}/ at {local_root}", fg=typer.colors.RED, err=True)
@@ -898,6 +909,164 @@ def push_runs(
         typer.secho(f"  conflict: {c}", fg=typer.colors.YELLOW)
 
 
+def _pull_direction(
+    prefix: str,
+    par_url: str,
+    save_root: Path,
+    direction: str,
+    *,
+    dry_run: bool,
+) -> None:
+    """List one *par_url* bucket, keep only ``<prefix>/<direction>/**``
+    objects, and download them into *save_root* (idempotent, I20).
+
+    ``pull-strategy``/``pull-runs`` share this path: same canonical
+    workspace layout, same md5-based idempotency, same PAR-expiry handling.
+    """
+    from . import oci_client
+
+    # base keeps a trailing slash: download_object urljoins it with the
+    # object name, and urljoin drops the last segment when the base is not
+    # slash-terminated (…/data → …/strategies/…), corrupting the object URL.
+    base = par_url.rstrip("/") + "/"
+    prefix_url = f"{base}{prefix}/"
+    keep_prefix = f"{prefix}/{direction}/"
+    transport = _push_transport()
+    try:
+        objects = oci_client.list_objects(transport, prefix_url)
+    except oci_client.ParExpiredError as exc:
+        typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    selected = [o for o in objects
+                if str(o.get("name", "")).startswith(keep_prefix)]
+    if not selected:
+        typer.secho(
+            f"pull: no {prefix}/{direction}/ objects under "
+            f"{oci_client.redact_par_url(prefix_url)}", fg=typer.colors.YELLOW,
+        )
+        return
+
+    if dry_run:
+        typer.secho(
+            f"pull ({prefix}/{direction}): {len(selected)} object(s) would be "
+            f"downloaded into {save_root}", fg=typer.colors.CYAN,
+        )
+        for o in selected:
+            typer.secho(f"  would pull: {o['name']}", fg=typer.colors.CYAN)
+        return
+
+    pulled = skipped = 0
+    for o in selected:
+        name = str(o["name"]).strip()
+        local_path = save_root / name
+        already = (local_path.exists()
+                   and oci_client._is_local_up_to_date(local_path, o))
+        try:
+            path = oci_client.download_object(
+                transport, base, name, save_root, o,
+            )
+        except oci_client.ParExpiredError as exc:
+            typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        if already:
+            skipped += 1
+            typer.secho(f"  skip (up to date): {path.relative_to(save_root)}",
+                        fg=typer.colors.CYAN)
+        else:
+            pulled += 1
+            typer.secho(f"  pulled: {path.relative_to(save_root)}",
+                        fg=typer.colors.GREEN)
+
+    typer.secho(
+        f"pull ({prefix}/{direction}): {pulled} pulled, {skipped} skip "
+        f"into {save_root}", fg=typer.colors.GREEN,
+    )
+
+
+@app.command(name="pull-strategy")
+def pull_strategy(
+    direction: str = typer.Argument(..., help="Direction name, e.g. 'fx-trend'"),
+    config: str = typer.Option("config/config.yml", "--config"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="List what would be downloaded; do not fetch"),
+) -> None:
+    """Download a direction's strategies/ (``strategies/<direction>/**``)
+    from the PAR bucket into the canonical workspace layout
+    (``~/.lyra/<ws>/strategies/<direction>/``) — the same tree ``lyra run``/
+    ``context``/``new-version`` read and ``push-strategy``/``push-direction``
+    upload.
+
+    Idempotent (I20): files whose local md5 already matches the remote digest
+    are skipped. Re-running the pull before each session is the OCI-authority
+    download half of the work loop.
+    """
+    from . import workflow
+
+    oci, _local = _cfg(config)
+    url = (oci.strategies_par_url or oci.data_par_url).rstrip("/")
+    if not url:
+        typer.secho(
+            "no pull source configured (oci.strategies_par_url empty)",
+            fg=typer.colors.RED, err=True,
+        )
+        raise typer.Exit(code=2)
+    try:
+        workflow.validate_ident(direction, "direction")
+    except workflow.WorkflowError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    root = _workspace(config)
+    _pull_direction(
+        prefix="strategies",
+        par_url=url,
+        save_root=root,
+        direction=direction,
+        dry_run=dry_run,
+    )
+
+
+@app.command(name="pull-runs")
+def pull_runs(
+    direction: str = typer.Argument(..., help="Direction name"),
+    config: str = typer.Option("config/config.yml", "--config"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="List what would be downloaded; do not fetch"),
+) -> None:
+    """Download a direction's runs/ (``runs/<direction>/**``) from the PAR
+    bucket into the canonical workspace layout (``~/.lyra/<ws>/runs/<dir>``) —
+    the same tree ``lyra run`` writes to and ``push-runs`` reads from.
+
+    Idempotent (I20); see ``pull-strategy``.
+    """
+    from . import workflow
+
+    oci, _local = _cfg(config)
+    url = (oci.runs_par_url or oci.strategies_par_url
+           or oci.data_par_url).rstrip("/")
+    if not url:
+        typer.secho(
+            "no pull source configured (oci.runs_par_url empty)",
+            fg=typer.colors.RED, err=True,
+        )
+        raise typer.Exit(code=2)
+    try:
+        workflow.validate_ident(direction, "direction")
+    except workflow.WorkflowError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    root = _workspace(config)
+    _pull_direction(
+        prefix="runs",
+        par_url=url,
+        save_root=root,
+        direction=direction,
+        dry_run=dry_run,
+    )
+
+
 @app.command(name="list")
 def list_cmd(
     prefix: str = typer.Option("strategies", "--prefix",
@@ -1037,11 +1206,14 @@ def compare_cmd(
                     fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
     try:
-        result = workflow.compare_siblings(ws, direction, branch)
+        # 0009 D12/D13 (H1/H2): --track scopes the evidence to that track's
+        # runs; without it, the comparison is direction-wide (explicit, all
+        # tracks) and each run row still carries track + identity fields.
+        result = workflow.compare_siblings(ws, direction, branch, track=track)
     except workflow.WorkflowError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
-    typer.echo(f"# compare — {direction}")
+    typer.echo(f"# compare — {direction}" + (f" (track={track})" if track else ""))
     for row in result["siblings"]:
         b = row["branch"]
         runs = row["runs"]
@@ -1051,6 +1223,25 @@ def compare_cmd(
                        f"trades={best.get('trades')} (runs={len(runs)})")
         else:
             typer.echo(f"  {b}: (no runs)")
+    # 0009 D13 (H2): the comparability verdict + why (per-run identity).
+    verdict = result.get("comparable")
+    label = {True: "COMPARABLE", False: "NOT COMPARABLE",
+             None: "UNKNOWN (missing identity fields)"}[verdict]
+    typer.echo(f"comparable: {label}  "
+               f"(data_digests={result['distinct_data_digests']}, "
+               f"feature_versions={result['distinct_feature_versions']}, "
+               f"feature_generations={result['distinct_feature_generations']}, "
+               f"runs_without_identity={result['runs_without_data_identity']})")
+    for row in result["siblings"]:
+        for r in row["runs"]:
+            if r.get("comparable") is False:
+                typer.secho(
+                    f"  {row['branch']}: run {r['run_id'][:12]} incomparable — {r['incomparable_reason']}",
+                    fg=typer.colors.YELLOW)
+            elif r.get("comparable") is None:
+                typer.secho(
+                    f"  {row['branch']}: run {r['run_id'][:12]} unknown — {r['incomparable_reason']}",
+                    fg=typer.colors.YELLOW)
 
 
 @app.command(name="merge")

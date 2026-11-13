@@ -403,7 +403,7 @@ def run_strategy(
     run_dir = Path(result.out_dir) / run_name / run_date / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_artifacts(run_dir, plan, spec, result, run_id, trading_days_for,
-                     feature_catalog_snapshot)
+                     feature_catalog_snapshot, data_digest=data_digest)
     result.out_dir = run_dir
 
     if strict and result.instrument_failures:
@@ -632,6 +632,7 @@ def _write_artifacts(
     run_id: str,
     trading_days_for: TradingDaysCounter | None,
     feature_snapshot_id: str | None,
+    data_digest: str | None = None,
 ) -> None:
     generated_at = datetime.now(timezone.utc).isoformat()
 
@@ -676,6 +677,11 @@ def _write_artifacts(
         "instruments": sorted(result.metrics),
         "window": window,
         "feature_snapshot_id": feature_snapshot_id,
+        # 0009 D13 (H2): per-run data identity — the feature values actually
+        # consumed (digest) + the feature-code generation. compare_siblings
+        # reads these from metrics.json to judge comparability per run.
+        "data_digest": data_digest,
+        "feature_version": features_mod.FEATURE_VERSION,
         "git_commit": git_commit,
         "per_instrument": {i: result.metrics[i] for i in sorted(result.metrics)},
         "summary": summary,
@@ -706,6 +712,7 @@ def _write_artifacts(
         "features_used": sorted(plan.features_used),
         "feature_snapshot_id": feature_snapshot_id,
         "feature_version": features_mod.FEATURE_VERSION,
+        "data_digest": data_digest,
         "compiler_version": plan.compiler_version,
         "engine_version": _ENGINE_VERSION,
         "duckdb_version": duckdb.__version__,

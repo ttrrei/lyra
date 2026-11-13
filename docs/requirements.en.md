@@ -324,6 +324,16 @@ directions are fully peer.
 - **vNN (N≥2) must declare** `parent: <parent version id>` (crossover:
   `parents: [...]`) and `driven_by_lesson: <one line, pointing into
   lessons.md>`. v01 is exempt.
+- **Candidate files belong to a track (0009 D12, landed in #112)**: v01
+  is the direction-level shared read-only baseline
+  (`strategies/<direction>/v01.yaml`); vNN (N≥2) is owned by its track
+  (`strategies/<direction>/<track>/<vNN>.yaml`), so same-named branches
+  can evolve independently across tracks without interfering; `context` /
+  `compare` support `--track` scoping, and without a track they aggregate
+  cross-track (each row labelled with its track). compare judges
+  comparability per run on three dimensions
+  (`data_digest` ∧ `feature_version` ∧ `feature_snapshot_id`); any run
+  missing a field → unknown (never presumed comparable).
 - **Multiple branches are first-class**: single-threaded deep search
   falls into local optima; a version's diagnosis should spawn
   **multiple** candidate evolution branches tried in parallel;

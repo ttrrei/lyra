@@ -112,6 +112,43 @@
 > ACTION_LOG 同步；M3 命令名 `lyra doctor`、`lyra build`→真实管道命令、compile
 > smoke 内置 fallback；M4 run_meta 写失败改为硬失败。详见 `docs/reviews/`。
 
+## 5. D12 / D13 — track 级候选布局与逐 run 可比性判定（11-12 批次1 H1/H2，用户 2026-11-13 裁决"现在做"，**#112 已落地**：pytest 333 passed + 9 项对抗性探针全过 + CLI 全链路实测）
+
+### D12. 候选文件归属 track（H1）
+
+**布局**：
+```
+strategies/<direction>/
+├── hypothesis.md                  ← 方向级共享（只读基线，冻结进每 track baseline）
+├── lessons.md                     ← 方向级共享教训
+├── v01.yaml                       ← 方向级基线（legacy 只读；所有 track 共享起点）
+├── index/t<track>.jsonl           ← track 事件日志（不变）
+├── <track_a>/v02a.yaml            ← track 拥有（H1 新增层）
+├── <track_a>/v03.yaml
+└── <track_b>/v02a.yaml            ← 与 track_a 的 v02a 同名共存（H1 核心）
+```
+
+**规则**：
+1. **方向级 vNN.yaml = 共享基线，只读语义**：`new_version`/`merge` 不再写方向级；方向级文件仍可被读取（作为 parent / 基线）与 push。存量 12 个方向的 `v01.yaml` 原地不动（零迁移：`~/.lyra/default` 的 tracks 目录为空，无任何 track 数据）。
+2. **重复检查 track 化**：`new_version` 的"分支已存在"检查改为**本 track 目录内**存在才拒绝；跨 track 同名合法（`strategies/<direction>/<track>/v02a.yaml` 互不冲突）。
+3. **`_branch_file` 解析**：优先 `<track>/<branch>.yaml`，回退方向级（基线）；`--from` parent 同理（方向级基线永远是合法 parent）。
+4. **runs 隔离**：`_runs_for_branch` 增加 `track` 参数——`run_meta.track_id` 匹配（无 track 参数时保留旧行为，供 `synthesize` 跨 track 读取并标注来源）。`context --track` 只列本 track runs（H1 核心诉求）。
+5. **merge**：目标文件写本 track 目录；auto-name（下一个空 vNN）在**本 track + 方向级**集合上求空号。
+6. **OCI 兼容**：`classify_path` 按文件名分类（`_VNN_RE` 匹配末段），`strategies/<dir>/<track>/vNN.yaml` 仍判 immutable，**无需改 oci_push**（已核对）。
+7. **cap/事件日志**：不变（已 track 级）。
+
+### D13. compare 逐 run 身份判据（H2）
+
+1. **身份字段**：`metrics.json` 与 `manifest.json` 增加 `data_digest`（runner 已计算，仅入 run_id payload）与 `feature_version`（manifest 已有）。`run_meta.json` 不变（身份=归属；数据身份在 metrics）。
+2. **判定**：`compare_siblings` 对参与比较的 run 集合判定 `comparable` = 所有 run 的 `data_digest` 相同 **且** `feature_version` 相同 **且** `feature_snapshot_digest` 相同（0009 D3 已有项保留为第三维）。任一 run 缺字段（legacy）→ `comparable=None`（unknown，不推定可比）并单列 `runs_without_data_identity`；有字段但互异 → `False` + 逐 run `incomparable_reason`（`data_digest`/`feature_version`/`feature_snapshot`）。
+3. **逐 run 输出**：每个 run 行携带 `data_digest` / `feature_version` / `comparable`，AI 可看到"这个 run 为什么不能和那个比"。
+4. **synthesize**：跨 track 合成显式列出 track 来源 + 每 run 身份字段（I22 显式入口，非隐式混入）。
+
+### 测试计划（新增）
+- H1：两 track 各自 `new_version v02` 成功（方向级文件互斥性解除）；`context --track` 不串读另一 track 的 runs；`--from` 指向方向级基线可用；OCI 分类对 track 子目录仍 immutable。
+- H2：同 snapshot、不同 data_digest 的两 run → `comparable=False` + reason；缺 data_digest 的 legacy run → `comparable=None`；三字段全同 → `True`；metrics.json/manifest.json 含两字段。
+- 回归：现有 `test_cap_is_per_track_not_global` 等 track 语义测试保持绿（布局只新增子目录层，不改变已有断言路径）。
+
 ## 修订记录
 
 | 日期 | 版本 | 变更 |

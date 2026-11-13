@@ -279,6 +279,13 @@ YAML 文件。初始 12 个方向继承自 nova：`trend_continuation`、
 - **vNN（N≥2）必须声明** `parent: <父版本 id>`（交叉分支为
   `parents: [...]`）和 `driven_by_lesson: <一句话，指向 lessons.md>`。
   v01 不需要。
+- **候选文件归属 track（0009 D12，#112 落地）**：v01 是方向级共享只读
+  baseline（`strategies/<direction>/v01.yaml`）；vNN（N≥2）由所属 track
+  拥有（`strategies/<direction>/<track>/<vNN>.yaml`），同名分支跨 track
+  可独立演进（互不影响）；`context`/`compare` 支持 `--track` 域内查看，
+  无 track 时为跨 track 汇总（每行标注 track 归属）。compare 的可比性
+  按 run 三维判定（`data_digest` ∧ `feature_version` ∧ `feature_snapshot_id`），
+  任一 run 缺字段 → 未知（绝不推定可比）。
 - **多分支是一等能力**：单线程深搜会陷局域最优；一个版本的诊断应
   推导出**多个**候选演进方向并行试；`lyra compare --siblings` 提供
   兄弟分支 run 摘要对比，AI/人 综合判断 continue / prune / cross。
