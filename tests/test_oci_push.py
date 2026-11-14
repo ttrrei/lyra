@@ -393,6 +393,88 @@ def test_push_runs_maps_to_direction_track_runid(tmp_path, monkeypatch):
     assert f"runs/fx-trend/alpha/{run_id}/trades.parquet" in rec.objects
 
 
+def test_push_runs_accepts_run_meta_sidecar(tmp_path, monkeypatch):
+    """审查 U1 回归：`lyra run` 之后总会写 run_meta.json（R12 identity
+    sidecar）。H8「unexpected files」守卫必须在白名单里放行它，否则所有现代
+    run 都会被拒推。这里验证携带 run_meta.json 的 run 正常推送且 sidecar 落地。"""
+    import hashlib as _hashlib
+
+    from typer.testing import CliRunner
+
+    from lyra import cli
+
+    ws = tmp_path / "ws"
+    run_id = "runmeta0123456789"
+    run_dir = ws / "runs" / "myrun" / "20261110" / run_id
+    run_dir.mkdir(parents=True)
+
+    metrics_bytes = b"{}"
+    manifest = {
+        "run_id": run_id,
+        "direction": "fx-trend",
+        "artifacts": {
+            "metrics.json": _hashlib.sha256(metrics_bytes).hexdigest(),
+        },
+    }
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (run_dir / "metrics.json").write_bytes(metrics_bytes)
+    # the R12 identity sidecar that `lyra run` always writes post-hoc:
+    (run_dir / "run_meta.json").write_text(
+        json.dumps({"run_id": run_id, "direction": "fx-trend", "track_id": "alpha"}),
+        encoding="utf-8")
+
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"oci:\n  data_par_url: {PREFIX}\n  strategies_par_url: {PREFIX}\n"
+        "local:\n  workspace: ws\n  data: data\n", encoding="utf-8")
+    rec = FakeParRW(objects={})
+    monkeypatch.setattr(cli, "_push_transport", lambda: rec)
+    out = CliRunner().invoke(
+        cli.app,
+        ["push-runs", "fx-trend", "myrun", "--track", "alpha",
+         "--config", str(cfg), "--runs-root", str(ws / "runs")],
+    )
+    assert out.exit_code == 0, out.output
+    assert "unexpected files" not in out.output
+    assert f"runs/fx-trend/alpha/{run_id}/run_meta.json" in rec.objects
+
+
+def test_push_runs_rejects_garbage_run_meta(tmp_path, monkeypatch):
+    """审查 U1 边界：放行 run_meta.json 不等于允许任意垃圾件——一个非 JSON 的
+    run_meta.json 仍应被拒（保持 H8 反假件强度：sidecar 内容须为合法 JSON）。"""
+    import hashlib as _hashlib
+
+    from typer.testing import CliRunner
+
+    from lyra import cli
+
+    ws = tmp_path / "ws"
+    run_id = "runmeta0123456789"
+    run_dir = ws / "runs" / "myrun" / "20261110" / run_id
+    run_dir.mkdir(parents=True)
+    metrics_bytes = b"{}"
+    manifest = {
+        "run_id": run_id, "direction": "fx-trend",
+        "artifacts": {"metrics.json": _hashlib.sha256(metrics_bytes).hexdigest()},
+    }
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (run_dir / "metrics.json").write_bytes(metrics_bytes)
+    (run_dir / "run_meta.json").write_text("this is not json", encoding="utf-8")
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"oci:\n  data_par_url: {PREFIX}\n  strategies_par_url: {PREFIX}\n"
+        "local:\n  workspace: ws\n  data: data\n", encoding="utf-8")
+    rec = FakeParRW(objects={})
+    monkeypatch.setattr(cli, "_push_transport", lambda: rec)
+    out = CliRunner().invoke(
+        cli.app,
+        ["push-runs", "fx-trend", "myrun", "--track", "alpha",
+         "--config", str(cfg), "--runs-root", str(ws / "runs")],
+    )
+    assert out.exit_code != 0
+    assert "run_meta" in out.output.lower()
+
+
 def test_push_runs_direction_mismatch_fails(tmp_path, monkeypatch):
 
     from typer.testing import CliRunner
@@ -476,6 +558,28 @@ def test_h5_sibling_suffix_branches_classify_immutable():
     assert oci_push.classify_path("strategies/fx-trend/v01.yaml") == "immutable"
     # non-branch files stay unclassified
     assert oci_push.classify_path("strategies/fx-trend/b0.yaml") == "unclassified"
+
+
+def test_corpus_candidate_pool_classify_2026_11_14():
+    """2026-11-14 裁决: temp/ 候选池移出 git、内容进 OCI 标准策略库
+    (canonical strategies/corpus/<entry>/…).候选本体冻结(immutable)、
+    索引随 0010 triage 追加 verdict(append_only)。"""
+    from lyra import oci_push
+
+    # 候选本体（按内容寻址的 strategy.yaml / meta.json）→ 冻结、不可变
+    assert oci_push.classify_path(
+        "strategies/corpus/nova_campaign/failed_breakout/5ffb8149/strategy.yaml"
+    ) == "immutable"
+    assert oci_push.classify_path(
+        "strategies/corpus/nova_campaign/failed_breakout/5ffb8149/meta.json"
+    ) == "immutable"
+    # corpus 顶层索引（verdict 随 triage 追加）→ 允许超集更新
+    assert oci_push.classify_path(
+        "strategies/corpus/nova_campaign/_index.json"
+    ) == "append_only"
+    assert oci_push.classify_path(
+        "strategies/corpus/moneta_s_series/_index.json"
+    ) == "append_only"
 
 
 def test_h2_size_equality_alone_does_not_skip(tmp_path):

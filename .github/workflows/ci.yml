@@ -25,18 +25,12 @@ jobs:
       # (public samples) and temp/ (read-only corpus for 0010 triage). Fail if any
       # other strategies file is tracked — this is the leak that .gitignore alone
       # cannot guarantee (see docs/review/overall-qwen-local-git-oci-边界检查.md).
-      - name: Alpha-in-git gate (strategies/ → examples/ + temp/ only)
-        run: |
-          echo "Tracked files under strategies/:"
-          git ls-files 'strategies/'
-          echo "---"
-          bad=$(git ls-files 'strategies/' | grep -vE '^strategies/(examples|temp)/' || true)
-          if [ -n "$bad" ]; then
-            echo "::error::Alpha strategy files committed to git (must live in OCI only):"
-            echo "$bad"
-            exit 1
-          fi
-          echo "OK: no alpha strategy files tracked in git"
+      # Alpha-in-git gate: strategies/ in git must contain ONLY examples/.
+      # Real alpha (directions/<family>/, temp/ 候选池) lives in OCI only.
+      # 同一逻辑复用：本地 pre-commit（scripts/git-hooks/pre-commit）也调它。
+      # 不可绕过的最后一道 = GitHub branch protection（required status check）。
+      - name: Alpha-in-git gate (strategies/ → examples/ only)
+        run: bash scripts/alpha_gate.sh
 
       - uses: actions/setup-python@v5
         with:

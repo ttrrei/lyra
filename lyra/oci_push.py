@@ -77,6 +77,15 @@ def classify_path(rel_path: str) -> str:
     top = parts[0]
 
     if top == "strategies":
+        # strategies/corpus/… — alpha 候选池（temp/ 移出 git 后，其内容进 OCI
+        # 标准策略库；原稿在 nova）。候选是冻结的、按内容寻址的，不可变：
+        # 与 vNN 一样，sha 冲突必须显式 --force-push 才覆盖（I17 语义）。
+        if len(parts) >= 2 and parts[1] == "corpus":
+            # corpus 级 _index.json 随 0010 triage 追加 verdict → 允许超集更新；
+            # 其余（候选 strategy.yaml + 每候选 meta.json 快照）冻结、不可变。
+            if parts[-1] == "_index.json":
+                return "append_only"
+            return "immutable"
         # strategies/<direction>/<file>
         if len(parts) >= 3:
             fname = parts[-1]

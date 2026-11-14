@@ -766,6 +766,67 @@ def push_direction(
         shutil.rmtree(staging, ignore_errors=True)
 
 
+def _corpus_staging(temp_root: Path) -> Path:
+    """Stage the local ``strategies/temp/`` candidate corpus under the
+    canonical OCI shape ``strategies/corpus/<entry>/…`` (2026-11-14 裁决:
+    temp 移出 git、内容进 OCI 标准策略库, 原稿在 nova).
+
+    ``temp/<X>`` (nova_campaign/, moneta_s_series/, …) → ``corpus/<X>``.
+    classify_path treats corpus candidates as immutable and corpus *.json
+    indexes as append-only, so a re-push after 0010 triage appends verdicts.
+    """
+    staging = Path(tempfile.mkdtemp(prefix=".lyra-corpus-"))
+    dest_root = staging / "strategies" / "corpus"
+    dest_root.mkdir(parents=True)
+    for entry in sorted(temp_root.iterdir()):
+        dest = dest_root / entry.name
+        if entry.is_dir():
+            for f in entry.rglob("*"):
+                if f.is_file():
+                    rel = f.relative_to(entry)
+                    (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(f, dest / rel)
+        elif entry.is_file():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(entry, dest)
+    return staging
+
+
+@app.command(name="push-corpus")
+def push_corpus(
+    config: str = typer.Option("config/config.yml", "--config"),
+    force_push: bool = typer.Option(False, "--force-push"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """Push the local ``strategies/temp/`` candidate corpus to OCI as
+    ``strategies/corpus/<entry>/…`` (alpha candidate pool; originals in nova).
+
+    Fails closed if the local ``strategies/temp/`` corpus is missing."""
+    root = _workspace(config)
+    temp_root = Path(__file__).resolve().parent.parent / "strategies" / "temp"
+    # Prefer the workspace copy if it exists (canonical), else the repo-local
+    # corpus (which is where the triage corpus is authored, per temp/README).
+    ws_temp = root / "strategies" / "temp"
+    if ws_temp.is_dir():
+        temp_root = ws_temp
+    if not temp_root.is_dir():
+        typer.secho(
+            f"no candidate corpus at {temp_root} — nothing to push",
+            fg=typer.colors.RED, err=True,
+        )
+        raise typer.Exit(code=2)
+    n_files = sum(1 for f in temp_root.rglob("*") if f.is_file())
+    staging = _corpus_staging(temp_root)
+    try:
+        typer.secho(
+            f"push-corpus: staging {n_files} files → strategies/corpus/…",
+            fg=typer.colors.CYAN,
+        )
+        _push_staging(config, staging, force_push=force_push, dry_run=dry_run)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
 @app.command(name="push-runs")
 def push_runs(
     direction: str = typer.Argument(..., help="Direction name (from the run manifest)"),
@@ -854,13 +915,28 @@ def push_runs(
                 f"artifact '{name}' sha256 mismatch (manifest={want} actual={actual}) — "
                 f"refusing to push (H8)", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=2)
-    # reject unexpected files: only manifest-listed artifacts + manifest.json
-    expected_files = set(artifacts) | {"manifest.json"}
+    # reject unexpected files: only manifest-listed artifacts + the known
+    # sidecars (manifest.json + run_meta.json). 2026-11-14 审查 U1：`lyra run`
+    # 之后总会写 run_meta.json（R12 identity sidecar, cli._write_run_meta），
+    # 若不在白名单里，H8「unexpected files」守卫会把 *所有* 现代 run 一律拒推，
+    # 回测产物 100% 推不上去。run_meta 是合法 sidecar，放行；H8 反假件保护不变。
+    expected_files = set(artifacts) | {"manifest.json", "run_meta.json"}
     extra = [f.name for f in run_dir.iterdir() if f.is_file() and f.name not in expected_files]
     if extra:
         typer.secho(f"unexpected files in run dir: {sorted(extra)} — refusing (H8)",
                     fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
+    # 保持 H8 强度：run_meta.json 是 lyra 机器生成的 JSON sidecar，若存在则
+    # 必须是合法 JSON（非 JSON 说明被篡改/损坏，拒推而非把垃圾件推上桶）。
+    _run_meta = run_dir / "run_meta.json"
+    if _run_meta.is_file():
+        try:
+            _json.loads(_run_meta.read_text(encoding="utf-8"))
+        except Exception as exc:
+            typer.secho(
+                f"run_meta.json is not valid JSON ({exc}) — refusing to push (H8)",
+                fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2)
 
 
     # staging layout must mirror the canonical OCI layout (0007 D7):
@@ -872,7 +948,18 @@ def push_runs(
     dest_dir.mkdir(parents=True, exist_ok=True)
     try:
         for name in sorted(expected_files):
-            shutil.copy2(run_dir / name, dest_dir / name)
+            src = run_dir / name
+            if not src.is_file():
+                # run_meta.json is a post-run sidecar; a legacy run predating
+                # _write_run_meta legitimately lacks it. (Required artifacts are
+                # already verified present above; this only skips the optional
+                # sidecar.)
+                if name != "run_meta.json":
+                    raise FileNotFoundError(
+                        f"expected run file missing: {src} (name={name!r})"
+                    )
+                continue
+            shutil.copy2(src, dest_dir / name)
         # H8: auditable provenance sidecar (track attribution is injected by
         # the push, not by the 0006 manifest — make it an artifact too).
         (dest_dir / "run_provenance.json").write_text(
@@ -1184,6 +1271,33 @@ def new_version_cmd(
         raise typer.Exit(code=1)
     typer.secho(f"created branch: {path}", fg=typer.colors.GREEN)
     active = workflow.count_active_branches(ws, direction, track)
+    typer.echo(f"  track {direction}/{track}: {active}/8 active")
+
+
+@app.command(name="prune")
+def prune_cmd(
+    direction: str = typer.Argument(...),
+    branch: str = typer.Option(..., "--branch", help="Active branch slug to drop"),
+    track: str = typer.Option(..., "--track", help="Owning track (I21 cap scope)"),
+    config: str = typer.Option("config/config.yml", "--config"),
+) -> None:
+    """Drop an active branch from a track's active list (relieve the 8-cap).
+
+    审查 U3 (2026-11-14)：`workflow.prune_branch` 一直存在，但 CLI 无入口——
+    8 分支配额耗尽后即死锁，无法回收。此命令接通该核心剪枝通道。剪枝是
+    显式、追加事件式（H10 保留 append-only JSONL），绝不自动、绝不改名。
+    """
+    from . import workflow
+
+    ws = _workspace(config)
+    try:
+        workflow.prune_branch(ws, direction, track, branch)
+    except workflow.WorkflowError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    active = workflow.count_active_branches(ws, direction, track)
+    typer.secho(f"pruned branch {branch} from track {direction}/{track}",
+                fg=typer.colors.GREEN)
     typer.echo(f"  track {direction}/{track}: {active}/8 active")
 
 

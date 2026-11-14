@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# 本地 pre-commit：提交前跑 alpha-in-git 门禁（复用 scripts/alpha_gate.sh）。
+# 安装：core.hooksPath 指向本目录（见 ACTION_LOG / 边界对抗检查报告 §F3）。
+# 该 hook 是"尽力拦网"；不可绕过的最后一道是 GitHub branch protection。
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+bash "$root/scripts/alpha_gate.sh"
