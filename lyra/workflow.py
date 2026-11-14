@@ -601,6 +601,59 @@ def render_context(
     out.append(f"FEATURE_VERSION={FEATURE_VERSION}; {len(feats)} registered features:")
     out.append(", ".join(feats))
 
+    # --- T3: the grammar + a copyable valid template (the web-AI's guide) --
+    # A web/chat AI (no filesystem, no coding) can only get its strategy
+    # right if the context *tells it the shape*. Without this, it must guess
+    # the YAML schema and learn the rules only through `lyra validate`
+    # rejections. This section is the "how to write this file" reference the
+    # assessment flagged as Tier-3, delivered via the very context the AI reads.
+    out.extend([
+        "",
+        "## how to write a strategy (grammar + a valid template to copy)",
+        "Write **one YAML file**, then run `lyra validate <file>` (and `lyra submit` to run it).",
+        "The schema is strict: **unknown keys are rejected** (not ignored). Copy the template",
+        "below and only change what you intend. Rules that matter:",
+        "  * `timeframe_minutes` must be **5** (features_5m) or **60** (features_1h).",
+        "  * `version` is the **YAML schema version** (always **1**) — not the direction version.",
+        "  * Each condition is `{feature, op, value}` → meaning `(feature op value)`.",
+        "    - `op` is one of: `eq, ne, gt, gte, lt, lte` (numeric features); `eq, ne` (boolean features).",
+        "    - `value` is a **constant number** OR **another feature** (feature-vs-feature, e.g. `sma_6 > sma_24`).",
+        "    - `feature` must be a name from the `## features` list above (or an OHLC alias: `open`/`high`/`low`/`close`).",
+        "  * `entry` / `exit` take `long` and `short` sub-blocks; `long`/`short` is a condition-list under `all:` (AND) or `any:` (OR), or a single condition map.",
+        "  * `stop_loss_pct: 0.02` is **mandatory** (the 2% hard stop, I3) — leave it at 0.02.",
+        "  * `take_profit_pct` / `max_holding_bars` are optional.",
+        "  * Do **not** invent keys, do **not** use Python/callbacks/SQL — only the structure below.",
+        "Template (validated against this registry — copy it as your starting point):",
+        "```yaml",
+        "version: 1",
+        "id: my_strategy_1h",
+        "direction: " + direction,
+        "hypothesis: >-",
+        "  One-sentence hypothesis: what edge you expect and why, and how it should express itself.",
+        "timeframe_minutes: 60",
+        "entry:",
+        "  long:",
+        "    all:",
+        "      - {feature: rsi_6, op: lt, value: 30}",
+        "      - {feature: sma_6, op: gt, value: sma_24}",
+        "  short:",
+        "    all:",
+        "      - {feature: rsi_6, op: gt, value: 70}",
+        "      - {feature: sma_6, op: lt, value: sma_24}",
+        "exit:",
+        "  long: {feature: rsi_6, op: gt, value: 55}",
+        "  short: {feature: rsi_6, op: lt, value: 45}",
+        "  stop_loss_pct: 0.02",
+        "execution:",
+        "  spread_bps: 2",
+        "  slippage_bps_per_side: 0.2",
+        "  commission_bps_round_trip: 0",
+        "  financing_bps_per_day: 0",
+        "```",
+        "If you're unsure a feature exists, use only names from the `## features` list — an",
+        "unregistered feature makes `lyra validate` fail with a clean INVALID line.",
+    ])
+
     shared_lessons = d / "lessons.md"
     for t in tracks_list:
         tid = t["track_id"]

@@ -8,7 +8,7 @@
 >
 > **证据等级**：**[实测]** = 我实跑并观察到；**[读码]** = 静态追踪；**[评审]** = 四份评审交叉确认。
 >
-> **⏩ 进度（2026-11-15, v1.70/#123）**：本文的 **H1 / H2 / H3 三个硬伤已修复并自测+对抗检验通过**（详见 ACTION_LOG #123）：`tracks/` 现进 push/pull/staging 范围、baseline 冻结且幂等；`create_track` 校验前置不再静默重冻；`new-version`/`merge` 骨架改为合法 YAML（`driven_by_lesson` 引号化）、实测过 `lyra validate`；跨机完整闭环（create→push→pull→context→fork→push）实锤成立。**剩余**：H4 `lyra submit` 一键命令（独立 feature，语义待定）、T3 网页 AI 的 context 包（"如何用本文件"+文法速查）。
+> **⏩ 进度（2026-11-15, v1.71-1.72 / #123-125）**：本文的 **H1 / H2 / H3 三个硬伤已修复并自测+对抗检验通过**（ACTION_LOG #123）：`tracks/` 现进 push/pull/staging 范围、baseline 冻结且幂等；`create_track` 校验前置不再静默重冻；`new-version`/`merge` 骨架改为合法 YAML、实测过 `lyra validate`；跨机完整闭环（create→push→pull→context→fork→push）实锤成立。**H4 `lyra submit` 一键命令已落地**（#124，validate 先行 fail-closed→run，端到端实锤 `VALID→OK→1155 trades`）。**T3 网页 AI context 包已落地**（#125，`lyra context` 现含"如何写策略"语法 + 实测过 `lyra validate` 的可抄模板）。**至此"基座→应用平台"的代码面全部就绪**：`pytest` **355 passed**、pyflakes 干净；剩 **git push** + **branch protection**（均为仓库/用户侧，非代码）。
 
 ---
 
@@ -80,7 +80,13 @@ if idx.exists():
 
 ### H4 —— AI 的 YAML 落地无一步命令（CLAUDE 评审 B2）
 
+> **✅ 已落地核心一步（v1.71/#124，2026-11-15）**：新增 **`lyra submit <file> --data-dir … [--track T]`**——把 AI 的 YAML 直接跑起来，内部**校验先行（fail-closed，INVALID 绝不进撮合引擎、无半截 run）→ VALID 才委托 `run`**（复用 `--data-dir`/`--track`/`run_meta` 归因语义）。端到端实锤：`submit …/momentum_breakout/v01.yaml → VALID→OK→1155 trades`。**这就是用户描述的"写完 YAML → 一条命令拿到性能"的核心闭环**。
+> **范围界定（诚实）**：`submit` 覆盖的是"校验→运行→读数"这一步。若要把 AI 的 YAML 作为某 track 的**已登记分支**纳入 `compare --siblings` 的兄弟对比，仍用既有 `lyra new-version --track T --branch vNN …` 登记后再 `submit`（#119 已补 `lyra prune` 回收 8 分支名额）。即"跑一次拿读数"=1 步；"纳入分支树做对比"= 登记 + 跑，两者都已有命令、无卡死路径。
+
+<details><summary>原始问题记录（保留以说明诊断依据）</summary>
+
 直接把 AI 返回的 YAML 存成 `strategies/<方向>/<track>/vNN.yaml` **不会被 track 识别**：`context` 与 `compare --track` 只列已登记分支，新文件不可见（要显式 `--branch vNN` 才能比）。**现在唯一可靠做法**：先 `lyra new-version --track T --branch vNN --from 父 --lesson …` 登记，再用 AI 的 YAML 整个覆盖生成的文件——**4 步**，且任何一步失败都可能占掉 1 个一次性名额（8 个分支/track，无 `prune` 命令回收）。
+</details>
 
 ---
 
@@ -94,7 +100,7 @@ if idx.exists():
 4. **运行时必须带 `--track`**：不带时 run 成功，但 `run_meta.json` 里 `track_id=null`，之后 `compare --track` 只显示 `(no runs)` **没有任何报错** [实测]
 5. **成本字段要人工核对**：每个策略自己声明 `execution`，缺省 0；多 AI 竞争同一个净收益排名时改成本是最省力的"提分"——**每次收到 AI 的 YAML 用 `diff` 对基线的 `execution:` 块**，必须完全一致 [实测+读码]
 6. **lessons 是手工文件**：每个 track 的 `tracks/<方向>/<track>.lessons.md`，没有命令追加；`context` 只展示最后 N 行 [读码]
-7. **AI 看不到的东西**：`lyra context` 目前**没有** YAML 语法与强制规则、**没有**特征含义（只有名字）、**没有**成本信息——每一轮都要额外给 AI 一份编写规范 [读码]
+7. **AI 看不到的东西**：~~`lyra context` 没有 YAML 语法与强制规则~~ **（已修复 #125：context 现含"如何写策略"语法 + 实测过 `lyra validate` 的可抄模板）**；仍**没有**逐特征含义（只有 146 个名字，无"含义/类型/预热 bar"词典）、**没有**成本信息——若要 AI 理解特征语义，仍需额外给一份特征词典（可选增强，非闭环必需）
 
 ---
 
@@ -141,7 +147,7 @@ if idx.exists():
 
 ## 五、资产备份安全（你的 Q1/Q3）
 
-> **直接答案**：**基本安全，剩 2 项收尾**。核心资产（代码 / 策略 / runs / 原始价格源）都有备份或可重建；剩余：① nova 转 private（你手动）② git push（你执行）。
+> **直接答案**：**安全，剩 1 项收尾**。核心资产（代码 / 策略 / runs / 原始价格源）都有备份或可重建；~~nova 转 private~~ **（你已完成）**；剩余：② git push（你执行，本环境无凭据）。
 
 | 资产 | 位置 | 备份状态 | 风险 |
 |---|---|---|---|

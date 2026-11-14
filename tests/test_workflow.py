@@ -336,6 +336,24 @@ def test_context_contains_siblings_runs(tmp_path):
     assert "volume filter helped" in ctx
 
 
+def test_context_includes_grammar_and_valid_template_t3(tmp_path):
+    """T3 (web-AI no-FS loop): context must carry the strategy grammar AND a
+    copyable template, because a web/chat AI (no filesystem, no coding) reads
+    the context as its only reference for "how to write this YAML"."""
+    _mk_direction(tmp_path)
+    ctx = wf.render_context(tmp_path, "fx-trend")
+    # The grammar section + the key rules the AI must follow.
+    assert "how to write a strategy" in ctx
+    assert "timeframe_minutes" in ctx and "5" in ctx and "60" in ctx
+    assert "op" in ctx and "stop_loss_pct" in ctx
+    # A copyable template the AI can start from.
+    assert "```yaml" in ctx
+    assert "version: 1" in ctx
+    assert "direction: fx-trend" in ctx
+    assert "entry:" in ctx and "exit:" in ctx
+    assert "stop_loss_pct: 0.02" in ctx
+
+
 def test_h1_context_does_not_leak_other_track_runs(tmp_path):
     """0009 D12 (H1): track alpha's context must NOT show track beta's runs
     for the same branch — each AI's evidence is its own."""
