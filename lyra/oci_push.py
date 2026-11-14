@@ -103,6 +103,19 @@ def classify_path(rel_path: str) -> str:
         return "immutable"
     if top == "alpha" and len(parts) >= 2 and parts[1] == "features":
         return "immutable"
+    # H1 (2026-11-15): tracks/<direction>/<track>.json is the *frozen*
+    # baseline snapshot (provenance) — written once in create_track and never
+    # rewritten, so it is immutable (sha conflicts must be explicit
+    # --force-push). <track>.lessons.md is append-only (loop memory: lessons
+    # accumulate over the AI iteration). Everything else under tracks/ is
+    # fail-closed (unclassified).
+    if top == "tracks" and len(parts) >= 3:
+        fname = parts[-1]
+        if fname.endswith(".lessons.md"):
+            return "append_only"
+        if fname.endswith(".json"):
+            return "immutable"
+        return "unclassified"
     return "unclassified"
 
 
@@ -176,11 +189,18 @@ class PushResult:
 
 
 #: I17-scoped top-level directories: the push *walk* skips any other top-level
-#: directory (e.g. 0007's research workspace files ``tracks/``, ``reviews/``
-#: which are local-only and never pushed). Unclassified *files* inside a
-#: scoped directory are still fail-closed (D9) — the skip is per top-level
+#: directory (e.g. 0007's research workspace files ``reviews/`` which are
+#: local-only and never pushed). Unclassified *files* inside a scoped
+#: directory are still fail-closed (D9) — the skip is per top-level
 #: directory, not per file.
-_SCOPED_TOP_LEVEL = frozenset({"strategies", "runs", "data", "alpha"})
+#:
+#: H1 (2026-11-15): ``tracks/`` is IN scope — the frozen track baseline
+#: (``tracks/<dir>/<track>.json``) and per-track lessons (``.lessons.md``)
+#: are the cross-machine loop memory; a fresh machine that only pulled
+#: ``strategies/`` would lose its track provenance and lessons, breaking the
+#: AI-iteration closed loop. ``reviews/`` stays out (synthesis output is
+#: regenerable and not part of the baseline/loop memory).
+_SCOPED_TOP_LEVEL = frozenset({"strategies", "runs", "data", "alpha", "tracks"})
 
 
 def in_push_scope(rel_path: str) -> bool:

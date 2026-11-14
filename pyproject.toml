@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.4", "mypy>=1.10"]
+dev = ["pytest>=8.0", "pyflakes>=4.0", "ruff>=0.4", "mypy>=1.10"]
 # 跨库对照组（0003 K1 双实现交叉验证）：pandas-ta-classic 是主要对照组
 # （活跃维护、276 指标、全长度 NaN 前缀与 TA-Lib 同行为、覆盖
 # plus_di/minus_di/supertrend/hull）；tulipy 是补充锚点（C 后端独立代码

@@ -195,7 +195,18 @@ def list_objects(
         params: dict[str, Any] = {"fields": _LIST_FIELDS, "limit": page_size}
         if start:
             params["start"] = start
-        response = transport.get(base, params=params, timeout=_LIST_TIMEOUT)
+        # I19 (批次2-H3 补): a transport exception (5xx, timeout, reset,
+        # DNS, TLS) embeds the full request URL — and the PAR URL is the
+        # bearer credential — in its message. The write path already
+        # redacts (oci_push); the read path must too. 401/403/404 raise
+        # below with a redacted URL; this closes the exception path.
+        try:
+            response = transport.get(base, params=params, timeout=_LIST_TIMEOUT)
+        except Exception as exc:
+            raise ParListError(
+                f"PAR listing at {redact_par_url(base)} failed: "
+                f"{redact_in_message(str(exc))}"
+            ) from exc
         if _is_expiry(response.status_code):
             raise ParExpiredError(
                 f"PAR listing returned {response.status_code} for "
@@ -268,7 +279,14 @@ def download_object(
         return target  # idempotent skip — no request issued (I20)
 
     obj_url = _object_url(base, name)
-    response = transport.get(obj_url, stream=True, timeout=_DOWNLOAD_TIMEOUT)
+    # I19: same transport-exception redaction as the listing path above.
+    try:
+        response = transport.get(obj_url, stream=True, timeout=_DOWNLOAD_TIMEOUT)
+    except Exception as exc:
+        raise ParObjectError(
+            f"download of {redact_par_url(obj_url)} failed: "
+            f"{redact_in_message(str(exc))}"
+        ) from exc
     if _is_expiry(response.status_code):
         raise ParExpiredError(
             f"PAR download returned {response.status_code} for "

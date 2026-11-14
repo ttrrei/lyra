@@ -12,14 +12,18 @@ timeframe_minutes: 60
 # 2026-11-12: 原引用未注册的 range_high_12/range_low_12；12-bar 窗口族
 # （prior12_high/low/range）已按用户裁决正式注册（FEATURE_VERSION 5→6），
 # 此处改回 12-bar 原语义；突破判定同步修正为 gt/lt（原 eq 为语义错误）。
+# 2026-11-14: 修正突破方向（审查 C3）。compiler 语义为
+# `{feature, op, value}` → `(feature op value)`，故突破「收盘价上破前 12-bar
+# 高点」必须是 close > prior12_high（收盘价高于先前高点）；原
+# `prior12_high > close` 是「收盘价低于前高」，与自身 hypothesis 相悖，已反。
 entry:
   long:
     all:
-      - {feature: prior12_high, op: gt, value: close}     # 突破前 12-bar 高点
+      - {feature: close, op: gt, value: prior12_high}     # 收盘价上破前 12-bar 高点
       - {feature: range_position_24, op: gt, value: 0.9}  # 区间位置确认
   short:
     all:
-      - {feature: prior12_low, op: lt, value: close}
+      - {feature: close, op: lt, value: prior12_low}      # 收盘价下破前 12-bar 低点
       - {feature: range_position_24, op: lt, value: 0.1}
 exit:
   stop_loss_pct: 0.02          # 2% 硬止损（I3）

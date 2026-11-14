@@ -302,7 +302,7 @@ def run_strategy(
     cat = Catalog(data_dir / "catalog.duckdb")
     if not cat.path.exists():
         raise FileNotFoundError(
-            f"catalog not found at {cat.path}; run `lyra build` first (R6)."
+            f"catalog not found at {cat.path}; run `lyra features` first (R6)."
         )
     views_list = sorted(cat.views(), key=lambda d: str(d.get("view")))
     # 0009 D6: the snapshot is now a *data identity*, not just a name list —

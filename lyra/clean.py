@@ -208,8 +208,14 @@ def _clean_sql(csv_dir: Path, payload_present: set[str]) -> str:
     # R3: keys must be non-NULL and non-empty before dedup — otherwise a
     # blank instrument/time survives into bronze and later stages (feature
     # builder, strategy run) fail far from the data boundary.
+    # Charset guard (安全, 2026-11-14 审查 P1): instrument 直接拼进 Parquet 文件名
+    # （features.py 的 <staging>/<instrument>.parquet），市场数据里带路径分隔符
+    # 的 instrument 值会变成目录穿越/任意文件写。在白名单
+    # [A-Za-z0-9_.-] 外（且禁 ..）的键在数据边界即拒（fail-closed, DQ 语义）。
     key_valid = (
         " AND instrument IS NOT NULL AND TRIM(instrument) <> ''"
+        " AND instrument ~ '^[A-Za-z0-9_.-]{1,64}$'"
+        " AND NOT (instr(instrument, '..') > 0)"
         " AND time IS NOT NULL"
     )
     # R13: a content hash of the payload columns is the final tie-breaker.

@@ -495,7 +495,13 @@ def _cfg(config: str):
 #: One-shot `push`/`backup`/`sync` scope (R7): strategies + runs + alpha
 #: features. The raw ``data/`` market layer is already persisted on OCI and
 #: is not re-pushed by the one-shot command.
-_BACKUP_TOP_LEVELS = frozenset({"strategies", "runs", "alpha"})
+#:
+#: H1 (2026-11-15): ``tracks/`` is in scope — the frozen track baseline
+#: (``tracks/<dir>/<track>.json``) + per-track lessons (``.lessons.md``) are
+#: the cross-machine loop memory (provenance + the AI-iteration lessons).
+#: Without this, a fresh machine that pulled ``strategies/`` + ``runs/`` would
+#: silently lose its track baseline and lessons, breaking the closed loop.
+_BACKUP_TOP_LEVELS = frozenset({"strategies", "runs", "alpha", "tracks"})
 
 
 def _push_all_roots(
@@ -694,6 +700,18 @@ def _staging_slice(source_root: Path, direction: str, *, include_runs: bool) -> 
                     dest = staging / "runs" / direction / rel
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(f, dest)
+    # H1 (2026-11-15): carry this direction's track memory too (frozen
+    # baseline + lessons) so a per-direction push — the command a web-AI loop
+    # most naturally uses — doesn't silently strand the cross-machine loop
+    # state that the full `lyra push` now includes.
+    src_tracks = source_root / "tracks" / direction
+    if src_tracks.is_dir():
+        for f in src_tracks.rglob("*"):
+            if f.is_file():
+                rel = f.relative_to(src_tracks)
+                dest = staging / "tracks" / direction / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, dest)
     return staging
 
 
@@ -1107,6 +1125,17 @@ def pull_strategy(
     root = _workspace(config)
     _pull_direction(
         prefix="strategies",
+        par_url=url,
+        save_root=root,
+        direction=direction,
+        dry_run=dry_run,
+    )
+    # H1 (2026-11-15): also restore the track memory (frozen baseline +
+    # lessons) so a fresh machine can continue the loop — the same bucket the
+    # push side wrote ``tracks/<direction>/**`` to. If the direction has no
+    # tracks yet, _pull_direction reports "no … objects" and returns cleanly.
+    _pull_direction(
+        prefix="tracks",
         par_url=url,
         save_root=root,
         direction=direction,

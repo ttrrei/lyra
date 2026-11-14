@@ -857,7 +857,20 @@ def _build_table(instrument: str, built: dict, reg: Registry, version_str: str, 
     }
     for name in reg.names():
         arrays[name] = built["cols"][name].astype(np.float64)
-    table = pa.table({k: pa.array(v) for k, v in arrays.items()})
+    # Critical fix (NaN warm-up): mask non-finite values as null so
+    # DuckDB's IS NULL / IS NOT NULL gates work correctly.  Without this,
+    # pyarrow stores IEEE-754 NaN which DuckDB treats as a valid DOUBLE
+    # (NaN > 70 → TRUE, NaN IS NULL → FALSE), bypassing the compiler's
+    # _full_non_null_gate and producing spurious signals on warm-up bars.
+    # Input columns (mid_o/c, volume, …) are data, not feature outputs, and
+    # DQ1 already guarantees they are finite — so we mask only the feature
+    # columns, leaving the input columns as-is (pa.array infers their types).
+    def _masked(name: str, arr) -> pa.Array:
+        if name in reg.names():
+            # pyarrow ``mask=True`` → NULL, so mask the *non-finite* positions
+            return pa.array(arr.astype(np.float64), mask=~np.isfinite(arr))
+        return pa.array(arr)
+    table = pa.table({k: _masked(k, v) for k, v in arrays.items()})
     meta = {
         b"feature_version": str(FEATURE_VERSION).encode("utf-8"),
         b"version_string": version_str.encode("utf-8"),
@@ -869,7 +882,14 @@ def _build_table(instrument: str, built: dict, reg: Registry, version_str: str, 
 def write_parquet(table, meta: dict, path: Path) -> None:
     """Write the wide table to a single Parquet file (D1: no snapshot dir)."""
     import pyarrow.parquet as pq
+    import re
 
+    # 安全（纵深第二层）：instrument 名拼进文件名，这里拒绝任何非白名单字符，
+    # 即使上游（clean）的字符集守卫被绕过也写不出仓库/数据根之外的路径。
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", path.stem):
+        raise FeaturesError(
+            f"unsafe instrument name for parquet path: {path.stem!r}"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     # Always overwrite (0002 A1: derived layers are recomputed, never cached).
     if path.exists():

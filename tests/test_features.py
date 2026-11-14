@@ -740,3 +740,57 @@ def test_feature_snapshot_digest_tracks_generation(tmp_path, monkeypatch):
     assert d1 != d_legacy
     # digest is stable
     assert feat.feature_snapshot_digest(tmp_path) == d1
+
+
+# --- NaN warm-up → SQL NULL (Critical regression guard) ---------------------
+
+def test_build_table_warmup_nan_is_sql_null(ctx, data):
+    """Critical (found by cross-AI adversarial review, 2026-11-14):
+    warm-up NaN must land in Parquet as SQL NULL, not IEEE-754 NaN.
+
+    Without the mask, DuckDB evaluates ``NaN IS NULL`` as FALSE and
+    ``NaN > 0`` as TRUE, which bypasses the compiler's
+    ``_full_non_null_gate`` and produces spurious entry signals on
+    warm-up bars (every instrument, every strategy using a
+    greater-than comparison).
+    """
+    import duckdb
+
+    reg, cols = _compute(ctx)
+    n = data["n"]
+    inp = {
+        "time": data["t"],
+        "mid_o": (data["c"] - 0.5).astype(np.float64),
+        "mid_h": data["h"].astype(np.float64),
+        "mid_l": data["l"].astype(np.float64),
+        "mid_c": data["c"].astype(np.float64),
+        "volume": data["v"].astype(np.float64),
+        "n_bars": np.full(n, 60, dtype=np.int32),
+    }
+    built = {"n": n, "cols": cols, "input": inp}
+    table, _meta = features._build_table("TEST", built, reg, "test", 60)
+
+    # Pick a feature whose warm-up prefix is NaN in numpy but must be
+    # SQL NULL after _build_table.
+    spec = reg.get("rsi_6")
+    assert spec.warmup_bars > 0
+    arr = cols["rsi_6"]
+    assert np.isnan(arr[:spec.warmup_bars]).all(), "precondition: warm-up NaN"
+
+    pa_col = table.column("rsi_6")
+    assert pa_col.null_count >= spec.warmup_bars, (
+        f"rsi_6 warm-up must be SQL NULL, got null_count={pa_col.null_count}"
+    )
+    for i in range(spec.warmup_bars):
+        assert pa_col[i].as_py() is None, f"row {i} expected NULL, got {pa_col[i].as_py()}"
+
+    # Cross-check via DuckDB: the gate expression the compiler emits
+    # must see NULL, not NaN.
+    con = duckdb.connect()
+    con.register("f", table)
+    rows = con.execute(
+        f"SELECT rsi_6 IS NULL, rsi_6 > 0 FROM f LIMIT {spec.warmup_bars}"
+    ).fetchall()
+    for is_null, gt0 in rows:
+        assert is_null is True, "DuckDB must see IS NULL on warm-up"
+        assert gt0 is None, "DuckDB must see NULL (not TRUE) for NaN > 0"

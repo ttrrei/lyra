@@ -248,6 +248,14 @@ def simulate(
             side, sig_time = pending_entry
             raw_open = _quote(bar, -side, "mid_o", spread)
             price = raw_open * (1 + side * slip)
+            # 数据健全（审查 B2）：entry 价非法（0/负/NaN）会让 _finish 里
+            # `gross = …/ entry_px` 零除/NaN 传染。在开仓处 fail-fast，报清数据错误。
+            if not (isinstance(price, (int, float)) and math.isfinite(price) and price > 0):
+                raise ValueError(
+                    f"invalid entry price {price!r} for {bar['instrument']} "
+                    f"at {bar['time']!r} (non-positive or non-finite) — "
+                    "source OHLC is corrupt; refusing to trade"
+                )
             position = {
                 "direction": side,
                 "price": price,

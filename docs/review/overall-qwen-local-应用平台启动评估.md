@@ -7,6 +7,8 @@
 > **输入**：`UsageInitialReview/` 下 CLAUDE × 2 + MINIMAX × 2 共 4 份独立评估 + 本项目既有 #116-#121 边界修复 + nova/moneta 仓库审计。
 >
 > **证据等级**：**[实测]** = 我实跑并观察到；**[读码]** = 静态追踪；**[评审]** = 四份评审交叉确认。
+>
+> **⏩ 进度（2026-11-15, v1.70/#123）**：本文的 **H1 / H2 / H3 三个硬伤已修复并自测+对抗检验通过**（详见 ACTION_LOG #123）：`tracks/` 现进 push/pull/staging 范围、baseline 冻结且幂等；`create_track` 校验前置不再静默重冻；`new-version`/`merge` 骨架改为合法 YAML（`driven_by_lesson` 引号化）、实测过 `lyra validate`；跨机完整闭环（create→push→pull→context→fork→push）实锤成立。**剩余**：H4 `lyra submit` 一键命令（独立 feature，语义待定）、T3 网页 AI 的 context 包（"如何用本文件"+文法速查）。
 
 ---
 
@@ -36,6 +38,8 @@
 - **分支命名**：`vNN` + 可选小写后缀（`v02a`、`v04ab`）[读码]
 
 ## 二、硬伤 🔴（四份评审交叉确认，全部 [实测]）
+
+> **✅ 状态（v1.70/#123，2026-11-15）**：下列 H1/H2/H3 已按各自"修复方案"落地并通过自检 + 对抗检验（ADV-1~ADV-9 全通过，`pytest` 352 passed、pyflakes 干净、骨架过 `lyra validate`、跨机闭环实锤）。以下为原始问题记录（保留以说明诊断依据）。
 
 ### H1 —— `tracks/` 根本不在 push 范围内 → 闭环无记忆
 

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import calendar
 import csv
+import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -192,6 +193,19 @@ def fetch_candles(
     if not instrument or "/" in instrument:
         raise OandaError(
             "Instrument must be an OANDA instrument name such as GBP_USD"
+        )
+
+    # 安全（P1, 2026-11-14 审查 SSRF/token 泄露）：host 只允许 OANDA 官方域名
+    # (*.oanda.com)。bearer token 只应发给 OANDA；若 config 把 host 配成内网地址
+    # （如 169.254.169.254 / 内部服务），会把 token 泄露并探测内网。fail-closed。
+    if not host or not re.fullmatch(
+        r"[a-z0-9-]+(\.[a-z0-9-]+)*\.oanda\.com|[a-z0-9-]+\.oanda\.com|oanda\.com",
+        host.strip().lower(),
+    ):
+        raise OandaError(
+            f"OANDA host not in allowlist: {host!r}. Only OANDA hosts "
+            "(oanda.com / *.oanda.com) are permitted — the bearer token must "
+            "never be sent to other hosts."
         )
 
     close_session = session is None

@@ -80,6 +80,12 @@ class FakeParRW(FakePar):
         ("strategies/fx/v01.yaml/evil", "unclassified"),
         ("strategies/v01.yaml", "unclassified"),
         ("README.md", "unclassified"),
+        # H1 (2026-11-15): tracks/ is cross-machine loop memory — in scope.
+        ("tracks/fx/alpha.json", "immutable"),
+        ("tracks/fx/alpha.lessons.md", "append_only"),
+        ("tracks/fx/notes.md", "unclassified"),
+        ("tracks/fx", "unclassified"),
+        ("tracks/alpha.json", "unclassified"),
     ],
 )
 def test_classify_matrix(rel, kind):
@@ -505,19 +511,62 @@ def test_push_runs_direction_mismatch_fails(tmp_path, monkeypatch):
 
 
 def test_out_of_scope_toplevel_skipped(tmp_path):
-    """0007 research workspace files (tracks/, reviews/) are local-only and
-    must be *skipped* by the push walk — distinct from unclassified files
-    *inside* a scoped dir (which stay fail-closed)."""
+    """Reviews (synthesize output) are local-only and must be *skipped* by the
+    push walk — distinct from unclassified files *inside* a scoped dir (which
+    stay fail-closed).
+
+    H1 (2026-11-15): tracks/ is now IN scope (cross-machine loop memory: the
+    frozen baseline JSON + per-track lessons), so tracks/d1/alpha.json is
+    uploaded, while reviews/ stays out of scope."""
     seed_local(tmp_path, {
         "strategies/d1/lessons.md": b"l1\nl2\n",
         "tracks/d1/alpha.json": b'{"track_id":"alpha"}',
+        "tracks/d1/alpha.lessons.md": b"- lesson\n",
         "reviews/synthesize-x.md": b"# report",
     })
     t = FakeParRW(objects={})
     res = push(t, tmp_path, PREFIX)
-    assert res.uploads == ["strategies/d1/lessons.md"]
-    assert "tracks/d1/alpha.json" not in t.objects
+    assert res.uploads == [
+        "strategies/d1/lessons.md",
+        "tracks/d1/alpha.json",
+        "tracks/d1/alpha.lessons.md",
+    ]
+    # H1: tracks/ is now uploaded (loop memory).
+    assert "tracks/d1/alpha.json" in t.objects
+    assert "tracks/d1/alpha.lessons.md" in t.objects
+    # reviews/ (synthesis output) stays local-only.
     assert "reviews/synthesize-x.md" not in t.objects
+
+
+def test_staging_slice_carries_track_memory_h1(tmp_path):
+    """H1 (2026-11-15): the per-direction staging (used by push-direction)
+    must carry the direction's track memory — frozen baseline + lessons — not
+    just strategies/ and runs/. Otherwise a web-AI loop pushing one direction
+    at a time would strand its cross-machine loop state."""
+    from lyra.cli import _staging_slice
+
+    seed_local(tmp_path, {
+        "strategies/d1/v01.yaml": b"id: v01\n",
+        "runs/d1/t1/r1/m.json": b"{}",
+        "tracks/d1/alpha.json": b'{"track_id":"alpha"}',
+        "tracks/d1/alpha.lessons.md": b"- L1\n",
+        # another direction's tracks must NOT leak in
+        "tracks/d2/beta.json": b'{"track_id":"beta"}',
+    })
+    staging = _staging_slice(tmp_path, "d1", include_runs=True)
+    try:
+        have = {str(p.relative_to(staging).as_posix())
+                for p in staging.rglob("*") if p.is_file()}
+        assert "strategies/d1/v01.yaml" in have
+        assert "runs/d1/t1/r1/m.json" in have
+        # H1: this direction's track memory is staged
+        assert "tracks/d1/alpha.json" in have
+        assert "tracks/d1/alpha.lessons.md" in have
+        # but not another direction's tracks (direction-scoped slice)
+        assert not any(h.startswith("tracks/d2/") for h in have)
+    finally:
+        import shutil
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def test_top_levels_filter_excludes_data(tmp_path):

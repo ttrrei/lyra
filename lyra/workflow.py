@@ -82,6 +82,19 @@ def _write_json(path: Path, payload: Any) -> None:
                     encoding="utf-8")
 
 
+def _yaml_quote(value: str) -> str:
+    """Render *value* as a single-quoted YAML scalar that always parses.
+
+    H3 (2026-11-15): strategy YAML is generated with free-text audit fields
+    (``driven_by_lesson``) that the author fills in. A bare string containing
+    ``:`` ``<`` ``>`` or leading punctuation breaks YAML parsing and fails
+    ``lyra validate``. Single-quoting (with embedded single-quotes doubled —
+    the YAML 1.1 escape) keeps any lesson text valid and round-trips to the
+    same string.
+    """
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 # ---------------------------------------------------------------------------
 # Tracks (research identity, I18)
 # ---------------------------------------------------------------------------
@@ -241,6 +254,16 @@ def create_track(workspace: Path, direction: str, track_id: str) -> dict[str, An
             f"track id already exists: {direction}/{track_id} — refusing to "
             f"overwrite (I18 fail-fast; create a new id instead)"
         )
+    # H2 fix (2026-11-15): check ALL preconditions BEFORE writing any file.
+    # Original code called _write_json(tp, record) before checking idx.exists(),
+    # so on a synced machine the record was already written (with a re-frozen
+    # baseline) by the time the error fired — silently destroying provenance.
+    idx = track_index_path(workspace, direction, track_id)
+    if idx.exists():
+        raise WorkflowError(
+            f"track index already exists for {direction}/{track_id} — "
+            f"inconsistent state, refusing to clobber (I18 fail-fast)"
+        )
     baseline = _baseline_for_direction(workspace, direction)
     record = {
         "direction": direction,
@@ -250,15 +273,6 @@ def create_track(workspace: Path, direction: str, track_id: str) -> dict[str, An
         "baseline": baseline,
     }
     _write_json(tp, record)
-    # Track event log (JSONL, append-only class per I17 — H10: a JSONL of
-    # independent event lines is a verbatim line-superset of its prior
-    # versions, so re-pushing after new events is always allowed).
-    idx = track_index_path(workspace, direction, track_id)
-    if idx.exists():
-        raise WorkflowError(
-            f"track index already exists for {direction}/{track_id} — "
-            f"inconsistent state, refusing to clobber (I18 fail-fast)"
-        )
     _append_index_event(workspace, direction, track_id,
                         {"op": "create_track", "direction": direction,
                          "track_id": track_id, "at": _now_iso()})
@@ -397,31 +411,52 @@ def new_version(
         pfile = _parent_file(workspace, direction, parent, track)
         parent_slug = pfile.stem  # e.g. v03 or the branch slug
 
+    # 审查 U2 (2026-11-14)：骨架必须 *通过 `lyra validate`* 才能被作者迭代。
+    # 原模板三处非法：
+    #   (1) `version: 0` —— version 是 *schema* 版本（strategy_schema.SCHEMA_VERSION=1），
+    #       不是分支号；strategy_schema 强制 version == 1，故 0 直接触发
+    #       "unsupported YAML schema version"，作者第一步就卡死。
+    #   (2) 入场结构 `entry.long.feature:` 不是 parser 识别的形状，须为
+    #       `entry.long.all: [{feature, op, value}]`（与 validate 通过的真实策略一致）。
+    #   (3) `sma_20_above_sma_50` 未在任何 Registry 注册 → registry 检查失败。
+    # 现改为：version=1 + 合法入场形状 + 用恒可解析的 OHLC 别名（close/open →
+    # mid_c/mid_o，不依赖方向级特征注册），使骨架开箱即 validate 通过、可直接迭代。
     template_lines = [
         "# Lyra strategy — derived branch (0007 new-version)",
         f"# direction: {direction}",
+        "# 骨架（0007 new-version）：已可通过 `lyra validate`。",
+        "#   入场示例用 OHLC 别名 close/open（恒可解析）——请按你的假设改成真实",
+        "#   特征/op/value（feature 必须是 Registry 已注册特征或 open/high/low/close）。",
         f"id: {slug}",
         f"direction: {direction}",
-        "version: 0",
+        "version: 1",
         "timeframe_minutes: 60",
         "entry:",
         "  long:",
-        "    feature: sma_20_above_sma_50",
+        "    all:",
+        "      - {feature: close, op: gt, value: open}   # TODO: 真实入场条件",
+        "  short:",
+        "    all:",
+        "      - {feature: close, op: lt, value: open}   # TODO: 真实入场条件",
         "exit:",
-        "  long:",
-        "    stop_loss_pct: 0.02",
-        "execution:",
         "  stop_loss_pct: 0.02",
+        "execution:",
+        "  spread_bps: 2",
     ]
     if parent_slug is not None:
         template_lines.append(f"parent: {parent_slug}")
         template_lines.append("parents:")
         template_lines.append(f"  - {parent_slug}")
     if driven_by_lesson is not None:
-        template_lines.append(f"driven_by_lesson: {driven_by_lesson}")
+        template_lines.append(f'driven_by_lesson: {_yaml_quote(driven_by_lesson)}')
     elif parent_slug is not None:
         # R12 vNN≥2: placeholders required — the author fills them.
-        template_lines.append("driven_by_lesson: <TODO: which lesson drove this branch>")
+        # H3 fix (2026-11-15): the placeholder is a *quoted* string so the
+        # generated skeleton parses as valid YAML (unquoted `<TODO: ...>` is a
+        # YAML mapping error → `lyra validate` fails on the author's first run).
+        template_lines.append(
+            'driven_by_lesson: "TODO(必填): 用一句话写清这个分支由哪条教训驱动"'
+        )
     target.write_text("\n".join(template_lines) + "\n", encoding="utf-8")
 
     # Register as active on the track: append ONE event line (H10 — the
@@ -434,15 +469,15 @@ def new_version(
         "at": _now_iso(),
     })
 
-    # Reflect in the track record as well (single source for context/synthesis).
-    tp = track_path(workspace, direction, track)
-    rec2 = _load_json(tp)
-    rec2.setdefault("branches", {})[slug] = {
-        "file": rel,
-        "parent": parent_slug,
-        "driven_by_lesson": driven_by_lesson,
-    }
-    _write_json(tp, rec2)
+    # H1 (2026-11-15): the track record is a *frozen, immutable* baseline
+    # snapshot (its provenance value). The active-branch state lives in the
+    # append-only index JSONL (already written above), which is the real source
+    # of truth that context()/enforce_branch_cap/active_branches read. The old
+    # code re-wrote the record here to track `branches`, but (a) nothing ever
+    # read that field, and (b) re-writing the frozen record made it mutable —
+    # which would collide with the immutable OCI classification and, worse,
+    # let a re-push after forking silently overwrite the baseline provenance.
+    # So the record is written exactly once, in create_track, and left frozen.
     return target
 
 
@@ -763,13 +798,19 @@ def compare_siblings(workspace: Path, direction: str, branches: list[str],
     all_runs: list[dict[str, Any]] = []
     for b in branches:
         runs = _runs_for_branch(workspace, direction, b, track=track)
-        # best = highest per-instrument net_return across the run's instruments
+        # best = highest per-instrument ANNUALIZED score across the run's
+        # instruments. 2026-11-14 审查 C4：合同定义的评分指标是 annualized
+        # （净收益和 / 完整日历年），sibling 比较应按该口径排序；原用 net_return
+        # 会因持有期不同而不可比（持有 3 天的 20% 与持有 30 天的 8% 直接比 net
+        # 会把前者判胜）。annualized 可为 < -100%，故哨兵用 -inf 而非 -1。
         best = None
+        best_ann = float("-inf")
         for r in runs:
             all_runs.append(r)
             for inst in r.get("instruments", []):
-                if best is None or (inst.get("net_return") or -1) > (best.get("net_return") or -1):
-                    best = inst
+                ann = inst.get("annualized")
+                if ann is not None and ann > best_ann:
+                    best, best_ann = inst, ann
         rows.append({"branch": b, "runs": runs, "best": best})
 
     # --- H2: three-dimension per-run comparability -------------------------
@@ -887,7 +928,9 @@ def merge(
         "# merge candidate (0007) — AI to synthesize parameters across parents",
         f"id: {slug}",
         f"direction: {direction}",
-        "version: 0",
+        # 审查 U2 (2026-11-14)：version 是 schema 版本（SCHEMA_VERSION=1），
+        # 原 `version: 0` 非法；merge 候选骨架应与 new_version 一致用 1。
+        "version: 1",
         "parents:",
     ]
     lines += [f"  - {p}" for p in parents]
@@ -896,7 +939,11 @@ def merge(
     # C6: provenance by content hash (audit chain survives prunes/renames).
     lines.append("# parent_sha256 (0007 C6, provenance):")
     lines += [f"#   {p}: {parent_shas[p]}" for p in parents]
-    lines.append("driven_by_lesson: <TODO: lesson(s) motivating this merge>")
+    # H3 fix (2026-11-15): quoted so the skeleton is valid YAML (unquoted
+    # `<TODO: ...>` is a YAML mapping error).
+    lines.append(
+        'driven_by_lesson: "TODO(必填): 用一句话写清这个 merge 由哪些教训驱动"'
+    )
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     # Register: append one event line (H10 — keeps the JSONL append-only).

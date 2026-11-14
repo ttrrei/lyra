@@ -101,6 +101,26 @@ def test_tracks_invalid_id_fails(tmp_path):
             wf.create_track(tmp_path, "fx-trend", bad)
 
 
+def test_create_track_validate_before_write_h2(tmp_path):
+    """H2 (2026-11-15): when the preconditions fail (the track index already
+    exists — the "synced machine" inconsistent state), create_track must fail
+    fast AND leave NO partial record behind. The pre-fix code wrote
+    tracks/<dir>/<track>.json (with a re-frozen baseline) before checking the
+    index, so a failed create still silently dropped a record that would then
+    clobber provenance on the next push. This pins validate-before-write."""
+    _mk_direction(tmp_path)
+    # Simulate a synced machine: the index JSONL was pulled from OCI but the
+    # record JSON is absent — the exact inconsistent state create_track guards.
+    idx = tmp_path / "strategies" / "fx-trend" / "index" / "tgamma.jsonl"
+    idx.parent.mkdir(parents=True, exist_ok=True)
+    idx.write_text(json.dumps({"op": "create_track", "track_id": "gamma"}) + "\n",
+                   encoding="utf-8")
+    with pytest.raises(wf.WorkflowError, match="track index already exists"):
+        wf.create_track(tmp_path, "fx-trend", "gamma")
+    # The invariant: no partial record was written.
+    assert not (tmp_path / "tracks" / "fx-trend" / "gamma.json").exists()
+
+
 # --- cap (I21 / D6 / O13) -----------------------------------------------------
 
 
@@ -130,6 +150,40 @@ def test_cap_is_per_track_not_global(tmp_path):
     assert wf.count_active_branches(tmp_path, "fx-trend", "beta") == 1
     with pytest.raises(wf.WorkflowError, match="branch cap reached"):
         wf.new_version(tmp_path, "fx-trend", "v99", track="alpha")
+
+
+def test_prune_cli_relieves_cap(tmp_path, monkeypatch):
+    """审查 U3 回归：`prune_branch` 存在但此前无 CLI 入口——8 分支配额耗尽后
+    死锁。`lyra prune` 接通该通道：填满 8 → prune 一个 → 可再 fork。"""
+    from typer.testing import CliRunner
+
+    from lyra import cli
+
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    # point the CLI workspace root at tmp_path (resolve_data_root override).
+    monkeypatch.setenv("LYRA_DATA_ROOT", str(tmp_path / "data"))
+    base = []
+    r = CliRunner()
+    # fill the cap via CLI new-version (proves the CLI path, not just wf API)
+    for i in range(10, 18):
+        out = r.invoke(cli.app, base + ["new-version", "fx-trend",
+                                       "--branch", f"v{i:02d}", "--track", "alpha"])
+        assert out.exit_code == 0, out.output
+    # cap reached → 9th fork refused
+    out = r.invoke(cli.app, base + ["new-version", "fx-trend",
+                                   "--branch", "v99", "--track", "alpha"])
+    assert out.exit_code != 0
+    assert "cap" in out.output.lower()
+    # prune one → cap relieved
+    out = r.invoke(cli.app, base + ["prune", "fx-trend",
+                                   "--branch", "v10", "--track", "alpha"])
+    assert out.exit_code == 0, out.output
+    assert "7/8 active" in out.output
+    # now the 9th fork succeeds
+    out = r.invoke(cli.app, base + ["new-version", "fx-trend",
+                                   "--branch", "v99", "--track", "alpha"])
+    assert out.exit_code == 0, out.output
 
 
 def test_new_version_unknown_track_fails(tmp_path):
@@ -219,11 +273,17 @@ def test_new_version_writes_parent_and_lesson(tmp_path):
     text = target.read_text(encoding="utf-8")
     assert "parent: v01" in text
     assert "parents:" in text and "  - v01" in text
-    assert "driven_by_lesson: L2" in text
-    # vNN>=2 without explicit lesson → placeholder required (R12)
+    # H3 (2026-11-15): lesson is single-quoted so the skeleton stays valid YAML.
+    assert "driven_by_lesson: 'L2'" in text
+    # vNN>=2 without explicit lesson → a *quoted* fill-me placeholder (R12).
+    # The whole point: the generated skeleton must parse as valid YAML (the old
+    # unquoted `<TODO: …>` was a YAML mapping error → `lyra validate` failed).
     target2 = wf.new_version(tmp_path, "fx-trend", "v03", track="alpha", parent="v01")
     text2 = target2.read_text(encoding="utf-8")
-    assert "driven_by_lesson: <TODO" in text2
+    import yaml as _yaml
+    parsed = _yaml.safe_load(text2)
+    assert "driven_by_lesson" in parsed
+    assert str(parsed["driven_by_lesson"]).startswith("TODO")
 
 
 def test_new_version_missing_parent_fails(tmp_path):

@@ -32,15 +32,17 @@ typing_extensions==4.16.0
 typing-inspection==0.4.5
 urllib3==2.8.0
 
-# --- dev/test (pyproject [project.optional-dependencies] dev + control) ---
+# --- dev/test (pyproject [project.optional-dependencies] dev) ---
 annotated-doc==0.0.5
 iniconfig==2.3.1
 packaging==26.3
-pandas==3.1.1
-pandas-ta-classic==0.9.0
 pluggy==1.7.0
 pyflakes==4.1.0
 pytest==9.2.0
-python-dateutil==4.0.0
-tulipy==0.4.0
 tzdata==2026.6
+# NOTE: the [control] crosscheck deps (pandas-ta-classic, tulipy) are
+# intentionally NOT in this lock — CI must not need to compile them
+# (tulipy 0.4.0 has no cp312 wheels and fails to build against
+# numpy 2.x, which broke every CI run). Install them locally for the
+# K1 crosscheck tests with:  pip install -e ".[control]"
+# (pandas==3.1.1 and python-dateutil==4.0.0 drop with pandas-ta-classic).
