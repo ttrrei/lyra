@@ -25,16 +25,19 @@ credentials.yml
 # --- Alpha 策略（B1） --------------------------------------------------------
 # 只跟踪公开示例子树（B14）与 temp/ 待归类候选池；忽略一切真实方向文件夹
 # （trend_continuation/、failed_breakout/、…、_new/）及其 vNN.yaml +
-# hypothesis.md + lessons.md。
+# hypothesis.md + lessons.md + directions/ 下的 alpha 候选（nova/、v01 基线）。
 # temp/（#99）：只读历史语料索引 + 快照（来源 nova/moneta，非本项目 alpha），
 # 0010 triage 的输入契约，需入 git 供跨机/多 AI 读取。
+#
+# 裁决（2026-11-14 用户）：所有 strategy（含 v01 基线 + nova 候选）= alpha，
+# 一律只进 OCI、不进 git；git 里 strategies/ 只留 examples/（示例）+ temp/（语料）。
+# 因此【不】反包含 directions/（旧版曾误加 `!strategies/directions/**` 放行 alpha，
+# 已移除——见 docs/review/overall-qwen-local-git-oci-边界检查.md）。
 strategies/*
 !strategies/examples/
 !strategies/examples/**
 !strategies/temp/
 !strategies/temp/**
-!strategies/directions/
-!strategies/directions/**
 
 # --- 本地 OCI 镜像（B13，可重建） -------------------------------------------
 # 默认落在 ~/.lyra/<workspace>/…；若被 --inside-repo 落进仓库则忽略

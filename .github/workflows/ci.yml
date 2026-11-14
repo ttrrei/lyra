@@ -19,6 +19,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Alpha boundary gate (AGENTS.md "Never commit alpha paths to git. CI checks
+      # this."): strategies/ is closed-source alpha (v01 baseline + vNN candidates +
+      # hypothesis/lessons). The ONLY git-tracked strategies subtrees are examples/
+      # (public samples) and temp/ (read-only corpus for 0010 triage). Fail if any
+      # other strategies file is tracked — this is the leak that .gitignore alone
+      # cannot guarantee (see docs/review/overall-qwen-local-git-oci-边界检查.md).
+      - name: Alpha-in-git gate (strategies/ → examples/ + temp/ only)
+        run: |
+          echo "Tracked files under strategies/:"
+          git ls-files 'strategies/'
+          echo "---"
+          bad=$(git ls-files 'strategies/' | grep -vE '^strategies/(examples|temp)/' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Alpha strategy files committed to git (must live in OCI only):"
+            echo "$bad"
+            exit 1
+          fi
+          echo "OK: no alpha strategy files tracked in git"
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
