@@ -8,7 +8,7 @@
 >
 > **证据等级**：**[实测]** = 我实跑并观察到；**[读码]** = 静态追踪；**[评审]** = 四份评审交叉确认。
 >
-> **⏩ 进度（2026-11-15, v1.71-1.72 / #123-125）**：本文的 **H1 / H2 / H3 三个硬伤已修复并自测+对抗检验通过**（ACTION_LOG #123）：`tracks/` 现进 push/pull/staging 范围、baseline 冻结且幂等；`create_track` 校验前置不再静默重冻；`new-version`/`merge` 骨架改为合法 YAML、实测过 `lyra validate`；跨机完整闭环（create→push→pull→context→fork→push）实锤成立。**H4 `lyra submit` 一键命令已落地**（#124，validate 先行 fail-closed→run，端到端实锤 `VALID→OK→1155 trades`）。**T3 网页 AI context 包已落地**（#125，`lyra context` 现含"如何写策略"语法 + 实测过 `lyra validate` 的可抄模板）。**至此"基座→应用平台"的代码面全部就绪**：`pytest` **355 passed**、pyflakes 干净；剩 **git push** + **branch protection**（均为仓库/用户侧，非代码）。
+> **⏩ 进度（2026-11-15, v1.70-1.73 / #123-126）**：本文的 **H1 / H2 / H3 三个硬伤已修复并自测+对抗检验通过**（ACTION_LOG #123）：`tracks/` 现进 push/pull/staging 范围、baseline 冻结且幂等；`create_track` 校验前置不再静默重冻；`new-version`/`merge` 骨架改为合法 YAML、实测过 `lyra validate`；跨机完整闭环（create→push→pull→context→fork→push）实锤成立。**H4 `lyra submit` 一键命令已落地**（#124，validate 先行 fail-closed→run）。**T3 网页 AI context 包已落地**（#125，`lyra context` 现含"如何写策略"语法 + 实测过 `lyra validate` 的可抄模板）。**#1/#2/#3/#5 四个闭环缺口已修复**（#126，详见 §6.2）：`submit --track --branch` 把 AI 的 YAML **登记为该 track 的分支**（不再"骨架≠AI 策略"两个文件、run 正确归到 branch+track）、`submit` 直接打印**完整 report.md**（AI 下一轮直接可读）、新命令 `lyra lesson` 让迭代**带记忆**。**至此"基座→应用平台"的代码面 + web-AI 迭代闭环全部就绪**：`pytest` **362 passed**、pyflakes 干净；端到端闭环 + 6 项对抗 fail-closed 全部实锤。剩 **git push** + **branch protection**（均为仓库/用户侧，非代码）。
 
 ---
 
@@ -81,7 +81,8 @@ if idx.exists():
 ### H4 —— AI 的 YAML 落地无一步命令（CLAUDE 评审 B2）
 
 > **✅ 已落地核心一步（v1.71/#124，2026-11-15）**：新增 **`lyra submit <file> --data-dir … [--track T]`**——把 AI 的 YAML 直接跑起来，内部**校验先行（fail-closed，INVALID 绝不进撮合引擎、无半截 run）→ VALID 才委托 `run`**（复用 `--data-dir`/`--track`/`run_meta` 归因语义）。端到端实锤：`submit …/momentum_breakout/v01.yaml → VALID→OK→1155 trades`。**这就是用户描述的"写完 YAML → 一条命令拿到性能"的核心闭环**。
-> **范围界定（诚实）**：`submit` 覆盖的是"校验→运行→读数"这一步。若要把 AI 的 YAML 作为某 track 的**已登记分支**纳入 `compare --siblings` 的兄弟对比，仍用既有 `lyra new-version --track T --branch vNN …` 登记后再 `submit`（#119 已补 `lyra prune` 回收 8 分支名额）。即"跑一次拿读数"=1 步；"纳入分支树做对比"= 登记 + 跑，两者都已有命令、无卡死路径。
+> **✅ 登记分支一步化（v1.73/#126，2026-11-15）**：`submit` 现支持 **`--track T --branch vNN`**——把 AI 的（已校验）YAML **逐字登记为该 track 的分支文件**（`adopt_branch`），随后 run 归到 `branch=vNN, track_id=T`，于是 `context --track` 显示**AI 的真实策略 + 它的 run**（此前是"骨架 + no runs"），`compare --track` 也能直接比兄弟版本。**"跑一次拿读数 + 纳入分支树做对比"现在是一条命令**（`submit --track --branch`），不再需要手工 `new-version` + 覆盖文件（那条路仍在，但 canonical 循环走 submit）。8 分支上限仍由 `lyra prune` 回收名额。
+> **范围界定（诚实）**：`submit` 现覆盖"校验→登记分支→运行→**完整 report**"。#1（完整报告进 stdout）与 #3（`lyra lesson` 记忆）同日落地（#126），完整用法见 **§九 使用手册**。
 
 <details><summary>原始问题记录（保留以说明诊断依据）</summary>
 
@@ -253,6 +254,74 @@ if idx.exists():
 - 真实数据上的特征/引擎数值
 - 各家 AI 对 YAML 语法的实际遵从率（需真实模型干跑才能给数字）
 - moneta/nova data+runs 的备份审计
+
+## 九、web-AI 迭代循环使用手册（#126 落地后的真实用法）
+
+> 这是**用户视角**的逐步操作手册：假设你（人）已 clone 好代码、`lyra pull` 同步了历史策略与 track。
+> 写策略的 AI 是**网页/聊天版**（无文件系统、无 coding），你只负责把它的 YAML 落到一个本地文件、并跑命令。
+> 一轮循环 = 下面 5 步，全部由 `lyra` 命令面完成，AI 只需"读 context + 写 YAML + 看 report + 写 lesson"。
+
+### 一轮完整循环（命令顺序）
+
+```bash
+# ① 读：把该 direction 的 hypothesis + 特征列表 + 语法 + 可抄模板 + 该 track 的
+#    已有分支/历史 run/教训 打包给 AI（无 FS 的 AI 就靠这份文本）
+lyra context failed_breakout --track t_demo > /tmp/ctx.md   # 粘给 AI
+
+# ② 写：AI（网页版）读 ctx.md，按里面的语法 + 模板改出一条新策略 YAML 文本。
+#    你把它落到本地一个文件（名字随意，内容里要带 direction + 合法 entry/exit）
+#    —— 例：/tmp/ai_new.yaml
+
+# ③ 跑 + 登记：一条命令完成 校验→(登记为 t_demo 的 v01 分支)→运行→打印完整报告。
+#    fail-closed：AI 的 YAML 若非法，绝不进撮合引擎、也不登记分支、不产生 run。
+lyra submit /tmp/ai_new.yaml \
+    --data-dir ~/.lyra/default/data \
+    --track t_demo --branch v01
+#   → VALID → adopted as failed_breakout/t_demo/v01 → OK: run … → (完整 report.md 直接进 stdout)
+```
+
+**关键点（#126 修的四个缺口，现在都自动满足）：**
+- **#2/#5 归因**：AI 的 YAML 被 `submit --track --branch` **登记为该 track 的分支文件**，run 记 `branch=v01, track_id=t_demo, spec_id=<AI 的 id>`。于是：
+- **#1 完整结果**：`submit` 成功后直接打印该 run 的 **完整 `report.md`**（每品种指标 + 逐月表 + 跨品种 min/median/max）——AI 下一轮直接读到，不必再猜怎么读 run 目录。
+- **#3 记忆**：AI 看完报告，把结论写回该 track：
+
+```bash
+# ④ 记：一条教训（append-only；下轮 context 会显示最近 5 条，迭代带记忆）
+lyra lesson failed_breakout --track t_demo \
+    "v01 win 58% 但负 EV(-0.13 net) — v02 收紧 stop_loss_pct、加趋势过滤"
+
+# ⑤ 下一轮：context 现在显示 该 track 的真实分支 + 它的 run + 你刚写的教训
+lyra context failed_breakout --track t_demo
+```
+
+### 迭代多版本（v01→v02→…）
+
+```bash
+# AI 基于 v01 的报告写 v02：
+lyra submit /tmp/ai_v02.yaml --data-dir ~/.lyra/default/data --track t_demo --branch v02
+lyra lesson failed_breakout --track t_demo "v02 收紧止损后 EV 转正，年化 3.2%"
+
+# 同 track 内兄弟版本对比（v01 vs v02 各品种指标）
+lyra compare failed_breakout --track t_demo
+```
+
+- **8 分支上限**（I19）：一个 track 最多 8 个活跃分支；满了用 `lyra prune failed_breakout --track t_demo --branch vNN` 回收名额。
+- **换机/换会话**：`lyra push` 把 strategies + tracks(baseline+lessons) + runs 上 OCI；新机器 `lyra pull` 全量恢复——闭环记忆不丢（#123 H1 已修）。
+
+### 常见错误与 fail-closed 行为（实测）
+
+| 你做了 | 命令结果 |
+|---|---|
+| `submit --track t` 但没给 `--branch` | `ERROR (not run): --track requires --branch <slug>`（不跑） |
+| AI 的 YAML 用了未注册 feature | `INVALID (not run): unknown feature …`（不进引擎、不登记、无 run） |
+| `--track` 指向不存在的 track | `ERROR (not run): unknown track …`（不 adopt） |
+| `--branch "not a slug!!"` | `ERROR (not run): invalid branch name …`（拒绝） |
+| `lesson` 到不存在的 track / 空文本 | `unknown track …` / `lesson text is empty …`（拒绝） |
+
+### 边界（诚实）
+
+- **#4 feature 字典未做**（可选）：146 个 feature 只有名字，无"含义/类型/预热 bar"。AI 可照抄 context 里的模板起步（合法），但要**理解**某特征语义仍需额外给一份词典。
+- `submit` 跑的是**已登记分支**（canonical 循环）；一次性 `lyra run` 仍按文件名归因（非 canonical，少用）。
 
 ## 关联文件
 

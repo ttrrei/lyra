@@ -830,7 +830,7 @@ def test_submit_valid_delegates_to_run(monkeypatch, tmp_path):
     from lyra import strategy_schema as schema_mod
 
     reg = object()
-    spec = types.SimpleNamespace(id="directions_good")
+    spec = types.SimpleNamespace(id="directions_good", direction="fx-trend")
     monkeypatch.setattr(schema_mod, "parse_strategy", lambda *a, **k: spec)
     import lyra.compiler as compiler_mod
     monkeypatch.setattr(compiler_mod, "compile_strategy", lambda *a, **k: None)
@@ -841,15 +841,135 @@ def test_submit_valid_delegates_to_run(monkeypatch, tmp_path):
     def fake_run(**kw):
         calls.update(kw)
 
+    # Adoption target (gap #2): --track requires --branch; mock the workflow
+    # adopt so no real track is needed. Run returns None (submit tolerates).
+    from lyra import workflow as wf
+    def fake_adopt(*a, **k):
+        return a[4] if len(a) > 4 else k.get("source_yaml")  # the source path
+    monkeypatch.setattr(wf, "adopt_branch", fake_adopt)
     monkeypatch.setattr(cli, "run", fake_run)
     good = tmp_path / "good.yaml"
     good.write_text("id: good\ndirection: fx-trend\nversion: 1\n", encoding="utf-8")
     r = CliRunner()
     out = r.invoke(cli.app, ["submit", str(good), "--data-dir", str(tmp_path / "d"),
-                             "--track", "t01", "--strict", "--name", "n1"])
+                             "--track", "t01", "--branch", "v01", "--strict", "--name", "n1"])
     assert out.exit_code == 0
     assert calls["strategy"] == str(good)
     assert calls["data_dir"] == str(tmp_path / "d")
     assert calls["track"] == "t01"
     assert calls["strict"] is True
     assert calls["name"] == "n1"
+
+
+# ---- 审查 #125 (web-AI loop): gaps #1/#2/#3/#5 regression tests -----------
+
+def test_append_lesson_writes_and_is_append_only(tmp_path):
+    """审查 #125 gap #3: a lesson appends one timestamped line; repeat calls
+    append (not overwrite); empty text is rejected (fail-closed)."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    p1 = wf.append_lesson(tmp_path, "fx-trend", "alpha", "v01 was too loose")
+    p2 = wf.append_lesson(tmp_path, "fx-trend", "alpha", "v02: tighten stop")
+    assert p1 == p2
+    lines = p1.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    assert "v01 was too loose" in lines[0]
+    assert "v02: tighten stop" in lines[1]
+    # append-only: the first line is preserved verbatim by the second call
+    assert lines[0].endswith("v01 was too loose")
+
+
+def test_append_lesson_unknown_track_fails(tmp_path):
+    _mk_direction(tmp_path)
+    with pytest.raises(wf.WorkflowError, match="unknown track"):
+        wf.append_lesson(tmp_path, "fx-trend", "ghost", "hello")
+
+
+def test_append_lesson_empty_text_fails(tmp_path):
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    with pytest.raises(wf.WorkflowError, match="empty"):
+        wf.append_lesson(tmp_path, "fx-trend", "alpha", "   ")
+
+
+def test_adopt_branch_writes_ai_yaml_into_track(tmp_path):
+    """审查 #125 gap #2: the AI's strategy file (already validated upstream)
+    becomes the track's branch file verbatim — not a skeleton."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "ai_written.yaml"
+    src.write_text("version: 1\nid: ai_good\n# AI-authored body\n",
+                   encoding="utf-8")
+    dest = wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v01", src)
+    assert dest.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+    # index event recorded (append-only)
+    idx = tmp_path / "strategies" / "fx-trend" / "index" / "talpha.jsonl"
+    if not idx.exists():
+        # find the index jsonl by listing the index dir
+        idxdir = tmp_path / "strategies" / "fx-trend" / "index"
+        idxs = list(idxdir.glob("*.jsonl")) if idxdir.exists() else []
+        assert idxs, "no index jsonl written by adopt_branch"
+        idx = idxs[0]
+    assert "v01" in idx.read_text(encoding="utf-8")
+
+
+def test_adopt_branch_invalid_slug_fails(tmp_path):
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "x.yaml"
+    src.write_text("version: 1\nid: x\n", encoding="utf-8")
+    with pytest.raises(wf.WorkflowError):
+        wf.adopt_branch(tmp_path, "fx-trend", "alpha", "not a slug!", src)
+    with pytest.raises(wf.WorkflowError):
+        wf.adopt_branch(tmp_path, "fx-trend", "alpha", "bad", src)  # needs v-prefix
+
+
+def test_submit_requires_branch_with_track(monkeypatch, tmp_path):
+    """审查 #125 gap #2/#5: --track without --branch must fail-closed (no
+    run) — the branch slug is required for adoption + run attribution."""
+    from typer.testing import CliRunner
+    from lyra import cli
+    from lyra import strategy_schema as schema_mod
+
+    reg = object()
+    spec = types.SimpleNamespace(id="directions_good", direction="fx-trend")
+    monkeypatch.setattr(schema_mod, "parse_strategy", lambda *a, **k: spec)
+    import lyra.compiler as compiler_mod
+    monkeypatch.setattr(compiler_mod, "compile_strategy", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_registry_for", lambda *a, **k: reg)
+
+    called = {"run": False}
+
+    def fake_run(**kw):
+        called["run"] = True
+
+    monkeypatch.setattr(cli, "run", fake_run)
+    good = tmp_path / "good.yaml"
+    good.write_text("id: good\ndirection: fx-trend\nversion: 1\n", encoding="utf-8")
+    r = CliRunner()
+    out = r.invoke(cli.app, ["submit", str(good), "--data-dir", str(tmp_path / "d"),
+                             "--track", "t01"])
+    assert out.exit_code == 1
+    assert "--branch" in (out.output or "") + (out.stderr or "")
+    assert called["run"] is False  # fail-closed: no run happened
+
+
+def test_lesson_command_appends(tmp_path, monkeypatch):
+    """审查 #125 gap #3: the `lyra lesson` command appends to the track's
+    lessons file (so `context --track` shows it next round)."""
+    from typer.testing import CliRunner
+    from lyra import cli
+
+    # Point the command at our tmp workspace.
+    import lyra.workflow as wf
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    monkeypatch.setattr(cli, "_workspace", lambda *a, **k: tmp_path)
+    r = CliRunner()
+    out = r.invoke(cli.app, ["lesson", "fx-trend",
+                             "--track", "alpha",
+                             "v01: win 58% but negative EV — v02 tighten stop"])
+    assert out.exit_code == 0, out.output
+    lessons = tmp_path / "tracks" / "fx-trend" / "alpha.lessons.md"
+    assert lessons.exists(), "no lessons file written"
+    assert "tighten stop" in lessons.read_text(encoding="utf-8")

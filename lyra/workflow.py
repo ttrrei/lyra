@@ -486,6 +486,63 @@ def new_version(
 # ---------------------------------------------------------------------------
 
 
+def append_lesson(workspace: Path, direction: str, track_id: str, text: str) -> Path:
+    """Append one lesson line to the track's lessons file (H6/I18 append-only).
+
+    审查 #125 (web-AI loop): a lesson is the track's loop memory — the AI
+    writes one back after each run so the *next* iteration's ``context``
+    shows it. Append-only (I17-style, one line per lesson); no command could
+    previously do this (it was a hand-edited file). The track must exist
+    (I18 identity).
+    """
+    get_track(workspace, direction, track_id)  # must exist (I18 identity)
+    text = text.strip().rstrip("\n")
+    if not text:
+        raise WorkflowError("lesson text is empty — a lesson must say something")
+    p = track_lessons_path(workspace, direction, track_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    stamp = _now_iso()[:19]
+    existing = p.read_text(encoding="utf-8") if p.exists() else ""
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    p.write_text(existing + f"{stamp}: {text}\n", encoding="utf-8")
+    return p
+
+
+def adopt_branch(workspace: Path, direction: str, track_id: str, branch: str,
+                 source_yaml: Path) -> Path:
+    """Make the web-AI's strategy file the ACTUAL branch (审查 #125 gap #2).
+
+    ``new_version`` writes a *skeleton* and the AI's file stays a separate
+    one-off — so ``context`` showed the skeleton while the run came from a
+    different file. This writes the AI's (already-validated) YAML into the
+    track's branch location, registering/refreshing the branch in the index
+    and enforcing the 8-branch cap (I19). The caller is responsible for
+    validating the YAML first (``submit`` does this before calling).
+    """
+    get_track(workspace, direction, track_id)      # track must exist (I18)
+    if not _BRANCH_NAME_RE.match(branch):
+        raise WorkflowError(f"invalid branch name '{branch}'")
+    enforce_branch_cap(workspace, direction, track_id)  # I19, fail-closed
+    src = Path(source_yaml)
+    if not src.exists():
+        raise WorkflowError(f"source strategy file not found: {src}")
+    track_dir = workspace / "strategies" / direction / track_id
+    dest = track_dir / f"{branch}.yaml"
+    # Re-adopting an existing branch refreshes it in place (a branch is the
+    # track's single mutable line; the index stays append-only). No-op for a
+    # new branch.
+    track_dir.mkdir(parents=True, exist_ok=True)
+    # Copy content verbatim (the AI's validated YAML) — not a symlink/skeleton.
+    dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    rel = f"{track_id}/{branch}.yaml"  # path relative to strategies/<direction>/
+    _append_index_event(workspace, direction, track_id, {
+        "op": "activate", "branch": branch, "file": rel,
+        "source": str(src), "at": _now_iso(),
+    })
+    return dest
+
+
 def track_lessons_path(workspace: Path, direction: str, track_id: str) -> Path:
     """Per-track lessons file (H6/I18: track A's context never reads track
     B's lessons; a shared direction-level lessons.md remains readable but is

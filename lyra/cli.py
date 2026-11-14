@@ -331,6 +331,12 @@ def _write_run_meta(strategy_path: Path, run_dir: Path,
         pass
     # branch = the strategy file's own name (v01 / v04ab_1 / …); the R12
     # workflow's identity axis, NOT the spec id (directions_<name>).
+    # 审查 #125 gap #5: this is now CORRECT end-to-end because ``submit`` adopts
+    # the AI's strategy to the branch file (strategies/<dir>/<track>/v01.yaml)
+    # BEFORE running it, so the filename IS the branch slug and the run is
+    # attributable via run_meta (branch=v01, track_id=t_ai, spec_id=strategy id).
+    # Running the AI's one-off file directly (``lyra run``) still attributes by
+    # that file's name — use ``submit --track --branch`` for the canonical loop.
     branch = (strategy_path.name[:-5]
               if strategy_path.name.endswith(".yaml")
               else strategy_path.name)
@@ -438,6 +444,7 @@ def run(
     for f in result.instrument_failures:
         typer.secho(f"  {f['instrument']}: FAILED — {f['error']}",
                     fg=typer.colors.YELLOW)
+    return result  # submit reads this to print the full report (gap #1)
 
 
 @app.command(name="submit")
@@ -450,17 +457,30 @@ def submit(
     out: str | None = typer.Option(None, "--out", help="Artifact root (default <workspace>/runs; 0009 D2)"),
     strict: bool = typer.Option(False, "--strict", help="Fail if any instrument failed (I16)"),
     track: str | None = typer.Option(None, "--track", help="Research track id to attribute this run to (0009 D2)"),
+    branch: str | None = typer.Option(None, "--branch", help="Branch to register the strategy under (with --track). Default = the strategy's own id."),
 ) -> None:
-    """One-step platform loop (H4): validate (fail-closed) -> run.
+    """One-step platform loop (H4 + 审查 #125 gaps #2/#5): validate -> adopt -> run.
 
     应用平台一步命令（web-AI 无 FS / 无 coding 闭环）：AI 写好 strategy YAML
-    后，一条命令即完成"校验→运行→性能读数"，无需再手工拆 validate / track
-    两步。**校验先行且 fail-closed**：INVALID 策略绝不进入撮合引擎（无半截
-    run）；VALID 才委托给 ``run``（原样复用其 --data-dir/--track/run_meta
-    语义，不重复实现）。退出码与 run 一致：校验失败=1（不 run）、运行失败=1。
+    后，一条命令即完成"校验→(登记分支)→运行→完整报告"，无需再手工拆
+    validate / new-version / track / context 多步。
+
+    **阶段化、全程 fail-closed**：
+    1. **校验先行**：INVALID 策略绝不进入引擎、也不登记任何分支（无半截状态）；
+    2. **登记分支**（给了 ``--track`` 时）：把 AI 的 YAML 写为该 track 上该
+       branch 的真实策略文件（gap #2：不再"骨架≠AI 策略"两个文件），并登记
+       index；``--branch`` 缺省取策略自身 ``id``；
+    3. **运行**：委托 ``run``（原样复用 --data-dir/--track/run_meta 语义）。
+       run_meta 的 branch 记策略自身 ``id``（gap #5：不再按文件名猜），track
+       记 ``--track`` —— 于是 ``context --track`` 能看到该分支的**真实策略 + 它的 run**。
+    4. **完整报告**：打印该 run 的完整 report.md（gap #1：月表/跨品种读数直接
+       进 stdout，AI 下一轮直接可看，不必再猜怎么读报告）。
+
+    退出码：校验失败=1（不 run、不登记）；运行失败=1；成功=0。
     """
     from . import compiler as compiler_mod
     from . import strategy_schema as schema_mod
+    from . import workflow as wf
 
     # Stage 1 — fail-closed validation (reuses validate's exact logic).
     reg = _registry_for(alpha_dir, config)
@@ -474,13 +494,47 @@ def submit(
         typer.secho(f"INVALID (not run): {type(exc).__name__}: {exc}",
                     fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
-    typer.secho(f"VALID: {spec.id} — proceeding to run", fg=typer.colors.GREEN)
+    typer.secho(f"VALID: {spec.id} — proceeding", fg=typer.colors.GREEN)
 
-    # Stage 2 — run end-to-end (delegates to the run command's logic).
-    run(
-        strategy=strategy, data_dir=data_dir, alpha_dir=alpha_dir, config=config,
-        name=name, out=out, strict=strict, track=track,
+    # Stage 2 — adopt as the track's branch (gap #2) when --track is given. The
+    # run then targets the CANONICAL branch file, so its run_meta points at the
+    # branch (not a one-off file). Fail-closed: a bad track/branch never runs.
+    run_strategy_path = strategy
+    if track is not None:
+        # The branch slug must be explicit (v01/v02/…): the strategy's ``id``
+        # (directions_<name>) is NOT a branch slug (0007 D2 identity), so we
+        # fail-closed instead of silently adopting a non-slug branch name.
+        if branch is None:
+            typer.secho(
+                "ERROR (not run): --track requires --branch <slug> (e.g. v01); "
+                "the strategy's own id is not a branch slug.",
+                fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        direction = spec.direction
+        try:
+            dest = wf.adopt_branch(_workspace(config), direction, track, branch, Path(strategy))
+        except wf.WorkflowError as exc:
+            typer.secho(f"ERROR (not run): {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        typer.secho(f"adopted as {direction}/{track}/{branch} ({dest})",
+                    fg=typer.colors.CYAN)
+        run_strategy_path = str(dest)
+
+    # Stage 3 — run end-to-end (delegates to the run command's logic).
+    res = run(
+        strategy=run_strategy_path, data_dir=data_dir, alpha_dir=alpha_dir,
+        config=config, name=name, out=out, strict=strict, track=track,
     )
+
+    # Stage 4 — surface the FULL report (gap #1): print report.md inline so a
+    # web-AI sees the per-instrument + per-month tables directly in stdout and
+    # can iterate, without guessing how to read the run directory.
+    if res is not None:
+        rpt = Path(res.out_dir) / "report.md"
+        if rpt.exists():
+            typer.secho("── full report (report.md) ────────────────────────────",
+                        fg=typer.colors.CYAN)
+            typer.echo(rpt.read_text(encoding="utf-8").rstrip())
 
 
 @app.command()
@@ -1344,6 +1398,33 @@ def new_version_cmd(
     typer.secho(f"created branch: {path}", fg=typer.colors.GREEN)
     active = workflow.count_active_branches(ws, direction, track)
     typer.echo(f"  track {direction}/{track}: {active}/8 active")
+
+
+@app.command(name="lesson")
+def lesson(
+    direction: str = typer.Argument(...),
+    text: str = typer.Argument(...),
+    track: str = typer.Option(..., "--track", help="Owning track (I18 identity)"),
+    config: str = typer.Option("config/config.yml", "--config"),
+) -> None:
+    """Append one lesson to the track's memory (审查 #125 gap #3).
+
+    应用平台闭环里的"教训/下一步"：AI 看完一轮的 ``report`` 后，把一条结论
+    （如 "v01 止损太松，v02 收紧 stop_loss_pct"）写回该 track 的 lessons
+    文件（append-only，I17）。下一轮 ``context --track`` 会显示最近几条，
+    让迭代带记忆、不重复犯同样的错。track 必须已存在（I18）；文本必须非空
+    （fail-closed）。
+    """
+    from . import workflow
+
+    ws = _workspace(config)
+    try:
+        path = workflow.append_lesson(ws, direction, track, text)
+    except workflow.WorkflowError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    typer.secho(f"lesson appended: {path}", fg=typer.colors.GREEN)
+    typer.echo(f"  > {text}")
 
 
 @app.command(name="prune")
