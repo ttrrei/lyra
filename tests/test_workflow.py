@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import types
 
 import pytest
 
@@ -787,3 +788,50 @@ def test_d13_compare_single_run_is_comparable(tmp_path):
     row = result["siblings"][0]
     assert row["runs"][0]["comparable"] is True
     assert row["runs"][0]["incomparable_reason"] is None
+
+
+def test_submit_fail_closed_invalid_does_not_run(tmp_path):
+    """H4: `lyra submit` on an INVALID strategy exits 1 and NEVER runs the engine."""
+    from typer.testing import CliRunner
+    from lyra import cli
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("id: bad\ndirection: x\nversion: 0\n", encoding="utf-8")  # unsupported version
+    r = CliRunner()
+    out = r.invoke(cli.app, ["submit", str(bad), "--data-dir", str(tmp_path / "data")])
+    assert out.exit_code == 1
+    assert "INVALID" in (out.output or "") + (out.stderr or "")
+    # fail-closed: no run artifact dir was created (run never ran)
+    assert not (tmp_path / "data").exists() or not any((tmp_path / "data").iterdir())
+
+
+def test_submit_valid_delegates_to_run(monkeypatch, tmp_path):
+    """H4: `lyra submit` on a VALID strategy delegates to `run` with the same args."""
+    from typer.testing import CliRunner
+    from lyra import cli
+    from lyra import strategy_schema as schema_mod
+
+    reg = object()
+    spec = types.SimpleNamespace(id="directions_good")
+    monkeypatch.setattr(schema_mod, "parse_strategy", lambda *a, **k: spec)
+    import lyra.compiler as compiler_mod
+    monkeypatch.setattr(compiler_mod, "compile_strategy", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_registry_for", lambda *a, **k: reg)
+
+    calls = {}
+
+    def fake_run(**kw):
+        calls.update(kw)
+
+    monkeypatch.setattr(cli, "run", fake_run)
+    good = tmp_path / "good.yaml"
+    good.write_text("id: good\ndirection: fx-trend\nversion: 1\n", encoding="utf-8")
+    r = CliRunner()
+    out = r.invoke(cli.app, ["submit", str(good), "--data-dir", str(tmp_path / "d"),
+                             "--track", "t01", "--strict", "--name", "n1"])
+    assert out.exit_code == 0
+    assert calls["strategy"] == str(good)
+    assert calls["data_dir"] == str(tmp_path / "d")
+    assert calls["track"] == "t01"
+    assert calls["strict"] is True
+    assert calls["name"] == "n1"

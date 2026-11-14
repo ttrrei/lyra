@@ -440,6 +440,49 @@ def run(
                     fg=typer.colors.YELLOW)
 
 
+@app.command(name="submit")
+def submit(
+    strategy: str = typer.Argument(..., help="Path to a strategy YAML (0004)"),
+    data_dir: str = typer.Option(..., "--data-dir", help="Data root with catalog.duckdb + feature Parquet (R6)"),
+    alpha_dir: str | None = typer.Option(None, "--alpha-dir", help="Alpha feature directory (R3.2); default = config local.alpha"),
+    config: str = typer.Option("config/config.yml", "--config"),
+    name: str | None = typer.Option(None, "--name", help="Run display name (default = strategy id)"),
+    out: str | None = typer.Option(None, "--out", help="Artifact root (default <workspace>/runs; 0009 D2)"),
+    strict: bool = typer.Option(False, "--strict", help="Fail if any instrument failed (I16)"),
+    track: str | None = typer.Option(None, "--track", help="Research track id to attribute this run to (0009 D2)"),
+) -> None:
+    """One-step platform loop (H4): validate (fail-closed) -> run.
+
+    应用平台一步命令（web-AI 无 FS / 无 coding 闭环）：AI 写好 strategy YAML
+    后，一条命令即完成"校验→运行→性能读数"，无需再手工拆 validate / track
+    两步。**校验先行且 fail-closed**：INVALID 策略绝不进入撮合引擎（无半截
+    run）；VALID 才委托给 ``run``（原样复用其 --data-dir/--track/run_meta
+    语义，不重复实现）。退出码与 run 一致：校验失败=1（不 run）、运行失败=1。
+    """
+    from . import compiler as compiler_mod
+    from . import strategy_schema as schema_mod
+
+    # Stage 1 — fail-closed validation (reuses validate's exact logic).
+    reg = _registry_for(alpha_dir, config)
+    try:
+        spec = schema_mod.parse_strategy(strategy, reg)
+        compiler_mod.compile_strategy(spec, reg)
+    except schema_mod.SchemaError as exc:
+        typer.secho(f"INVALID (not run): {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:  # defensive: no raw traceback for malformed YAML
+        typer.secho(f"INVALID (not run): {type(exc).__name__}: {exc}",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    typer.secho(f"VALID: {spec.id} — proceeding to run", fg=typer.colors.GREEN)
+
+    # Stage 2 — run end-to-end (delegates to the run command's logic).
+    run(
+        strategy=strategy, data_dir=data_dir, alpha_dir=alpha_dir, config=config,
+        name=name, out=out, strict=strict, track=track,
+    )
+
+
 @app.command()
 def report(
     run_dir: str = typer.Argument(..., help="Path to a run artifact dir (…/<name>/<date>)"),
