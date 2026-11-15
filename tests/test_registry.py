@@ -59,3 +59,33 @@ def test_load_from_core_only_unchanged(tmp_path: Path):
     assert reg.names() == core.names()
     # I16: the core registry itself is untouched.
     assert len(core) == 146
+
+
+def test_resolve_column_unknown_hint_suggests_close_match():
+    """#130: unknown-feature error should suggest a close registered name
+    (did-you-mean) so a web-AI knows a valid feature exists near its guess."""
+    from lyra.strategy_schema import _resolve_column
+    from lyra.features import build_registry
+    reg = build_registry()
+    # "return_6" is not registered (real one is return_6_atr)
+    try:
+        _resolve_column("return_6", reg, file="x.yaml", yaml_path="entry.long.all[0]")
+        raise AssertionError("expected SchemaError")
+    except Exception as e:
+        msg = str(e)
+        assert "unknown feature" in msg
+        assert "return_6_atr" in msg, f"expected did-you-mean hint, got: {msg}"
+
+
+def test_resolve_column_unknown_generic_hint():
+    """#130: a name with no close match gets the 'lyra context' hint."""
+    from lyra.strategy_schema import _resolve_column
+    from lyra.features import build_registry
+    reg = build_registry()
+    try:
+        _resolve_column("zzz_totally_bogus_qq", reg, file="x.yaml", yaml_path="p")
+        raise AssertionError("expected SchemaError")
+    except Exception as e:
+        msg = str(e)
+        assert "unknown feature" in msg
+        assert "lyra context" in msg, f"expected context hint, got: {msg}"

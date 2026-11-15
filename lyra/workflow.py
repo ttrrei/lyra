@@ -542,6 +542,22 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _fallback_hypothesis(direction_dir: Path) -> str | None:
+    """Fall back to the ``hypothesis:`` field in ``v01.yaml`` when no
+    ``hypothesis.md`` exists (11/12 real directions have only the YAML field).
+    Returns the text or ``None``."""
+    v01 = direction_dir / "v01.yaml"
+    if not v01.exists():
+        return None
+    try:
+        import yaml as _y
+        spec = _y.safe_load(v01.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None
+    hyp = spec.get("hypothesis")
+    return hyp.strip() if isinstance(hyp, str) and hyp.strip() else None
+
+
 def _branch_ever_seen(events: list[dict[str, Any]], branch: str) -> bool:
     """True if *branch* was ever activated or pruned (slug already consumed)."""
     for e in events:
@@ -755,7 +771,12 @@ def render_digest(
         first = first.lstrip("# ").strip()
         out.append(f"hypothesis: {first[:160]}{'…' if len(first) > 160 else ''}")
     else:
-        out.append("hypothesis: (none)")
+        # fall back to the v01.yaml hypothesis field (11/12 real directions)
+        fb = _fallback_hypothesis(d)
+        if fb:
+            out.append(f"hypothesis: {fb[:160]}{'…' if len(fb) > 160 else ''}  (from v01.yaml)")
+        else:
+            out.append("hypothesis: (none)")
 
     from .features import build_registry
     feats = build_registry().names()
@@ -858,7 +879,13 @@ def render_context(
         snap_sha = bl.get("hypothesis_sha256")
         out.append("\n## hypothesis (frozen at track creation)")
         if snap is None:
-            out.append("(no hypothesis present when the track was created)")
+            out.append("(no hypothesis.md present when the track was created)")
+            fb = _fallback_hypothesis(d)
+            if fb:
+                out.append("(baseline v01.yaml hypothesis — no frozen snapshot exists, shown for reference)")
+                out.append("```")
+                out.append(fb)
+                out.append("```")
             if live_text is not None:
                 out.append("(live file since created; shown for reference — NOT the frozen baseline)")
                 out.append(f"(live sha256 {live_sha[:16]}…)")
@@ -886,7 +913,14 @@ def render_context(
             out.append(live_text)
             out.append("```")
         else:
-            out.append("(none)")
+            fb = _fallback_hypothesis(d)
+            if fb:
+                out.append("(from baseline v01.yaml — no hypothesis.md present)")
+                out.append("```")
+                out.append(fb)
+                out.append("```")
+            else:
+                out.append("(none)")
 
     # --- feature list (R12: context includes the feature list) ------------
     out.append("\n## features")

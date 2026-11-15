@@ -343,9 +343,20 @@ def _resolve_column(name: str, registry: Registry, *, file: str | None,
         return OHLC_ALIASES[name], None
     if name in registry:
         return name, registry.get(name).kind
+    # #130 sim: give the AI the exact next step — point at the registered
+    # feature list so it does not have to guess from memory. Offer close
+    # matches by prefix/stem for typo'd names.
+    names = sorted(registry.names())
+    stem = name.rstrip("0123456789_")
+    close = [n for n in names if name[:3] in n or (len(stem) >= 4 and stem in n)][:5]
+    hint = ""
+    if close:
+        hint = f" — did you mean one of: {', '.join(close)}?"
+    else:
+        hint = " — run `lyra context <direction>` to see the registered feature list."
     raise SchemaError(
         f"unknown feature or column {name!r} (must be a registered feature "
-        f"or one of open/high/low/close)",
+        f"or one of open/high/low/close){hint}",
         file=file, yaml_path=f"{yaml_path}.feature" if yaml_path else None)
 
 

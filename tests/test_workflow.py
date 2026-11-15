@@ -1088,3 +1088,65 @@ def test_lesson_command_appends(tmp_path, monkeypatch):
     lessons = tmp_path / "tracks" / "fx-trend" / "alpha.lessons.md"
     assert lessons.exists(), "no lessons file written"
     assert "tighten stop" in lessons.read_text(encoding="utf-8")
+
+
+# --- #130 sim: hypothesis fallback from v01.yaml (no hypothesis.md) --------
+
+
+def test_context_hypothesis_falls_back_to_v01_yaml(tmp_path):
+    """#130: when a direction has NO hypothesis.md (11/12 real directions),
+    render_context must still surface the hypothesis from v01.yaml's field
+    so a web-AI knows what the direction is about."""
+    d = tmp_path / "strategies" / "me"
+    d.mkdir(parents=True)
+    # NO hypothesis.md — only v01.yaml with a hypothesis field
+    (d / "v01.yaml").write_text(
+        "id: me_v01\ndirection: me\nversion: 1\n"
+        "hypothesis: A confirmed RSI retreat marks exhaustion\n",
+        encoding="utf-8",
+    )
+    text = wf.render_context(tmp_path, "me")
+    assert "RSI retreat marks exhaustion" in text
+    assert "from baseline v01.yaml" in text
+    assert "(none)" not in text
+
+
+def test_digest_hypothesis_falls_back_to_v01_yaml(tmp_path):
+    """#130: render_digest shows the v01.yaml hypothesis when no hypothesis.md."""
+    d = tmp_path / "strategies" / "me"
+    d.mkdir(parents=True)
+    (d / "v01.yaml").write_text(
+        "id: me_v01\ndirection: me\nversion: 1\n"
+        "hypothesis: A confirmed RSI retreat marks exhaustion\n",
+        encoding="utf-8",
+    )
+    text = wf.render_digest(tmp_path, "me")
+    assert "RSI retreat marks exhaustion" in text
+    assert "(from v01.yaml)" in text
+
+
+def test_context_no_hypothesis_anywhere_shows_none(tmp_path):
+    """#130: truly absent hypothesis (no .md, no v01 field) → '(none)'."""
+    d = tmp_path / "strategies" / "me"
+    d.mkdir(parents=True)
+    (d / "v01.yaml").write_text(
+        "id: me_v01\ndirection: me\nversion: 1\n", encoding="utf-8"
+    )
+    text = wf.render_context(tmp_path, "me")
+    assert "(none)" in text
+
+
+def test_fallback_hypothesis_helper(tmp_path):
+    """#130: the helper returns None for missing/empty/non-str hypothesis."""
+    d = tmp_path / "strategies" / "me"
+    d.mkdir(parents=True)
+    assert wf._fallback_hypothesis(d) is None  # no v01 at all
+    (d / "v01.yaml").write_text(
+        "id: me_v01\ndirection: me\nversion: 1\n", encoding="utf-8")
+    assert wf._fallback_hypothesis(d) is None  # no hypothesis field
+    (d / "v01.yaml").write_text(
+        "id: me_v01\nhypothesis:   \n", encoding="utf-8")
+    assert wf._fallback_hypothesis(d) is None  # blank hypothesis
+    (d / "v01.yaml").write_text(
+        "id: me_v01\nhypothesis: real text\n", encoding="utf-8")
+    assert wf._fallback_hypothesis(d) == "real text"
