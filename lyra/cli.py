@@ -568,6 +568,20 @@ def submit(
                 fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
         direction = spec.direction
+        # #131 (self-check): a strategy YAML that omits BOTH `direction:` and
+        # the legacy `family:` alias yields spec.direction=None, which previously
+        # surfaced as the cryptic path-escape message "invalid direction None".
+        # Fail with the ACTUAL cause and the fix, so a web-AI can self-correct
+        # (do NOT guess from the file path — run_meta reads direction from the
+        # file CONTENT, so a path-guess would silently corrupt attribution).
+        if not direction:
+            typer.secho(
+                "ERROR (not run): the strategy YAML declares no direction — "
+                "add a top-level `direction: <slug>` (or legacy `family: <slug>`) "
+                "field (see the template in `lyra context <direction>`). "
+                "Direction is required to place the branch and attribute the run.",
+                fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
         try:
             dest = wf.adopt_branch(_workspace(config), direction, track, branch,
                                    Path(strategy), spec)

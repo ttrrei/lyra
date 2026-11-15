@@ -73,10 +73,103 @@
 
 ---
 
+## 三-补、自检（self-check）+ 对抗性检验（adversarial）
+
+> 用户要求：对 #131 的**改动本身**做自检与对抗检验，并把结果并入本文件；再模拟 3-4 轮循环验证"现在是否更好"。
+> 方法：先**读改动的真实代码**逐行核逻辑，再用**真实 CLI** 从攻击者/AI 角度逐项打，最后角色扮演跑循环。全部在隔离 workspace（`~/.lyra/bt3`、`~/.lyra/stagerun`），不动 `~/.lyra/default` 真实资产。
+
+### A. 代码逻辑自检（读码结论）
+
+| 核对点 | 结论 |
+|---|---|
+| preflight 与 stage 3 读**同一份** merged 文本解析出的 `spec` | ✅ 无漂移——门禁输入 == 落盘产物（`_merged_strategy_text` 既喂 `parse_strategy` 又写盘），不会"门禁通过但落盘内容不同" |
+| `parse_batch` 顶层别名（`bundle`/`directions`/`items` 首个出现的列表胜） | ✅ 顺序明确，`present keys` 报错列出实际键名，AI 可自纠 |
+| 映射 `strategy:` 用 `safe_dump` 无损 | ✅ 换行/反斜杠/unicode/null 均不损坏（回归 `test_parse_batch_mapping_strategy_roundtrips_lossless` 断言） |
+| 坏 YAML → 干净报错 | ✅ `BatchError`（带 fix hint）+ CLI 层 `[INVALID]` 行，均无裸 `Traceback` |
+| cap 计数**只计新分支**（`_branch_dest(it).exists()` 跳过幂等重提交） | ✅ 见下方对抗 (3)：满 8 时重提交已有分支仍成功 |
+| direction 交叉校验读 `spec.direction`（可能为 None→跳过） | ✅ `None` 时不强行比对，避免误杀 |
+| `_IDENT_BAD = ("..",".")` + `_IDENT_RE` 拒绝 `.`/`..`/空/`/` | ✅ 路径穿越全拦（见 B） |
+
+### B. 对抗性检验（攻击者/AI 视角，真实 CLI 逐项打）
+
+**B1 路径穿越（P0-4）— `validate_ident` 拒绝/接受集**
+
+| 输入 | 期望 | 实测 |
+|---|---|---|
+| `../outside`、`a/b`、`''`、`.`、`..`、`/abs` | 拒 | ✅ 全拒 |
+| `foo`、`t_me`、`v02`、`v2_001`、`fx-trend` | 收 | ✅ 全收 |
+| `a.b`、`a..b` | **合法文件名**（非穿越） | ✅ 收（**正确**：它们是单段合法名，不是目录逃逸） |
+| track `V2`、`T-A`（大写） | 拒（`_validate_track_id` 小写限定） | ✅ 全拒 |
+
+**B2 分支名一致性 — `validate_ident` 不拒绝 `_BRANCH_NAME_RE` 允许的合法名**
+`v01`/`v02a`/`v2_001`/`v123`/`v99` 全部通过 `validate_ident` 且全部匹配 `_BRANCH_NAME_RE`——两套校验**一致**，不会"识别层放行、正则层拦"的错配。
+
+**B3 cap / 幂等 / 不可变（满 8 的边界组合，隔离 `~/.lyra/bt3` fx-trend/t1 填到 7/8）**
+
+| 场景 | 期望 | 实测 |
+|---|---|---|
+| (1) 提交第 8 个**新**分支 `v09`（7+1=8，恰满） | 成功 | ✅ `1 adopted` |
+| (2) 提交第 9 个新分支 `v10`（8+1>8） | **拒** + 提示 prune | ✅ `[INVALID] … would exceed the 8-branch cap (currently 8, +1 new) — prune one first` |
+| (3) 满 8 时**重提交 `v02` 同字节**（幂等） | 成功（不耗新槽） | ✅ `1 adopted`（`_branch_dest` 已存在→不计新） |
+| (4) 满 8 时**重提交 `v02` 不同字节** | **拒**（不可变）+ **诚实信息** | ✅ `0 of 1 were adopted BEFORE this failure and REMAIN on disk (branches are immutable, so nothing was rolled back)…`——**无假话"rolled back"**（B2 修复实锤） |
+| prune 后槽位回收 | `v09` prune → 7/8 | ✅ `pruned branch v09` + `t1  active=7/8` |
+
+**B4 dry-run / 真实 apply 门禁等价（P0-3/B2 核心 bug——"dry-run 全过、真实 apply 半途失败"必须消失）**
+
+| bundle | dry-run | 真实 apply | 等价 |
+|---|---|---|---|
+| `v10`（超 cap） | REJECTED（exit 1） | REJECTED（exit 1） | ✅ 同判同码 |
+| `v02`（幂等） | VALID（exit 0） | 成功（exit 0） | ✅ 同判同码 |
+
+→ 二者**共享同一 preflight 门禁**，不再出现"dry-run 说能过、真跑却失败/半落盘"的分裂。
+
+**B5 stage-4 `--run`（真实数据 `~/.lyra/default/data`，`~/.lyra/stagerun`，方向 `market_structure`）**
+- 满 cap 时 `--run` 新分支 → preflight 拒（零落盘）✅
+- prune 腾槽后 `--run` → `1 adopted · 1 run ok, 0 failed`、run_dir **track-scoped**（`runs/stg_v02__t_r/…`，M3 归因不覆盖）、exit 0 ✅
+
+**结论**：#131 改动**自检无逻辑漏洞、对抗 5 组攻击（穿越/cap/幂等/不可变/门禁等价/真实 run）全部如预期**；修复前会暴露的两处最坏情况——**假话"rolled back"**（B2）与 **dry-run/真实 apply 分裂**（P0-3）——现均**实测消除**。
+
+---
+
+## 三-补-2、web-AI 角色扮演 4 轮模拟（"现在是否更好"）
+
+> 用户要求：以"只会读写文件 + 调 command、不会写 py 的无 coding AI"身份，在真实数据上跑 3-4 轮"读→写→跑→看→记→下一轮"循环，验证体验是否变好、并找出还能更好的地方。
+
+**方向 `momentum_exhaustion`，隔离 workspace `~/.lyra/simz`，真实数据 `~/.lyra/default/data`（14G）：**
+
+| 轮 | 动作 | 结果 |
+|---|---|---|
+| R1 读 | `digest`（348 字节）+ `context`（4.8KB） | ✅ hypothesis 显示（非 `(none)`，#130 修复生效）、146 feature、清晰指向 context |
+| R1 写+跑 | 建 `t_me` track → 写 v02（parent v01 + lesson）→ `submit --track --branch v02 --data-dir` | ✅ exit 0，`SPX500_USD: 179 trades, ann=+0.014, win=67.6%` |
+| R2 写+跑 | v03（parent v02，hold 12） | ✅ exit 0 |
+| R3 写+跑 | v04（parent v03，hold 8） | ✅ exit 0，`ann=+0.008, win=62.0%` |
+| R4 记 | `lesson` 记一条结论 | ✅ exit 0 |
+| R4 看 | `digest --track t_me` | ✅ **726 字节**，**3/8 active**，每分支一行（`ann=+0.014 win=67.6%` 已四舍五入）+ lesson + hypothesis + "full detail: context" 指引 |
+
+**结论：4 轮闭环完全成立，比修复前更好**——
+- **低 token**：每轮"看"只需 digest **348-726 字节**（<300 token），远低于修复前"submit 全量 report 2.5 万 token"。
+- **无摩擦**：lineage 门禁（R12）、cap（3/8）、不可变、run 归属（`runs/me_v0N__t_me` track-scoped）、`did-you-mean`、hypothesis 回退**全程无卡点**。
+- **迭代带记忆**：lesson 落盘后 digest 直接给下轮 AI 看。
+
+**模拟中暴露并修复的 1 处真实摩擦**：
+- **`submit` 遇到策略 YAML 无 `direction:`/`family:` 时**，报错是**误导性的 `invalid direction None`**（复用了路径穿越的措辞，AI 完全不知道要加什么字段）。已修复为**可自纠的明确报错**：`ERROR (not run): the strategy YAML declares no direction — add a top-level \`direction: <slug>\` (or legacy \`family: <slug>\`) field (see the template in \`lyra context <direction>\`)…`（新增回归 `test_submit_missing_direction_is_actionable`）。**设计取舍**：不靠文件路径猜 direction——因为 `run_meta` 的 direction 取自**文件内容**（`data.get("direction") or data.get("family")`），路径猜测会静默写错归因，故宁可明确报错让 AI 补字段。
+
+**两处"疑似 bug"经核验为测试伪象（非真 bug，如实记录）**：
+1. **digest 显示 `0/8 active`**：首轮模拟中我先**把分支文件写进 track 目录**再 submit → `adopt_branch` 命中"文件已存在→幂等 no-op"分支（**不调 lineage、不写 activate**），故未登记。**真实 AI 不会预写分支文件**（它写草稿在任意位置），`submit` 会走"新分支"路径正确 activate（simz 复现 `3/8 active`）。`adopt_branch` 的幂等/不可变设计本身**正确**。
+2. **`invalid direction None`**：由我 `clone()` 时**丢弃了 `family:`**（真实 v01 用 `family:` 而非 `direction:`）导致 spec.direction=None。带 `family:` 的忠实 v01 副本 submit **完全正常**（exit 0）。
+
+**仍可更好的方向（不阻塞，留待拍板）**：
+- **feature 字典**：146 个 feature 只有名字、无 ≤15 字含义，AI 起步靠抄模板 + did-you-mean 够用，但**补一句含义**能显著降低"选错 feature"试错轮数（P2 增强，已多轮提出未做）。
+- **`digest` 的跨分支对比**：现在每分支一行独立分数，**无"v02 vs v04 谁更好"的并排**——`lyra compare` 已覆盖深度对比，但 digest 里加一行 `best: v03` 能省 AI 一次 read（P1，审查已列，本轮未动）。
+- **`submit` 与 `apply-batch` 的门禁一致性**：`submit` 的门禁在 `adopt_branch` 内（lineage/cap/immutable 都在），`apply-batch` 的 preflight 把这些**前置**——二者语义一致但**入口不同**（submit 单条、batch 多条）。若未来加 `submit --dry-run` 让单条也能"先验后跑"，可对齐 batch 体验（P2，非阻塞）。
+
+---
+
 ## 四、诚实边界
 
 - **拒绝项非"不做"，是"不在收尾阶段做"**：#16 bundle manifest、#17 digest 重构、#21 多写者并发、#22 §4.x 研究方法论——均为**独立设计/后续阶段**，且触碰已锁边界（alpha/OCI）或非闭环阻塞。留待用户按优先级拍板。
 - **`apply-batch` 的 `--run` 单条失败** = 记录 + 其余续跑 + **exit 3**（adopt 阶段仍全或无 D6；run 阶段本就逐条独立，不假装回滚）。
+- **本轮模拟新增修复**：`submit` 遇无 `direction`/`family` 策略时，原报 `invalid direction None`（路径穿越措辞，误导）→ 改为可自纠的"add a top-level `direction:`"报错（**不靠文件路径猜**，因 run_meta 的 direction 取自文件内容，路径猜会写错归因）。
 - **P-8 `--stdin` / P-9 ledger** 是**平台模型取舍**（单写者 per workspace + 单事实源 + append-only），非遗漏；若未来上多 AI 并发/重多方向规模，再单独立项。
 - **feature 字典**（146 feature ≤15 字含义）仍为 P2 可选增强，未做（`context` 已给 feature 名 + did-you-mean，不阻塞循环）。
 - **待用户 `git push`**（本环境无凭据；origin/main 仍 = `526f2ea`）——#131 落地后需 push 到 main 触发 CI（其中 P0-1 的 CI 红已修）。

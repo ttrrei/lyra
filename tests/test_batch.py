@@ -312,3 +312,34 @@ def test_apply_batch_lineage_persisted_in_adopted_file(tmp_path):
     assert "v01" in adopted["parents"]
     assert adopted["driven_by_lesson"] == "v01 baseline was too tight"
     assert adopted["hypothesis"] == "Wider entry"
+
+
+def test_submit_missing_direction_is_actionable(tmp_path):
+    """Self-check (round-1 friction): a strategy YAML with NO direction/family
+    must fail with the actionable 'no direction' error, NOT the cryptic
+    path-escape 'invalid direction None'."""
+    from typer.testing import CliRunner
+    from lyra import cli
+    import yaml as _y
+    ws = tmp_path / "ws"
+    d = ws / "strategies" / "d1"
+    (d / "t1").mkdir(parents=True)
+    base = {"version": 1, "id": "b", "timeframe_minutes": 60,   # NOTE: no direction/family
+            "entry": {"long": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                      "short": {"feature": "sma_6", "op": "lt", "value": "sma_24"}},
+            "exit": {"long": {"feature": "sma_6", "op": "lt", "value": "sma_24"},
+                     "short": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                     "stop_loss_pct": 0.02, "max_holding_bars": 12},
+            "execution": {"spread_bps": 2, "slippage_bps_per_side": 0.2}}
+    (d / "v01.yaml").write_text(_y.safe_dump(base, allow_unicode=True), encoding="utf-8")
+    from lyra import workflow as wf
+    wf.create_track(ws, "d1", "t1")
+    draft = tmp_path / "draft.yaml"
+    draft.write_text(_y.safe_dump(base, allow_unicode=True), encoding="utf-8")
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(f"local:\n  workspace: {ws}\n  data: {ws}/data\n  strategies: {ws}/strategies\n  runs: {ws}/runs\n  alpha: {ws}/alpha\n", encoding="utf-8")
+    r = CliRunner().invoke(cli.app, ["submit", str(draft), "--track", "t1",
+                                     "--branch", "v02", "--config", str(cfg),
+                                     "--data-dir", str(tmp_path / "data")])
+    assert "no direction" in r.output or "add a top-level `direction:" in r.output
+    assert "invalid direction None" not in r.output   # the old cryptic message is gone
