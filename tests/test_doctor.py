@@ -44,19 +44,38 @@ def test_doctor_all_hard_checks_pass_exit_zero(tmp_path):
     assert "WARN" in result.output
 
 
-def test_doctor_missing_oci_slot_hard_fails_exit_one(tmp_path):
-    """0009 D10 (H4): all four OCI slots are HARD requirements — a config
-    missing features/strategies/runs must fail closed, not warn-and-pass."""
+def test_doctor_push_slots_empty_are_warnings_not_failures(tmp_path):
+    """P1-4 (UsageFinalReview): the push-only OCI slots (features/strategies/
+    runs) are documented as OPTIONAL — config.py says "`lyra pull` must never
+    require the push PAR slots" and config_example.yml says "Leave a slot empty
+    if that bucket is not configured yet".  A pull-only setup (only
+    ``data_par_url`` set) must PASS doctor with the three push slots reported
+    as WARNINGS, not hard failures."""
     cfg = _write_config(
         tmp_path / "config.yml",
         features_par_url="", strategies_par_url="", runs_par_url="",
     )
     result = runner.invoke(app, ["doctor", "--config", str(cfg)])
-    assert result.exit_code == 1
-    assert "FAIL" in result.output
-    # each missing slot is reported as a failure
+    assert result.exit_code == 0, result.output
+    assert "DOCTOR OK" in result.output
+    # the three push slots are surfaced (as warnings), and the data slot passed
+    assert "PASS config slot data_par_url set" in result.output
     for slot in ("features_par_url", "strategies_par_url", "runs_par_url"):
         assert slot in result.output
+
+
+def test_doctor_data_slot_missing_hard_fails_exit_one(tmp_path):
+    """P1-4 (UsageFinalReview): ``data_par_url`` is the ONLY slot ``lyra pull``
+    needs, so it is the hard requirement.  A config missing it must still fail
+    closed (unlike the push-only slots, which are warnings)."""
+    cfg = _write_config(
+        tmp_path / "config.yml",
+        data_par_url="",  # the required slot missing
+    )
+    result = runner.invoke(app, ["doctor", "--config", str(cfg)])
+    assert result.exit_code == 1, result.output
+    assert "data_par_url" in result.output
+    assert "FAIL" in result.output
 
 
 def test_doctor_bad_config_hard_fails_exit_one(tmp_path):

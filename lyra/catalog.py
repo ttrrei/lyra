@@ -81,7 +81,8 @@ class Catalog:
                     continue
                 # Safe: the subpath is from a fixed whitelist; the file path
                 # is escaped before embedding in SQL.
-                if not _SAFE_SUBPATH.match(sub):
+                # P2-5: fullmatch (re.match + $ still accepts a trailing newline).
+                if not _SAFE_SUBPATH.fullmatch(sub):
                     raise ValueError(f"unsafe catalog subpath: {sub!r}")
                 escaped = str(parquet).replace("'", "''")
                 if any(ord(ch) < 0x20 for ch in str(parquet)):

@@ -167,7 +167,8 @@ bundle:
       # … full strategy YAML (same fields as a standalone file)
       entry: { long: { all: [...] }, short: { all: [...] } }
       exit:  { long: {...}, short: {...}, stop_loss_pct: 0.02, max_holding_bars: 12 }
-      execution: { spread_bps: 2, slippage_bps_per_side: 0.2 }
+      execution: { spread_bps: 2, slippage_bps_per_side: 0.2,
+                   commission_bps_round_trip: 2, financing_bps_per_day: 1 }
 
   - direction: trend_continuation
     track: t_tc

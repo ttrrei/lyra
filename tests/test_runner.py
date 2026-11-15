@@ -211,6 +211,25 @@ def test_run_empty_produces_zero_trades(tmp_path):
     assert res.instrument_failures == []
 
 
+def test_run_name_path_escape_rejected(env):
+    """P1-2 (UsageFinalReview): the CLI ``--name`` is a user-supplied path
+    component.  ``spec.id`` is already whitelist-validated, but a raw
+    ``--name ../../evil`` would walk OUT of the workspace and write/overwrite
+    artifacts there.  ``run_strategy`` must now reject any name that is not a
+    single safe path component, while still accepting a normal slug."""
+    import pytest as _pt
+    # normal slug is fine
+    ok = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
+                             name="my_run_01", out_dir=env["strat"].parent / "runs_ok")
+    assert "my_run_01" in ok.out_dir.parts
+    # path escapes / separators / dot-segments are all refused
+    # (name="" is treated as "use spec.id" by ``name or spec.id`` and is fine)
+    for bad in ("../../evil", "a/b", ".", ".."):
+        with _pt.raises(Exception):
+            runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
+                                name=bad, out_dir=env["strat"].parent / "runs_bad")
+
+
 def test_run_report_fields(env):
     res = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
                               out_dir=env["strat"].parent / "runs")
@@ -248,6 +267,36 @@ def test_run_report_fields(env):
     assert "stop%" in text  # table header column
     # F-2: the low-sample flag is present in the table (header at minimum).
     assert "low-sample" in text
+
+
+def test_report_survives_partial_cost_fields(env):
+    """P0 (UsageFinalReview): a strategy whose ``execution:`` omits cost fields
+    produces a ``costs_bps`` payload with ``None`` values (not 0).  Rendering
+    the report used to do ``float(None)`` → TypeError → the run had no
+    report.md / manifest.json.  Now the renderer treats None as 0."""
+    import copy
+    res = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
+                              out_dir=env["strat"].parent / "runs")
+    payload = json.loads((res.out_dir / "metrics.json").read_text())
+    # Simulate a strategy that only set spread/slippage (commission+financing
+    # left None) — exactly the shape that crashed ``float(costs.get(k))``.
+    broken = copy.deepcopy(payload)
+    broken["costs_bps"] = {
+        "commission_round_trip": None,
+        "financing_per_day": None,
+        "spread": 2.0,
+        "slippage_per_side": 0.2,
+    }
+    out = env["strat"].parent / "report_partial_cost.md"
+    # Must NOT raise; and must render the missing fields as 0.0, not "None".
+    runner._write_report(out, broken)
+    text = out.read_text()
+    assert "cost model (bps):" in text
+    assert "commission_round_trip=0.0" in text
+    assert "financing_per_day=0.0" in text
+    assert "None" not in text.split("cost model (bps):")[1].splitlines()[0]
+    # commission+financing are 0 but spread+slippage are non-zero → NOT all-zero.
+    assert "ALL ZERO" not in text
 
 
 def test_run_financing_wired(env):
@@ -442,6 +491,67 @@ def test_run_instrument_failure_isolated(env, monkeypatch):
     with pytest.raises(RuntimeError):
         runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
                             out_dir=env["strat"].parent / "runs2", strict=True)
+
+
+def test_cli_run_all_instruments_failed_is_not_ok(env, monkeypatch):
+    """P1-3 (UsageFinalReview): with ``strict=False`` (the default), a run in
+    which EVERY instrument failed used to print green "OK: run …" and exit 0,
+    so automation wrapping ``lyra run`` treated a total failure as success.
+
+    Here the ``run`` command must exit non-zero when no instrument produced
+    metrics but some failed.  Uses CliRunner (the realistic path) so Typer
+    resolves option defaults correctly."""
+    from typer.testing import CliRunner
+    from lyra import cli as cli_mod
+
+    def _boom_all(plan, bars, *, trading_days_for=None):
+        raise RuntimeError("simulated total instrument failure")
+
+    monkeypatch.setattr(runner, "simulate", _boom_all)
+    monkeypatch.setattr(cli_mod, "_registry_for", lambda a, c: env["registry"])
+    monkeypatch.setattr(cli_mod, "_workspace", lambda c: env["strat"].parent)
+
+    res = CliRunner().invoke(
+        cli_mod.app,
+        ["run", str(env["strat"]), "--data-dir", str(env["data_root"]),
+         "--out", str(env["strat"].parent / "runs_p13")],
+    )
+    assert res.exit_code == 1, f"expected exit 1, got {res.exit_code}\n{res.output}"
+    assert "OK: run" not in res.output
+    assert "every instrument failed" in res.output
+
+
+def test_cli_run_partial_still_reports_failures(env, monkeypatch):
+    """P1-3 companion: a PARTIAL run (some instruments succeed, some fail)
+    must NOT be treated as a hard failure — ``submit`` and ``apply-batch``
+    rely on the run returning ``result.instrument_failures`` to report it as
+    PARTIAL (exit 4).  The ``run`` command itself still exits 0 for a partial
+    run (that distinction is surfaced by submit/batch, not by run), but it
+    must visibly list the failing instrument and must NOT claim a clean
+    all-instruments success."""
+    from typer.testing import CliRunner
+    from lyra import cli as cli_mod
+
+    real_simulate = runner.simulate
+
+    def _boom_partial(plan, bars, *, trading_days_for=None):
+        if bars and bars[0]["instrument"] == "GBPUSD":
+            raise RuntimeError("simulated per-instrument failure")
+        return real_simulate(plan, bars, trading_days_for=trading_days_for)
+
+    monkeypatch.setattr(runner, "simulate", _boom_partial)
+    monkeypatch.setattr(cli_mod, "_registry_for", lambda a, c: env["registry"])
+    monkeypatch.setattr(cli_mod, "_workspace", lambda c: env["strat"].parent)
+
+    res = CliRunner().invoke(
+        cli_mod.app,
+        ["run", str(env["strat"]), "--data-dir", str(env["data_root"]),
+         "--out", str(env["strat"].parent / "runs_p13b")],
+    )
+    # partial run: the run command succeeds (exit 0) and surfaces the failure
+    assert res.exit_code == 0, f"partial run should not hard-fail: {res.output}"
+    assert "EURUSD" in res.output
+    assert "GBPUSD" in res.output and "FAILED" in res.output
 
 
 def test_run_monthly_zero_openings_counted(env):

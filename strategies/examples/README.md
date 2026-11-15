@@ -13,7 +13,8 @@ OCI / 本地 `~/.lyra/`（B1 / B13 / I11），**永远不进入本仓库**。
 
 | 方向 | 内容 | 用途 |
 |---|---|---|
-| [momentum_breakout/](./momentum_breakout/) | hypothesis.md + lessons.md + v01.yaml | 展示方向文件夹的标准结构（R12）；供 `lyra validate` 演示 |
+| [momentum_breakout/](./momentum_breakout/) | hypothesis.md + lessons.md + v01.yaml | 展示方向文件夹的**完整标准结构**（R12：hypothesis + 追加式 lessons + v01 基线）；供 `lyra validate` 演示 |
+| [rsi_pullback/](./rsi_pullback/) | v01.yaml | 展示一个**最小**合法策略（仅 v01 基线）；`lyra validate` / `lyra context` 的对照示例。成本字段为**非零**（0.2 / 0.1 bps），演示真实的成本模型 |
 
 ## 一个方向的解剖
 

@@ -237,6 +237,42 @@ def test_push_unclassified_path_fails(tmp_path):
         push(t, tmp_path, PREFIX, force_push=True)
 
 
+def test_push_symlinked_local_root_still_uploads(tmp_path):
+    """P1-1 (UsageFinalReview): when an ancestor of ``local_root`` is itself a
+    symlink (macOS ``/var → /private/var``, a symlinked ``$HOME`` or tempdir),
+    the old pure-lexical ``path.is_relative_to(root_resolved)`` failed for
+    EVERY file → all refused as "untrusted-path".  After the fix (resolve the
+    file path too), legitimate files under a symlinked root are uploaded."""
+    real = tmp_path / "real"
+    seed_local(real, {"runs/d1/t1/r1/manifest.json": b'{"ok":1}'})
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    t = FakeParRW(objects={})
+    res = push(t, link, PREFIX)
+    assert res.uploads == ["runs/d1/t1/r1/manifest.json"]
+
+
+def test_push_genuine_symlink_still_refused(tmp_path):
+    """P1-1 security boundary: the symlink-root fix must NOT let a real
+    symlink (pointing outside the local root) through — it is still refused
+    as untrusted-path.  Only the *lexical comparison* of legitimate files was
+    relaxed, not the symlink refusal.  Uses ``plan_push`` directly so we can
+    inspect the conflict without the fail-closed wrapper raising."""
+    from lyra.oci_push import plan_push
+
+    seed_local(tmp_path, {"runs/d1/t1/r1/manifest.json": b'{"ok":1}'})
+    outside = tmp_path / "outside_secret.yaml"
+    outside.write_bytes(b"secret")
+    evil = tmp_path / "runs/d1/t1/r1/evil.yaml"
+    evil.symlink_to(outside)
+    t = FakeParRW(objects={})
+    plan = plan_push(t, tmp_path, PREFIX, {})
+    assert "runs/d1/t1/r1/evil.yaml" not in [u.rel_path for u in plan.uploads]
+    evil_conflicts = [c for c in plan.conflicts if c.rel_path == "runs/d1/t1/r1/evil.yaml"]
+    assert evil_conflicts and evil_conflicts[0].reason == "untrusted-path"
+    assert "runs/d1/t1/r1/manifest.json" in [u.rel_path for u in plan.uploads]
+
+
 def test_push_no_target_fails(tmp_path):
     seed_local(tmp_path, {"runs/d1/t1/r1/m.json": b"{}"})
     t = FakeParRW(objects={})

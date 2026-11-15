@@ -582,6 +582,18 @@ def test_h4_validate_ident_rejects_traversal(tmp_path):
         wf.validate_ident(good, "direction")
 
 
+def test_p25_validate_ident_rejects_trailing_newline(tmp_path):
+    """P2-5 (UsageFinalReview): ``re.match`` + ``$`` still accepts a trailing
+    newline ("abc\\n") — which would become a hostile filename on disk.  All
+    anchored ident validators must now use ``fullmatch`` so "abc\\n" is
+    rejected while "abc" passes."""
+    for bad in ("abc\n", "v02\n", "track-1\n", "fx-trend\n", "\nabc", "abc\n\n"):
+        with pytest.raises(wf.WorkflowError):
+            wf.validate_ident(bad, "direction")
+    for good in ("abc", "v02", "track-1", "fx-trend"):
+        wf.validate_ident(good, "direction")
+
+
 def test_h10_track_index_is_jsonl_append_only(tmp_path):
     """批次2-H10: the track index is a JSONL event log; a fork appends a new
     line, so the file stays a verbatim line-superset of the earlier version

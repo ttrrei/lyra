@@ -892,7 +892,9 @@ def _validate_doc(data: dict, registry: Registry, file: str) -> StrategySpec:
                           file=file, yaml_path="version")
 
     sid = data.get("id")
-    if not isinstance(sid, str) or not _SLUG_RE.match(sid):
+    # P2-5 (UsageFinalReview): fullmatch — ``re.match`` + ``$`` still accepts a
+    # trailing newline ("abc\n"), which would become a hostile filename on disk.
+    if not isinstance(sid, str) or not _SLUG_RE.fullmatch(sid):
         raise SchemaError(f"id must be a safe slug (lowercase alnum/_/-), got {sid!r}",
                           file=file, yaml_path="id")
 

@@ -534,6 +534,23 @@ def run(
         )
         raise typer.Exit(code=1)
 
+    # P1-3 (UsageFinalReview): with ``strict=False`` (the default), a run in
+    # which EVERY instrument failed used to print green "OK: run …" and exit 0
+    # — any automation wrapping `lyra run` would treat a total failure as
+    # success.  When NO instrument produced metrics but some FAILED, this is a
+    # hard failure: surface it as a clean non-zero exit (not a raw traceback).
+    # A PARTIAL run (some instruments have metrics, others failed) deliberately
+    # still returns, so ``submit``/``apply-batch`` can inspect
+    # ``instrument_failures`` and report it as PARTIAL (exit 4) — that semantic
+    # was fixed in #132 and is preserved.
+    if result.instrument_failures and not result.metrics:
+        names = ", ".join(f.get("instrument", "?") for f in result.instrument_failures)
+        typer.secho(
+            f"RUN FAILED: every instrument failed — {names}\n"
+            "  No run was produced. Check the data/feature layer and the "
+            "strategy's feature names (`lyra doctor`, `lyra features`).",
+            fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
     typer.secho(f"OK: run {result.run_id[:12]} -> {result.out_dir}",
                 fg=typer.colors.GREEN)
     for inst in sorted(result.metrics):
@@ -808,7 +825,9 @@ def apply_batch_cmd(
             wf.validate_ident(it.direction, "direction")
             wf.validate_ident(it.track, "track")
             wf.validate_ident(it.branch, "branch")
-            if not wf._BRANCH_NAME_RE.match(it.branch):
+            # P2-5: fullmatch (validate_ident already enforces this; kept for the
+            # vNN-specific pattern message).
+            if not wf._BRANCH_NAME_RE.fullmatch(it.branch):
                 _err(f"branch {it.branch!r} must match the vNN slug pattern")
                 continue
             wf.get_track(ws, it.direction, it.track)          # track must exist
@@ -1673,7 +1692,9 @@ def pull_strategy(
             base = root / sub
             if base.is_dir():
                 for p in sorted(base.iterdir()):
-                    if p.is_dir() and workflow._IDENT_RE.match(p.name) \
+                    # P2-5: fullmatch (re.match + $ still accepts a trailing
+                    # newline in a hostile directory name).
+                    if p.is_dir() and workflow._IDENT_RE.fullmatch(p.name) \
                             and p.name not in workflow._IDENT_BAD:
                         known.add(p.name)
         if not known:
@@ -1925,7 +1946,8 @@ def digest_cmd(
             if not is_dir:
                 skipped.append((p.name, "no v01.yaml / hypothesis.md / index / branch yaml"))
                 continue
-            if not workflow._IDENT_RE.match(p.name) or p.name in workflow._IDENT_BAD:
+            # P2-5: fullmatch (re.match + $ still accepts a trailing newline).
+            if not workflow._IDENT_RE.fullmatch(p.name) or p.name in workflow._IDENT_BAD:
                 skipped.append((p.name, "not a valid direction identifier"))
                 continue
             directions.append(p.name)
@@ -2165,9 +2187,12 @@ def doctor(
     """Read-only environment self-check (0009 D10; R10 acceptance).
 
     Hard failures (exit 1): Python version policy, core dependency imports,
-    config parsing + OCI slot presence.
-    Warnings (exit 0, WARN count printed): catalog/views presence,
-    feature-generation integrity (D4 gate), one compile smoke.
+    config parsing + the ``data_par_url`` slot (the only slot ``lyra pull``
+    needs).
+    Warnings (exit 0, WARN count printed): the push-only OCI slots
+    (features/strategies/runs) — optional for a pull-only setup (P1-4);
+    catalog/views presence; feature-generation integrity (D4 gate); one
+    compile smoke.
     """
     failures: list[str] = []
     warnings: list[str] = []
@@ -2200,17 +2225,33 @@ def doctor(
         data = load_config(config)
         oci = oci_from_dict(data)
         local = local_from_dict(data)
-        # D10: all four OCI slots are HARD requirements (a config missing any
-        # of them cannot run full OCI sync/backup, so doctor must fail closed,
-        # not degrade to a warning).
-        for slot in ("data_par_url", "features_par_url",
-                     "strategies_par_url", "runs_par_url"):
+        # P1-4 (UsageFinalReview): only ``data_par_url`` is a HARD requirement
+        # — it is the ONLY slot ``lyra pull`` (first-use data download) needs.
+        # The other three (features/strategies/runs) are PUSH-only slots and
+        # are explicitly documented as optional: config.py says "`lyra pull`
+        # must never require the push PAR slots" and config_example.yml says
+        # "Leave a slot empty if that bucket is not configured yet".  Treating
+        # them as hard failures made a pull-only setup FAIL doctor, contradicting
+        # both docs.  A user who only wants data can now pass; a user who tries
+        # to PUSH to an unconfigured bucket still gets an explicit error from
+        # the push command itself (fail-closed there).
+        data_val = getattr(oci, "data_par_url", None)
+        if data_val:
+            typer.echo("PASS config slot data_par_url set")
+        else:
+            failures.append(
+                "config slot data_par_url not set (required for `lyra pull` "
+                "and any OCI data sync)"
+            )
+        for slot in ("features_par_url", "strategies_par_url", "runs_par_url"):
             val = getattr(oci, slot, None)
             if val:
                 typer.echo(f"PASS config slot {slot} set")
             else:
-                failures.append(
-                    f"config slot {slot} not set (required for OCI sync/backup)"
+                warnings.append(
+                    f"config slot {slot} not set — the matching push command "
+                    f"(push-features/-strategy/-runs) will error explicitly; "
+                    "safe to leave empty for a pull-only setup"
                 )
         typer.echo("PASS config parses")
     except Exception as exc:

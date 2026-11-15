@@ -96,7 +96,8 @@ def classify_path(rel_path: str) -> str:
                 fname.endswith(".json") or fname.endswith(".jsonl")
             ):
                 return "append_only"
-            if _VNN_RE.match(fname):
+            # P2-5: fullmatch (re.match + $ still accepts a trailing newline).
+            if _VNN_RE.fullmatch(fname):
                 return "immutable"
         return "unclassified"
     if top in ("runs", "data"):
@@ -416,7 +417,17 @@ def plan_push(
 
     for path in sorted(p for p in local_root.rglob("*") if p.is_file()):
         rel = path.relative_to(local_root).as_posix()
-        if path.is_symlink() or not path.is_relative_to(root_resolved):
+        # H4 (batch2) + P1-1 (UsageFinalReview): symlinks and paths escaping
+        # the local root must never be uploaded.  ``is_relative_to`` is a PURE
+        # LEXICAL comparison, so when any ancestor of ``local_root`` is itself a
+        # symlink (macOS ``/var → /private/var``, a symlinked ``$HOME``, a
+        # symlinked tempdir) the unresolved ``path`` fails the check and EVERY
+        # file was wrongly refused ("untrusted-path").  Resolve the file path
+        # too so both sides of the comparison are in the same namespace.
+        # ``path.is_symlink()`` still runs FIRST (rglob yields genuine
+        # symlinks unresolved), so real symlinks are STILL refused — this fix
+        # does not loosen that boundary.
+        if path.is_symlink() or not path.resolve().is_relative_to(root_resolved):
             plan.conflicts.append(
                 ConflictItem(rel, "untrusted-path",
                              "symlink or path outside local root (refusing to upload)")

@@ -74,9 +74,10 @@ def branch_generation(slug: str) -> int | None:
     treat ``v02_1`` the same as ``v02`` (N>=2 → gated) and ``v01_1`` the same
     as ``v01`` (N==1 → reserved baseline).
     """
-    if not _BRANCH_NAME_RE.match(slug):
+    # P2-5: fullmatch — ``$`` in re.match still accepts a trailing newline.
+    if not _BRANCH_NAME_RE.fullmatch(slug):
         return None
-    m = _BRANCH_GEN_RE.match(slug)
+    m = _BRANCH_GEN_RE.match(slug)  # prefix match (no $ anchor) — stays .match
     return int(m.group(1)) if m else None
 # direction/track/branch/run identifiers are single path components: no
 # separators, no dot segments (H4 — a "../x" direction would escape the
@@ -260,7 +261,8 @@ def active_branches_of(events: list[dict[str, Any]]) -> list[str]:
 
 
 def _validate_track_id(track_id: str) -> None:
-    if not _TRACK_ID_RE.match(track_id):
+    # P2-5: fullmatch — ``$`` in re.match still accepts a trailing newline.
+    if not _TRACK_ID_RE.fullmatch(track_id):
         raise WorkflowError(
             f"invalid track id {track_id!r} — use lowercase alnum/_/- (I18 fail-fast)"
         )
@@ -273,7 +275,11 @@ def validate_ident(ident: str, what: str = "identifier") -> None:
     ``../outside`` or ``a/b`` can never escape the workspace root when
     joined into a file path.
     """
-    if not isinstance(ident, str) or not _IDENT_RE.match(ident) or ident in _IDENT_BAD:
+    # P2-5: fullmatch — ``$`` in re.match still accepts a trailing newline
+    # ("abc\n"), which would become a hostile filename on disk.  This is the
+    # shared choke point for direction/track/branch/run-name validation, so the
+    # fix covers all of them at once.
+    if not isinstance(ident, str) or not _IDENT_RE.fullmatch(ident) or ident in _IDENT_BAD:
         raise WorkflowError(
             f"invalid {what} {ident!r} — use a single path component "
             f"(alnum/_/-, no separators, no '.') "
@@ -434,7 +440,8 @@ def new_version(
     fields ``parent``/``driven_by_lesson`` (0007 D8 reuse point). Duplicate
     branch IDs fail fast (D9) — never overwrite, never auto-rename.
     """
-    if not _BRANCH_NAME_RE.match(branch):
+    # P2-5: fullmatch (re.match + $ still accepts a trailing newline).
+    if not _BRANCH_NAME_RE.fullmatch(branch):
         raise WorkflowError(
             f"invalid branch name {branch!r} — branches are vNN with optional "
             f"lowercase sibling/cross suffix (v02a, v04ab) per requirements R12"
@@ -711,7 +718,8 @@ def adopt_branch(workspace: Path, direction: str, track_id: str, branch: str,
     validate_ident(direction, "direction")
     _validate_track_id(track_id)
     get_track(workspace, direction, track_id)      # track must exist (I18)
-    if not _BRANCH_NAME_RE.match(branch):
+    # P2-5: fullmatch (re.match + $ still accepts a trailing newline).
+    if not _BRANCH_NAME_RE.fullmatch(branch):
         raise WorkflowError(f"invalid branch name '{branch}'")
     src = Path(source_yaml)
     if not src.exists():
@@ -1420,7 +1428,8 @@ def merge(
             n += 1
         name = f"v{n:02d}"
     slug = name
-    if not _BRANCH_NAME_RE.match(slug):
+    # P2-5: fullmatch (re.match + $ still accepts a trailing newline).
+    if not _BRANCH_NAME_RE.fullmatch(slug):
         raise WorkflowError(
             f"invalid merge name {slug!r} — branches are vNN with optional "
             f"lowercase suffix (requirements R12)"

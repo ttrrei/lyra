@@ -240,7 +240,19 @@ def _write_parquet(rows: Sequence[Mapping[str, Any]], path: Path,
     for c in columns:
         if c in time_cols:
             data[c] = [_iso(v) for v in data[c]]
-    table = pa.table({c: data[c] for c in columns})
+    # P2-7 (UsageFinalReview): a zero-row result — or any run whose strategy
+    # sets no stop / take-profit — must still emit a CONCRETE schema.  pa.table
+    # infers column types from the VALUES, so an all-``None`` column produced a
+    # ``null`` type (and an empty run produced an all-``null`` schema), which
+    # downstream pd.read_parquet / DuckDB read as ``null`` columns — exactly the
+    # case that most needs a stable contract.  We pin the explicit per-column
+    # types uniformly (values are unchanged; only the declared type is forced),
+    # so an empty run and a run with unset optional fields share one layout.
+    schema_map = _TRADE_COL_TYPES if "direction" in columns else _SIGNAL_COL_TYPES
+    arrays = [pa.array(data[c], type=pa.type_for_alias(schema_map.get(c, "string")))
+              for c in columns]
+    schema = pa.schema((c, a.type) for c, a in zip(columns, arrays))
+    table = pa.Table.from_arrays(arrays, schema=schema)
     pq.write_table(table, path, compression="snappy")
 
 
@@ -394,6 +406,15 @@ def run_strategy(
 
     # 5) write artifacts -----------------------------------------------------
     run_name = name or spec.id
+    # P1-2 (UsageFinalReview): the CLI ``--name`` value is a USER-SUPPLIED path
+    # component (``spec.id`` is already whitelist-validated at parse time, but a
+    # raw ``--name ../../evil`` would walk OUT of the workspace and write/
+    # overwrite artifacts there).  ``workflow.validate_ident`` rejects
+    # separators / dot-segments / empty names.  Imported inside the function to
+    # avoid a module-level cycle (``workflow.py`` imports ``runner._ENGINE_VERSION``).
+    if name is not None:
+        from .workflow import validate_ident  # local import: avoid runner↔workflow cycle
+        validate_ident(run_name, "run name")
     run_date = datetime.now(timezone.utc).strftime("%Y%m%d")
     # 批次1-H3: every run gets its own run_id-scoped directory.  Reusing a
     # (name, date) directory across different run_ids would let a zero-trade
@@ -490,6 +511,37 @@ _SIGNAL_COLUMNS = ["instrument", "time", "entry_long", "entry_short",
 _TIME_COLS_TRADE = {"signal_time", "entry_time", "exit_time"}
 _TIME_COLS_SIGNAL = {"time"}
 
+# P2-7 (UsageFinalReview): explicit per-column Parquet types.  ``pa.table``
+# infers column types from the VALUES — so a zero-row result produced an all-
+# ``null`` schema, and downstream ``pd.read_parquet`` / DuckDB read ``null``
+# columns instead of the concrete types.  Pinning the schema guarantees a
+# stable, concrete layout even when a run produces no rows.  Time columns are
+# iso-string (they are converted by ``_iso`` before the array is built).
+_TRADE_COL_TYPES = {
+    "instrument": "string",
+    "direction": "int64",
+    "signal_time": "string",
+    "entry_time": "string",
+    "exit_time": "string",
+    "entry_price": "float64",
+    "exit_price": "float64",
+    "exit_reason": "string",
+    "bars_held": "int64",
+    "gross_return": "float64",
+    "cost_return": "float64",
+    "net_return": "float64",
+    "stop_price": "float64",
+    "take_profit_price": "float64",
+}
+_SIGNAL_COL_TYPES = {
+    "instrument": "string",
+    "time": "string",
+    "entry_long": "bool",
+    "entry_short": "bool",
+    "exit_long": "bool",
+    "exit_short": "bool",
+}
+
 
 def _trades_rows(result: RunResult) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
@@ -579,14 +631,23 @@ def _write_report(path: Path, metrics_payload: dict[str, Any]) -> None:
     if costs is not None:
         # F-3: the actual cost model applied, so a zero-cost backtest is
         # visible (and warn-able) rather than silently optimistic.
-        zero = all(float(costs.get(k, 0.0)) == 0.0
+        # P0 (UsageFinalReview): an unspecified cost field is ``None`` (not 0)
+        # — ``costs.get(k, 0.0)`` does NOT cover a present-but-None value, so
+        # ``float(None)`` raised TypeError and the whole report crashed, leaving
+        # the run without report.md / manifest.json.  _num() treats None as 0.
+        def _num(v: Any) -> float:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return 0.0
+        zero = all(_num(costs.get(k)) == 0.0
                    for k in ("commission_round_trip", "financing_per_day",
                              "spread", "slippage_per_side"))
         lines.append("- **cost model (bps):** commission_round_trip="
-                     f"{costs.get('commission_round_trip')}, "
-                     f"financing_per_day={costs.get('financing_per_day')}, "
-                     f"spread={costs.get('spread')}, "
-                     f"slippage_per_side={costs.get('slippage_per_side')}"
+                     f"{_num(costs.get('commission_round_trip'))}, "
+                     f"financing_per_day={_num(costs.get('financing_per_day'))}, "
+                     f"spread={_num(costs.get('spread'))}, "
+                     f"slippage_per_side={_num(costs.get('slippage_per_side'))}"
                      + ("  ⚠ **ALL ZERO — net returns are cost-free and optimistically biased**"
                         if zero else ""))
     # FIN-03 (UsageLastReview #2): disclose the quote model so a reader never
