@@ -15,6 +15,7 @@ import tempfile
 import typer
 from typing import Any
 
+import duckdb
 import yaml as _yaml
 
 from pathlib import Path
@@ -243,6 +244,26 @@ def features(
         typer.echo(f"catalog views: {', '.join(made)}")
 
 
+def _warn_zero_cost(plan: Any) -> None:
+    """F-3 (UsageLastReview): warn (not block) when a strategy backtests with
+    zero costs — such net returns are cost-free and optimistically biased.
+
+    Spread/slippage are optional (a limit-order venue may genuinely have none),
+    so the warning keys on the two near-universal costs: commission and
+    financing.  Warning only — some research legitimately wants zero-cost
+    signal quality, and this is a *review* concern, not a schema one.
+    """
+    zero = (float(plan.commission_bps_round_trip or 0.0) == 0.0
+            and float(plan.financing_bps_per_day or 0.0) == 0.0)
+    if zero:
+        typer.secho(
+            "WARN: zero-cost strategy (commission_bps_round_trip=0 AND "
+            "financing_bps_per_day=0) — backtest net returns will be "
+            "cost-free and optimistically biased. Set real bps before trusting "
+            "the numbers.",
+            fg=typer.colors.YELLOW, err=True)
+
+
 @app.command()
 def validate(
     strategy: str = typer.Argument(..., help="Path to a strategy YAML"),
@@ -275,6 +296,9 @@ def validate(
     typer.echo(f"stop_loss  : {plan.stop_loss_pct}  take_profit: {plan.take_profit_pct}")
     typer.echo(f"max_holding: {plan.max_holding_bars}  params: {list(plan.params)}")
     typer.echo(f"plan_hash  : {plan.plan_hash}")
+    # F-3 (UsageLastReview): a zero-cost backtest is silently optimistic —
+    # warn (don't block) so a reader/AI sees it before trusting the numbers.
+    _warn_zero_cost(plan)
 
 
 @app.command()
@@ -307,6 +331,7 @@ def compile(
     typer.echo(f"-- params   : {list(plan.params)}")
     typer.echo(f"-- stop     : {plan.stop_loss_pct}  tp: {plan.take_profit_pct}  mhb: {plan.max_holding_bars}")
     typer.echo(f"-- plan_hash: {plan.plan_hash}")
+    _warn_zero_cost(plan)
     typer.echo("")
     typer.echo(plan.sql)
 
@@ -474,6 +499,24 @@ def run(
         raise typer.Exit(code=1)
     except (FileNotFoundError, RuntimeError) as exc:
         typer.secho(f"RUN FAILED: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    except duckdb.Error as exc:
+        # #132 (R-1/R-2): a first-use `submit`/`run` almost always hits a
+        # duckdb.BinderException here (feature layer not yet computed), and
+        # letting it escape prints a bare Rich traceback the AI cannot act on.
+        # Surface the ACTUAL cause + the exact fix (the same hint `lyra doctor`
+        # already knows), so the AI runs `lyra features` and retries. Genuinely
+        # unexpected errors still propagate (this is the CLI boundary, not a
+        # broad swallow).
+        typer.secho(f"RUN FAILED: {exc}", fg=typer.colors.RED, err=True)
+        typer.secho(
+            "  Likely cause: the feature layer has not been computed for this "
+            "data dir.\n"
+            "  Fix: run `lyra features` (then `lyra catalog --refresh` if "
+            "available), and retry with the SAME branch slug (the strategy is "
+            "already valid and adopted — nothing to re-derive).\n"
+            "  Verify with: `lyra doctor` (it reports feature-generation "
+            "integrity).", fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(code=1)
 
     # 0009 D2 (M4): run_meta.json is the R12 identity source — a run the
@@ -769,8 +812,19 @@ def apply_batch_cmd(
                 _err(f"branch {it.branch!r} must match the vNN slug pattern")
                 continue
             wf.get_track(ws, it.direction, it.track)          # track must exist
-            # direction cross-check (item vs strategy YAML)
-            if spec.direction is not None and spec.direction != it.direction:
+            # DEV-03/RED-05 (UsageLastReview #2): the strategy YAML MUST declare
+            # its own direction — do NOT let the outer item.direction stand in.
+            # `spec.direction=None` (no `direction:` and no legacy `family:`)
+            # used to pass this check silently, so the branch was placed under
+            # item.direction but run_meta read direction from the (empty) file
+            # → None, corrupting per-direction attribution. Fail-closed, matching
+            # the single-`submit` path.
+            if not spec.direction:
+                _err(f"strategy YAML declares no direction — add a top-level "
+                     f"`direction: {it.direction}` (or legacy `family:`); the "
+                     f"outer item.direction cannot stand in for it")
+                continue
+            if spec.direction != it.direction:
                 _err(f"item.direction={it.direction!r} but the strategy YAML "
                      f"declares direction={spec.direction!r} — they must match")
                 continue
@@ -789,7 +843,18 @@ def apply_batch_cmd(
     for (dname, tid), n_new in new_by_track.items():
         if n_new == 0:
             continue
-        cur = wf.count_active_branches(ws, dname, tid)
+        try:
+            # RED-02 (UsageLastReview #2): track_index_path now validates the
+            # direction/track and asserts workspace containment, so a bad key
+            # that slipped through the per-item preflight (which normally
+            # catches it and exits) becomes a clean preflight error here
+            # instead of an uncaught exception.
+            cur = wf.count_active_branches(ws, dname, tid)
+        except wf.WorkflowError as exc:
+            for it, p, spec in resolved:
+                if (it.direction, it.track) == (dname, tid):
+                    pre_errors.append((it, str(exc)))
+            continue
         if cur + n_new > wf.MAX_ACTIVE_BRANCHES_PER_TRACK:
             for it, p, spec in resolved:
                 if (it.direction, it.track) == (dname, tid) and \
@@ -860,14 +925,28 @@ def apply_batch_cmd(
     # --- Stage 4: optional run (on the ADOPTED file → correct branch id) --
     # #131 (B6-T10): the --data-dir requirement was checked in stage 2.5
     # (before any writes), so it is guaranteed present here.
-    run_ok = run_fail = 0
+    run_ok = run_fail = run_partial = 0
     if run_it:
         for it, dest in adopted:
             try:
-                run(strategy=str(dest), data_dir=data_dir, alpha_dir=alpha_dir,
-                    config=config, name=None, out=None, strict=False, track=it.track)
-                run_ok += 1
-                typer.echo(f"  run {it.direction}/{it.track}/{it.branch}: ok")
+                res = run(strategy=str(dest), data_dir=data_dir, alpha_dir=alpha_dir,
+                          config=config, name=None, out=None, strict=False, track=it.track)
+                # DEV-04/RED-06 (UsageLastReview #2): `strict=False` means run()
+                # returns a RunResult even when SOME instruments failed — and
+                # previously the batch counted that as "run ok". Now a partial
+                # run (any instrument_failures) is reported as PARTIAL with the
+                # failing instruments, and drives a non-zero exit.
+                n_fail = len(res.instrument_failures) if res is not None else 0
+                if n_fail:
+                    run_partial += 1
+                    names = ", ".join(f.get("instrument", "?") for f in res.instrument_failures)
+                    typer.secho(
+                        f"  run {it.direction}/{it.track}/{it.branch}: PARTIAL — "
+                        f"{len(res.metrics)} ok / {n_fail} instrument(s) FAILED: {names}",
+                        fg=typer.colors.YELLOW)
+                else:
+                    run_ok += 1
+                    typer.echo(f"  run {it.direction}/{it.track}/{it.branch}: ok")
             except Exception as exc:  # B6-T11: typer.Exit OR any run error
                 # #131 (B6-T11): run() raises typer.Exit (a SystemExit
                 # subclass) or a plain exception; both were previously
@@ -879,18 +958,25 @@ def apply_batch_cmd(
                             f"FAILED ({type(exc).__name__}) — others continue",
                             fg=typer.colors.YELLOW)
     tmp.cleanup()
-    run_note = (f" · {run_ok} run ok, {run_fail} failed" if run_it else " · not run")
+    run_note = (f" · {run_ok} run ok, {run_partial} partial, {run_fail} failed"
+                if run_it else " · not run")
 
-    # #131 (B6): exit code reflects the true batch outcome — a run failure
-    # must not masquerade as a clean exit.
+    # #131 (B6) + DEV-04 (UsageLastReview #2): the exit code must reflect the
+    # true batch outcome — a hard failure (exit 3) or a *partial* run
+    # (exit 4) must not masquerade as a clean exit.
+    _warn = run_fail > 0 or run_partial > 0
     typer.secho("── batch summary ──────────────────────────────────────────",
-                fg=typer.colors.GREEN if run_fail == 0 else typer.colors.YELLOW)
+                fg=typer.colors.GREEN if not _warn else typer.colors.YELLOW)
     for it, dest in adopted:
         typer.echo(f"  [OK] {it.direction}/{it.track}/{it.branch} -> {dest}")
     typer.secho(f"{len(adopted)} adopted" + run_note,
-                fg=typer.colors.GREEN if run_fail == 0 else typer.colors.YELLOW)
+                fg=typer.colors.GREEN if not _warn else typer.colors.YELLOW)
     if run_it and run_fail > 0:
         raise typer.Exit(code=3)
+    if run_it and run_partial > 0:
+        # partial: the run produced SOME results but not all instruments
+        # completed — non-zero so an AI/human can't treat it as a clean pass.
+        raise typer.Exit(code=4)
 
 
 @app.command()
@@ -1544,10 +1630,12 @@ def _pull_direction(
 
 @app.command(name="pull-strategy")
 def pull_strategy(
-    direction: str = typer.Argument(..., help="Direction name, e.g. 'fx-trend'"),
+    direction: str | None = typer.Argument(None, help="Direction name, e.g. 'fx-trend' (omit with --all)"),
     config: str = typer.Option("config/config.yml", "--config"),
     dry_run: bool = typer.Option(False, "--dry-run",
                                  help="List what would be downloaded; do not fetch"),
+    all_directions: bool = typer.Option(False, "--all",
+                                        help="Pull EVERY known direction (local strategies/ or tracks/ folders)"),
 ) -> None:
     """Download a direction's strategies/ (``strategies/<direction>/**``)
     from the PAR bucket into the canonical workspace layout
@@ -1569,13 +1657,46 @@ def pull_strategy(
             fg=typer.colors.RED, err=True,
         )
         raise typer.Exit(code=2)
+
+    root = _workspace(config)
+    if all_directions:
+        # U-3 (UsageLastReview): `pull-strategy --all` — enumerate the known
+        # directions (from the local strategies/ and tracks/ folders) and pull
+        # each, so a fresh machine restores the whole research tree in one
+        # command instead of naming every direction by hand.
+        if direction is not None:
+            typer.secho("give either a <direction> OR --all, not both",
+                        fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2)
+        known: set[str] = set()
+        for sub in ("strategies", "tracks"):
+            base = root / sub
+            if base.is_dir():
+                for p in sorted(base.iterdir()):
+                    if p.is_dir() and workflow._IDENT_RE.match(p.name) \
+                            and p.name not in workflow._IDENT_BAD:
+                        known.add(p.name)
+        if not known:
+            typer.echo("(no known directions locally — nothing to pull; "
+                       "a completely fresh machine must name a direction explicitly)")
+            return
+        typer.echo(f"pulling {len(known)} known direction(s): "
+                   f"{', '.join(sorted(known))}")
+        for dname in sorted(known):
+            _pull_direction(prefix="strategies", par_url=url, save_root=root,
+                            direction=dname, dry_run=dry_run)
+            _pull_direction(prefix="tracks", par_url=url, save_root=root,
+                            direction=dname, dry_run=dry_run)
+        return
+    if direction is None:
+        typer.secho("ERROR: give a <direction> argument, or --all.",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
     try:
         workflow.validate_ident(direction, "direction")
     except workflow.WorkflowError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
-
-    root = _workspace(config)
     _pull_direction(
         prefix="strategies",
         par_url=url,
@@ -1808,18 +1929,39 @@ def digest_cmd(
                 skipped.append((p.name, "not a valid direction identifier"))
                 continue
             directions.append(p.name)
+        # D-3 (UsageLastReview): a single H1 header for the whole view, a
+        # corrected plural, the GLOBAL feature count printed once (not per
+        # direction), and per-direction level-2 headings via standalone=False.
         typer.echo("# digest — ALL directions (compact)")
-        typer.echo(f"({len(directions)} directions"
+        plural = "direction" if len(directions) == 1 else "directions"
+        typer.echo(f"({len(directions)} {plural}"
                    + (f", {len(skipped)} skipped" if skipped else "") + ")")
+        try:
+            from .features import build_registry as _build_registry
+            _n_feats = len(_build_registry().names())
+            typer.echo(f"features: {_n_feats} registered "
+                       f"(FEATURE_VERSION={workflow.FEATURE_VERSION}) — "
+                       f"see `lyra context <direction>` for a direction's full list")
+        except Exception:
+            pass  # feature registry optional for the digest header
         if skipped:
             for name, why in skipped:
                 typer.echo(f"  (skipped: {name} — {why})")
+        # USER-04 (UsageLastReview #2): `--all --track T` must actually scope
+        # each direction to T, not silently show every track. A direction that
+        # has no such track is reported explicitly (not dropped or shown wrong).
         for dname in directions:
             try:
-                typer.echo(workflow.render_digest(ws, dname, track=None,
-                                                  n_lessons=n_lessons))
+                typer.echo(workflow.render_digest(ws, dname, track=track,
+                                                  n_lessons=n_lessons,
+                                                  standalone=False))
             except workflow.WorkflowError as exc:
-                typer.secho(f"  (direction {dname}: {exc})", fg=typer.colors.RED)
+                if track is not None:
+                    typer.secho(f"  (direction {dname}: no track {track!r} — "
+                                f"skipped)", fg=typer.colors.YELLOW)
+                else:
+                    typer.secho(f"  (direction {dname}: {exc})",
+                                fg=typer.colors.RED)
         return
 
     if direction is None:

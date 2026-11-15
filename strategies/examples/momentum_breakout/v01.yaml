@@ -32,5 +32,6 @@ exit:
 execution:
   spread_bps: 2
   slippage_bps_per_side: 0.2
-  commission_bps_round_trip: 0
-  financing_bps_per_day: 0
+  # F-3: costed defaults — a zero-cost backtest is silently optimistic.
+  commission_bps_round_trip: 0.2
+  financing_bps_per_day: 0.1

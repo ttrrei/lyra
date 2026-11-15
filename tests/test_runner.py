@@ -235,6 +235,19 @@ def test_run_report_fields(env):
     assert "Per-month" in text
     assert "Cross-instrument summary" in text
     assert "EURUSD" in text
+    # F-3 (UsageLastReview): the ACTUAL cost model is surfaced in the report
+    # and in metrics.json, so a zero-cost backtest is visible, not silent.
+    assert "costs_bps" in payload
+    assert set(payload["costs_bps"]) == {
+        "commission_round_trip", "financing_per_day", "spread",
+        "slippage_per_side"}
+    assert "cost model (bps):" in text
+    # F-1: per-instrument stop trigger-rate is computed + rendered.
+    assert "stop_trigger_rate" in payload
+    assert 0.0 <= payload["stop_trigger_rate"]["EURUSD"] <= 1.0
+    assert "stop%" in text  # table header column
+    # F-2: the low-sample flag is present in the table (header at minimum).
+    assert "low-sample" in text
 
 
 def test_run_financing_wired(env):

@@ -220,6 +220,56 @@ lyra apply-batch bundle.yaml --config config/config.yml --run \
 7. **Track IDs are permanent slugs**. Choose them thoughtfully (e.g. `t_me`
    for momentum exhaustion) — they appear in file paths and OCI object keys.
 
+### Interpreting the numbers — do not over-trust them
+
+These caveats are the difference between "the AI thinks it found alpha" and
+"the AI understands what it actually measured". Read them before judging any
+run:
+
+- **`annualized` / `score` is a SUM, not a rate.** It is the net return of
+  every trade divided by full calendar years — it is *not* annualised like a
+  CAGR, and it is *not* a per-trade rate. A big number can come from a handful
+  of big trades, not from a robust edge.
+- **Choice bias ("best of N" is overstated).** If you (or a previous AI)
+  tried 10 parameter sets and this is the best one, its score is the maximum
+  of 10 noisy draws — systematically inflated. Treat a single top result as a
+  *candidate*, not a conclusion. More trials → the best one looks better even
+  when there is no edge.
+- **Low-sample flag.** The report marks instruments with **< 20 trades** as
+  `⚠ <20 trades`. A "win rate" on 3 trades is noise, not a signal. Weight
+  lessons toward the instruments with real trade counts.
+- **Costs matter — a zero-cost backtest is optimistic.** The report prints the
+  applied cost model (`commission`, `financing`, `spread`, `slippage`) and
+  warns if all are zero. A positive result that only survives *after* costs
+  are set is far more believable than a cost-free one.
+- **Instruments are correlated — don't sum them.** Each instrument's number
+  is reported separately (never summed into a portfolio). But if several
+  instruments are the same underlying (e.g. SPX500 vs SPX500_USD, or two
+  indices), a "multi-instrument" result is really one bet counted several
+  times. Treat correlated instruments as one exposure, not several.
+- **Financing is charged per calendar day.** For FX/CFD on margin this is
+  reasonable; for an index or cash position the day count overstates the real
+  cost. Read the `financing day basis` line in the report before comparing
+  instruments with different holding periods.
+- **The 2% stop is fixed (not volatility-normalized).** The report shows each
+  instrument's **stop%** (share of trades stopped out). An instrument at 0%
+  had an *inactive* stop — its tail risk was never cut by the design, so its
+  losses can be gap-driven and larger than 2%.
+- **This is trade-level research, NOT an account backtest.** The 2% stop is a
+  per-trade *price* stop. It is NOT account equity 2% HWM drawdown, not a 2%
+  risk-per-trade budget, not margin/leverage/liquidation protection, and there
+  is no sizing, portfolio, or cross-instrument exposure model. Never describe
+  a result as "the account won't drop more than X".
+- **Quotes are mid + synthetic spread (FIN-03).** The engine models the
+  long/short bid/ask branch in code, but the current runner feeds only *mid*
+  OHLC — so fills are mid price ± a fixed `spread_bps`, not real broker bid/ask
+  execution. Treat fills as a research assumption, not a live-quote simulation.
+- **Volume is quote/tick activity, not traded volume (FIN-04).** If the source
+  is OANDA candle data, `volume` is the *number of price updates* in the bar —
+  a tick/quote-activity proxy. MFI / OBV / relative volume derived from it
+  measure quoting activity, not real order flow or money in/out. Don't read a
+  volume indicator as "money flow" without verifying the source.
+
 ---
 
 ## 6. Example complete session

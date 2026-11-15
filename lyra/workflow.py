@@ -57,6 +57,27 @@ _TRACK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 # ``_1`` / ``_2`` (e.g. v04ab_1) — the parameter-variant series for one
 # strategy. Letter suffixes (v02a/v04ab) remain the AI-identity axis.
 _BRANCH_NAME_RE = re.compile(r"^v\d+[a-z]*(_\d+)?$")
+# DEV-01 (UsageLastReview #2): a SINGLE generation parser. The old gate used
+# `_VNN_FILE_RE` (no `(_\d+)?`), so a legal branch like `v02_1` (O12 variant
+# suffix) passed `_BRANCH_NAME_RE` but was invisible to the lineage gate — a
+# fail-OPEN bypass of both the v01-reservation and the parent/lesson
+# requirements. This extracts the leading generation number from ANY name
+# `_BRANCH_NAME_RE` accepts, so every legal branch is gated consistently.
+_BRANCH_GEN_RE = re.compile(r"^v(\d+)")
+
+
+def branch_generation(slug: str) -> int | None:
+    """The generation (leading vNN number) of a branch slug, or ``None``.
+
+    Recognizes exactly the names `_BRANCH_NAME_RE` accepts (``v02``, ``v02a``,
+    ``v04ab_1`` …).  Returns the numeric generation so the lineage gate can
+    treat ``v02_1`` the same as ``v02`` (N>=2 → gated) and ``v01_1`` the same
+    as ``v01`` (N==1 → reserved baseline).
+    """
+    if not _BRANCH_NAME_RE.match(slug):
+        return None
+    m = _BRANCH_GEN_RE.match(slug)
+    return int(m.group(1)) if m else None
 # direction/track/branch/run identifiers are single path components: no
 # separators, no dot segments (H4 — a "../x" direction would escape the
 # workspace root).
@@ -179,8 +200,26 @@ def track_index_path(workspace: Path, direction: str, track_id: str) -> Path:
     a verbatim line-superset of every previous version and therefore pushable
     (批次2-H10: the old mutable ``{"active": [...]}`` snapshot broke the
     append-only gate on the first fork/prune).
+
+    RED-02 (UsageLastReview #2): this is the SINGLE choke point through which
+    every read/write path helper builds a workspace-relative path (read_index_
+    events, _track_active, get_track, _append_index_event, prune_branch, …).
+    Validate direction + track_id HERE, and assert the resolved path stays
+    inside the workspace tree — so an untrusted "../outside", "a/b", "." or
+    absolute direction/track can never escape the workspace at ANY boundary,
+    not just the CLI layer.
     """
-    return workspace / "strategies" / direction / "index" / f"t{track_id}.jsonl"
+    validate_ident(direction, "direction")
+    _validate_track_id(track_id)
+    p = workspace / "strategies" / direction / "index" / f"t{track_id}.jsonl"
+    # Containment: the resolved path must remain under the resolved workspace.
+    root = Path(workspace).resolve()
+    resolved = p.resolve()
+    if root != resolved and root not in resolved.parents:
+        raise WorkflowError(
+            f"track index path escapes the workspace: {resolved!r} is not "
+            f"under {root!r}")
+    return p
 
 
 def read_index_events(workspace: Path, direction: str, track_id: str) -> list[dict[str, Any]]:
@@ -345,7 +384,14 @@ def prune_branch(workspace: Path, direction: str, track_id: str, branch: str,
     审查#128 D9.1: a ``reason`` (why this branch died) is recorded in the
     event so the digest's "tried" line can show ``pruned: <reason>`` — the
     next AI reads *why* a candidate was dropped, not just that it was.
+
+    RED-02 (UsageLastReview #2): validate direction AND track_id here, not
+    only in the CLI. This is a write boundary (``_append_index_event`` builds
+    a path from all three); the CLI layer is defense-in-depth, not the
+    authority.
     """
+    validate_ident(direction, "direction")
+    _validate_track_id(track_id)
     validate_ident(branch, "branch")
     if branch not in _track_active(workspace, direction, track_id):
         raise WorkflowError(f"branch {branch!r} is not active on track {track_id}")
@@ -396,11 +442,15 @@ def new_version(
     # M2 (审查#128): v01 is the direction-level shared read-only baseline —
     # a track must never own it (a candidate shadowing the baseline breaks
     # the common-ancestor contract). Candidates start at v02.
-    _m = _VNN_FILE_RE.match(branch + ".yaml")
-    if _m is not None and int(_m.group(1)) <= 1:
+    # DEV-01 (UsageLastReview #2): use the single generation parser so the
+    # `v01_1` variant is treated as generation 1 (reserved) here too,
+    # consistent with the lineage gate — not just the plain `v01` file name.
+    _gen = branch_generation(branch)
+    if _gen is not None and _gen <= 1:
         raise WorkflowError(
-            f"branch v01 is the DIRECTION baseline and is reserved — a track "
-            f"({direction}/{track}) must not own it. Start candidates at v02.")
+            f"branch {branch} is the DIRECTION baseline generation (v01) and "
+            f"is reserved — a track ({direction}/{track}) must not own it. "
+            f"Start candidates at v02 (v02a/v02b/v02_1/…).")
     # NOTE (D7/D8): `new_version` is the *skeleton generator* — it may be
     # called before the author fills in `parent`/`driven_by_lesson` (the
     # template carries quoted placeholders that pass `lyra validate`). The
@@ -589,15 +639,17 @@ def _validate_new_branch_lineage(workspace: Path, direction: str, track_id: str,
     ``.driven_by_lesson`` are read; typed ``Any`` to avoid a schema import
     cycle — ``parse_strategy`` guarantees both fields exist).
     """
-    m = _VNN_FILE_RE.match(branch + ".yaml")
-    if m is None:
+    # DEV-01: use the SINGLE generation parser (covers v02_1, v04ab_1, …)
+    # instead of `_VNN_FILE_RE` — the latter missed the O12 variant suffix and
+    # let those slugs fail OPEN past both the reservation and provenance rules.
+    n = branch_generation(branch)
+    if n is None:
         return  # not a vNN slug (e.g. a direction-level slug) — nothing to gate
-    n = int(m.group(1))
     if n <= 1:
         raise WorkflowError(
-            f"branch v01 is the DIRECTION baseline and is reserved — a track "
-            f"(direction/{track_id}) must not own it. Start this track's "
-            f"candidates at v02 (v02a/v02b/…).")
+            f"branch {branch} is the DIRECTION baseline generation (v01) and "
+            f"is reserved — a track (direction/{track_id}) must not own it. "
+            f"Start this track's candidates at v02 (v02a/v02b/v02_1/…).")
     parents = tuple(getattr(spec, "parents", ()) or ())
     lesson = (getattr(spec, "driven_by_lesson", None) or "").strip()
     problems: list[str] = []
@@ -667,12 +719,42 @@ def adopt_branch(workspace: Path, direction: str, track_id: str, branch: str,
     track_dir = workspace / "strategies" / direction / track_id
     dest = track_dir / f"{branch}.yaml"
 
-    # --- existing branch: immutable (M1) ---------------------------------
+    # DEV-02/USER-01 (UsageLastReview #2): resolve the branch's CURRENT state
+    # (active / pruned / orphan) BEFORE the idempotent no-op. The old order
+    # checked `dest.exists()` + same-bytes first, so a PRUNED branch
+    # re-submitted with identical bytes hit the no-op and returned "success"
+    # while the branch stayed inactive — a silent false success. Now the
+    # active/pruned state is authoritative.
+    events = read_index_events(workspace, direction, track_id)
+    active = active_branches_of(events)
+    ever_seen = _branch_ever_seen(events, branch)
+
     if dest.exists():
         same = (_file_sha256(dest) == _file_sha256(src))
+        if branch not in active:
+            # The file is on disk but the branch is NOT currently active.
+            # Either it was pruned (ever_seen) or it's an orphan (file written
+            # but the activate event was never appended). Neither is a case for
+            # a silent no-op.
+            if ever_seen:
+                raise WorkflowError(
+                    f"branch {branch!r} was previously pruned on track "
+                    f"{direction}/{track_id} — its slug is a historical record "
+                    f"and can NOT be re-activated (even with identical content). "
+                    f"Use a new branch slug (v02a → v02b)."
+                )
+            # orphan: file present, no activate/prune event — the previous
+            # adopt's index append failed. Fail closed rather than silently
+            # pretending it's active; the user must repair (see doctor).
+            raise WorkflowError(
+                f"branch {branch!r} file exists on track {direction}/{track_id} "
+                f"but has NO activate event (orphan — a previous adopt wrote the "
+                f"file but the index event was lost). It is NOT active. Use "
+                f"`lyra doctor` to inspect, or register a new branch slug."
+            )
         if same:
-            # idempotent re-run of the same branch — nothing to do (no new
-            # cap slot, no new event). Safe to call repeatedly.
+            # branch is active AND content is identical — idempotent no-op.
+            # Safe to call repeatedly (no new cap slot, no new event).
             return dest
         raise WorkflowError(
             f"branch {branch!r} on track {direction}/{track_id} already exists "
@@ -681,10 +763,8 @@ def adopt_branch(workspace: Path, direction: str, track_id: str, branch: str,
             f"(e.g. v02a → v02b) with the changed strategy."
         )
 
-    # --- slug already consumed by a pruned branch: never reused (M1) -----
-    events = read_index_events(workspace, direction, track_id)
-    active = active_branches_of(events)
-    if _branch_ever_seen(events, branch) and branch not in active:
+    # --- slug consumed by a pruned branch (file already removed): reuse banned
+    if ever_seen and branch not in active:
         raise WorkflowError(
             f"branch {branch!r} was previously pruned on track "
             f"{direction}/{track_id} — its slug is a historical record and can "
@@ -753,6 +833,7 @@ def render_digest(
     *,
     track: str | None = None,
     n_lessons: int = 3,
+    standalone: bool = True,
 ) -> str:
     """A COMPACT (<~3KB) history digest of a direction/track (审查#128 P0-2).
 
@@ -770,7 +851,10 @@ def render_digest(
     """
     validate_ident(direction, "direction")
     d = workspace / "strategies" / direction
-    out: list[str] = [f"# digest — {direction}" + (f" / track {track}" if track else "")]
+    # D-3 (UsageLastReview): when embedded in `digest --all`, use a level-2
+    # heading (not a repeating H1) so the whole thing reads as one document.
+    h = "##" if not standalone else "#"
+    out: list[str] = [f"{h} digest — {direction}" + (f" / track {track}" if track else "")]
 
     # hypothesis — one line (the first non-empty line), not the full text
     hyp = d / "hypothesis.md"
@@ -788,10 +872,14 @@ def render_digest(
         else:
             out.append("hypothesis: (none)")
 
-    from .features import build_registry
-    feats = build_registry().names()
-    out.append(f"features: {len(feats)} registered (FEATURE_VERSION={FEATURE_VERSION}) — "
-               f"see `lyra context {direction}` for the full list")
+    # D-3: the registered-feature count is GLOBAL (same for every direction),
+    # so it's emitted once in the `digest --all` header (see cli.py) and only
+    # repeated here in single-direction (standalone) mode.
+    if standalone:
+        from .features import build_registry
+        feats = build_registry().names()
+        out.append(f"features: {len(feats)} registered (FEATURE_VERSION={FEATURE_VERSION}) — "
+                   f"see `lyra context {direction}` for the full list")
 
     tracks_list = list_tracks(workspace, direction)
     if track is not None:
@@ -1012,8 +1100,10 @@ def render_context(
         "execution:",
         "  spread_bps: 2",
         "  slippage_bps_per_side: 0.2",
-        "  commission_bps_round_trip: 0",
-        "  financing_bps_per_day: 0",
+        # F-3: non-zero commission/financing so a fresh T3 strategy is costed
+        # from the start (zero-cost backtests are silently optimistic).
+        "  commission_bps_round_trip: 0.2",
+        "  financing_bps_per_day: 0.1",
         "```",
         "If you're unsure a feature exists, use only names from the `## features` list — an",
         "unregistered feature makes `lyra validate` fail with a clean INVALID line.",

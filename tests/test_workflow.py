@@ -996,7 +996,7 @@ def test_adopt_branch_v01_reserved(tmp_path):
     wf.create_track(tmp_path, "fx-trend", "alpha")
     src = tmp_path / "x.yaml"
     src.write_text("version: 1\nid: x\n", encoding="utf-8")
-    with pytest.raises(wf.WorkflowError, match="baseline and is reserved"):
+    with pytest.raises(wf.WorkflowError, match="baseline.*is reserved"):
         wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v01", src)
 
 
@@ -1125,6 +1125,29 @@ def test_digest_hypothesis_falls_back_to_v01_yaml(tmp_path):
     assert "(from v01.yaml)" in text
 
 
+def test_digest_standalone_vs_embedded_heading(tmp_path):
+    """D-3 (UsageLastReview): a standalone digest uses an H1 heading + the
+    global feature count; the embedded (``digest --all``) form uses H2 and
+    omits the repeated per-direction feature line (printed once in the header).
+    """
+    d = tmp_path / "strategies" / "me"
+    d.mkdir(parents=True)
+    (d / "v01.yaml").write_text(
+        "id: me_v01\ndirection: me\nversion: 1\nhypothesis: exhaustion\n",
+        encoding="utf-8",
+    )
+    standalone = wf.render_digest(tmp_path, "me")
+    embedded = wf.render_digest(tmp_path, "me", standalone=False)
+
+    # heading level differs
+    assert standalone.splitlines()[0].startswith("# digest — me")
+    assert embedded.splitlines()[0].startswith("## digest — me")
+    assert not embedded.splitlines()[0].startswith("# digest")
+    # the GLOBAL feature count appears in standalone, not in the embedded form
+    assert "registered (FEATURE_VERSION=" in standalone
+    assert "registered (FEATURE_VERSION=" not in embedded
+
+
 def test_context_no_hypothesis_anywhere_shows_none(tmp_path):
     """#130: truly absent hypothesis (no .md, no v01 field) → '(none)'."""
     d = tmp_path / "strategies" / "me"
@@ -1150,3 +1173,107 @@ def test_fallback_hypothesis_helper(tmp_path):
     (d / "v01.yaml").write_text(
         "id: me_v01\nhypothesis: real text\n", encoding="utf-8")
     assert wf._fallback_hypothesis(d) == "real text"
+
+
+# --- DEV-01 (UsageLastReview #2): variant-suffix branch slugs must be gated ---
+
+def _mk_spec(direction="fx-trend", parent=None, lesson=None):
+    class _S:
+        pass
+    s = _S()
+    s.direction = direction
+    s.parents = (parent,) if parent else ()
+    s.driven_by_lesson = lesson or ""
+    return s
+
+
+def test_dev01_variant_suffix_v02_1_requires_lineage(tmp_path):
+    """A legal O12 variant branch `v02_1` must be gated exactly like `v02`
+    (the old `_VNN_FILE_RE` missed it → fail-OPEN bypass of the gate)."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    # v02_1 with no parent/lesson → must be rejected (NOT silently passed)
+    with pytest.raises(wf.WorkflowError, match="lineage"):
+        wf._validate_new_branch_lineage(tmp_path, "fx-trend", "alpha",
+                                        "v02_1", _mk_spec())
+    # with a valid parent + lesson → accepted (gated, not bypassed)
+    wf._validate_new_branch_lineage(tmp_path, "fx-trend", "alpha", "v02_1",
+                                    _mk_spec(parent="v01", lesson="L1"))
+
+
+def test_dev01_v01_variant_is_reserved(tmp_path):
+    """`v01_1` is generation 1 → the reserved direction baseline, not a
+    track candidate (the old gate let it fail open past the reservation)."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    with pytest.raises(wf.WorkflowError, match="reserved"):
+        wf._validate_new_branch_lineage(tmp_path, "fx-trend", "alpha",
+                                        "v01_1", _mk_spec(parent="v01",
+                                                          lesson="L1"))
+
+
+def test_branch_generation_parser(tmp_path):
+    assert wf.branch_generation("v01") == 1
+    assert wf.branch_generation("v01_1") == 1
+    assert wf.branch_generation("v02") == 2
+    assert wf.branch_generation("v02a") == 2
+    assert wf.branch_generation("v02_1") == 2
+    assert wf.branch_generation("v04ab_1") == 4
+    assert wf.branch_generation("directions_foo") is None   # not a branch slug
+    assert wf.branch_generation("v01.yaml") is None          # not a slug
+
+
+# --- DEV-02 (UsageLastReview #2): prune → same-byte re-adopt must NOT succeed ---
+
+def test_dev02_pruned_branch_same_byte_reject(tmp_path):
+    """prune v02, then re-submit an IDENTICAL v02 → must reject (old code hit
+    the idempotent no-op and returned success while the branch stayed
+    inactive)."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "v02.yaml"
+    body = "version: 1\nid: s\ndirection: fx-trend\n"
+    src.write_text(body, encoding="utf-8")
+    spec = _mk_spec(parent="v01", lesson="L1")   # valid lineage for v02
+    wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02", src, spec)
+    wf.prune_branch(tmp_path, "fx-trend", "alpha", "v02")
+    # identical re-submit → reject (not a silent no-op)
+    src2 = tmp_path / "v02_again.yaml"
+    src2.write_text(body, encoding="utf-8")   # identical bytes
+    with pytest.raises(wf.WorkflowError, match="pruned"):
+        wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02", src2, spec)
+    # it must remain inactive
+    ev = wf.read_index_events(tmp_path, "fx-trend", "alpha")
+    assert "v02" not in wf.active_branches_of(ev)
+
+
+def test_dev02_active_branch_same_byte_still_idempotent(tmp_path):
+    """A branch that is STILL active + identical bytes → idempotent no-op."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "v02.yaml"
+    body = "version: 1\nid: s\ndirection: fx-trend\n"
+    src.write_text(body, encoding="utf-8")
+    spec = _mk_spec(parent="v01", lesson="L1")   # valid lineage for v02
+    d1 = wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02", src, spec)
+    src2 = tmp_path / "v02_b.yaml"
+    src2.write_text(body, encoding="utf-8")   # identical, branch still active
+    d2 = wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02", src2, spec)
+    assert d1 == d2
+    ev = wf.read_index_events(tmp_path, "fx-trend", "alpha")
+    assert "v02" in wf.active_branches_of(ev)
+
+
+# --- RED-02 (UsageLastReview #2): prune_branch validates direction/track ---
+
+def test_red02_prune_validates_direction_and_track(tmp_path):
+    """prune_branch must reject path-escape direction/track at the workflow
+    boundary, not only in the CLI."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    for bad in ("../outside", "a/b", ".", ""):
+        with pytest.raises(wf.WorkflowError):
+            wf.prune_branch(tmp_path, bad, "alpha", "v02")
+    for bad in ("../x", "a/b"):
+        with pytest.raises(wf.WorkflowError):
+            wf.prune_branch(tmp_path, "fx-trend", bad, "v02")

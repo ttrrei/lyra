@@ -343,3 +343,85 @@ def test_submit_missing_direction_is_actionable(tmp_path):
                                      "--data-dir", str(tmp_path / "data")])
     assert "no direction" in r.output or "add a top-level `direction:" in r.output
     assert "invalid direction None" not in r.output   # the old cryptic message is gone
+
+
+def test_warn_zero_cost_fires_on_zero_strategy(tmp_path):
+    """F-3 (UsageLastReview): a strategy that backtests with zero commission
+    AND zero financing must trigger the optimistic-bias warning (printed, not
+    raised); a costed strategy must NOT trigger it."""
+    import io
+    import contextlib
+    from lyra import cli
+
+    class _Plan:
+        def __init__(self, comm, fin):
+            self.commission_bps_round_trip = comm
+            self.financing_bps_per_day = fin
+
+    # zero + zero → warning fires
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        cli._warn_zero_cost(_Plan(0, 0))
+    assert "zero-cost" in buf.getvalue()
+    assert "optimistically biased" in buf.getvalue()
+
+    # commission set, financing zero → no warning (one real cost is enough)
+    buf2 = io.StringIO()
+    with contextlib.redirect_stderr(buf2):
+        cli._warn_zero_cost(_Plan(0.2, 0))
+    assert "zero-cost" not in buf2.getvalue()
+
+    # financing set, commission zero → no warning
+    buf3 = io.StringIO()
+    with contextlib.redirect_stderr(buf3):
+        cli._warn_zero_cost(_Plan(0, 0.1))
+    assert "zero-cost" not in buf3.getvalue()
+
+    # both non-zero → no warning
+    buf4 = io.StringIO()
+    with contextlib.redirect_stderr(buf4):
+        cli._warn_zero_cost(_Plan(0.2, 0.1))
+    assert "zero-cost" not in buf4.getvalue()
+
+
+def test_apply_batch_strategy_missing_direction_rejected(tmp_path):
+    """DEV-03/RED-05 (UsageLastReview #2): a strategy YAML with NO direction
+    (and no legacy family:) must be rejected in batch preflight — the outer
+    item.direction must NOT stand in for it. Zero writes."""
+    from typer.testing import CliRunner
+    from lyra import cli
+    import yaml as _y
+    ws = tmp_path / "ws"
+    d = ws / "strategies" / "d1"
+    (d / "t1").mkdir(parents=True)
+    base = {"version": 1, "id": "b", "direction": "d1", "timeframe_minutes": 60,
+            "entry": {"long": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                      "short": {"feature": "sma_6", "op": "lt", "value": "sma_24"}},
+            "exit": {"long": {"feature": "sma_6", "op": "lt", "value": "sma_24"},
+                     "short": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                     "stop_loss_pct": 0.02, "max_holding_bars": 12},
+            "execution": {"spread_bps": 2, "slippage_bps_per_side": 0.2}}
+    (d / "v01.yaml").write_text(_y.safe_dump(base, allow_unicode=True),
+                                encoding="utf-8")
+    from lyra import workflow as wf
+    wf.create_track(ws, "d1", "t1")
+    # the STRATEGY omits direction (only the item carries d1)
+    no_dir = {k: v for k, v in base.items() if k != "direction"}
+    no_dir["id"] = "s2"
+    bundle = {"version": 1, "directions": [
+        {"direction": "d1", "track": "t1", "branch": "v02", "parent": "v01",
+         "driven_by_lesson": "v01 baseline was too tight",
+         "hypothesis": "Wider entry",
+         "strategy": no_dir}]}
+    bf = tmp_path / "b.yaml"
+    bf.write_text(_y.safe_dump(bundle, allow_unicode=True), encoding="utf-8")
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"local:\n  workspace: {ws}\n  data: {ws}/data\n"
+        f"  strategies: {ws}/strategies\n  runs: {ws}/runs\n  alpha: {ws}/alpha\n",
+        encoding="utf-8")
+    r = CliRunner().invoke(cli.app, ["apply-batch", str(bf), "--config", str(cfg)])
+    assert r.exit_code != 0
+    assert "no direction" in r.output or "declares no direction" in r.output
+    # zero writes: the branch file must NOT exist
+    assert not (d / "t1" / "v02.yaml").exists()

@@ -706,13 +706,12 @@ def feature_version_string(reg: Registry) -> str:
         parts.append(f"{name}|{sorted(spec.params.items())}|{spec.warmup_bars}")
     payload = "\n".join(parts)
     sha = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
-    # #131 (P-10): the Python *patch* version (and numpy's full version) must
-    # NOT enter the fingerprint. The two machines the multi-AI loop runs on
-    # will always differ in their exact patch/point release (3.12.4 vs
-    # 3.12.9, numpy 2.1.0 vs 2.1.3); a byte-identical feature table is still
-    # a byte-identical feature table — the numeric *minor* bound (3.12 vs 3.13)
-    # is the only thing that can change the Parquet bytes via the C-level
-    # numpy API, and that is a real semantic boundary worth keeping.
+    # #131 (P-10): the Python *patch* version is deliberately excluded from the
+    # fingerprint (both machines the multi-AI loop runs on differ in their
+    # point release, 3.12.4 vs 3.12.9, yet produce a byte-identical feature
+    # table). numpy's FULL version is deliberately KEPT: at the C level, a
+    # numpy minor/patch release can change the serialized Parquet bytes, so it
+    # is a real reproducibility boundary that must be visible in the id.
     stack = f"py{_py_minor()}/np{_np.__version__}"
     return f"feat-{FEATURE_VERSION}-{sha}-{stack}"
 

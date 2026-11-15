@@ -533,6 +533,19 @@ def _fmt(x: Any) -> str:
     return str(x)
 
 
+def _stop_trigger_rate(trades: list[Any]) -> float:
+    """F-1: fraction of an instrument's trades stopped out (stop_loss/stop_gap).
+
+    Lets a reader see at a glance whether the 2% stop was inactive (0%) or the
+    main exit path, per instrument.  ``0.0`` when the instrument has no trades.
+    """
+    if not trades:
+        return 0.0
+    stops = sum(1 for t in trades
+                if getattr(t, "exit_reason", None) in ("stop_loss", "stop_gap"))
+    return stops / len(trades)
+
+
 def _write_report(path: Path, metrics_payload: dict[str, Any]) -> None:
     """R5 report: strategy name, timeframe, instruments, time window, feature
     snapshot id, git commit, date; per-instrument metrics (no CAGR/HWM/Sharpe/
@@ -562,6 +575,28 @@ def _write_report(path: Path, metrics_payload: dict[str, Any]) -> None:
                  "(data window; generation time in manifest.json)")
     basis = metrics_payload.get("trading_days_basis") or "calendar"
     lines.append("- financing day basis: " + ("trading days" if basis == "trading" else "calendar/natural days (default; R4/O15 trading-day basis is a future enhancement)"))
+    costs = metrics_payload.get("costs_bps")
+    if costs is not None:
+        # F-3: the actual cost model applied, so a zero-cost backtest is
+        # visible (and warn-able) rather than silently optimistic.
+        zero = all(float(costs.get(k, 0.0)) == 0.0
+                   for k in ("commission_round_trip", "financing_per_day",
+                             "spread", "slippage_per_side"))
+        lines.append("- **cost model (bps):** commission_round_trip="
+                     f"{costs.get('commission_round_trip')}, "
+                     f"financing_per_day={costs.get('financing_per_day')}, "
+                     f"spread={costs.get('spread')}, "
+                     f"slippage_per_side={costs.get('slippage_per_side')}"
+                     + ("  ⚠ **ALL ZERO — net returns are cost-free and optimistically biased**"
+                        if zero else ""))
+    # FIN-03 (UsageLastReview #2): disclose the quote model so a reader never
+    # mistakes a mid+synthetic-spread backtest for a real bid/ask fill model.
+    lines.append("- quote model: mid OHLC ± fixed spread_bps "
+                 "(bid/ask branch exists in the engine but is NOT wired to the "
+                 "runner feed — treat fills as a research assumption)")
+    lines.append("- scope: trade-level per-instrument research — no sizing, "
+                 "leverage, margin, account HWM/drawdown, or portfolio model "
+                 "(I9)")
     if metrics_payload.get("instrument_failures"):
         lines.append("- **instrument failures:**")
         for f in metrics_payload["instrument_failures"]:
@@ -569,14 +604,22 @@ def _write_report(path: Path, metrics_payload: dict[str, Any]) -> None:
     lines.append("")
     lines.append("## Per-instrument metrics (R5; no CAGR/HWM/Sharpe/Sortino — I9)")
     lines.append("")
-    lines.append("| instrument | trades | net sum | annualized | win% | expectancy | avg bars held |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("| instrument | trades | net sum | annualized | win% | expectancy | avg bars held | stop% | low-sample |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
+    stop_rates = metrics_payload.get("stop_trigger_rate", {})
     for inst in sorted(metrics_payload["per_instrument"]):
         m = metrics_payload["per_instrument"][inst]
+        # F-2 (cheap): a low-sample flag so readers don't over-trust a 3-trade
+        # "win rate".  Threshold 20 is a conventional small-sample marker.
+        low_sample = int(m.get("trade_count", 0)) < 20
+        stop_rate = stop_rates.get(inst)
+        stop_cell = (f"{stop_rate:.3f}" + (" (inactive)" if stop_rate == 0.0 else "")
+                     if stop_rate is not None else "—")
         lines.append(
             f"| {inst} | {m['trade_count']} | {_fmt(m.get('net_return'))} | "
             f"{_fmt(m.get('annualized'))} | {m['win_rate']:.4f} | "
-            f"{m['expectancy']:.6f} | {_fmt(m.get('avg_bars_held'))} |"
+            f"{m['expectancy']:.6f} | {_fmt(m.get('avg_bars_held'))} | "
+            f"{stop_cell} | {'⚠ <20 trades' if low_sample else ''} |"
         )
     lines.append("")
     lines.append("## Per-month (actual openings; zero-open months kept — I8)")
@@ -686,6 +729,20 @@ def _write_artifacts(
         "per_instrument": {i: result.metrics[i] for i in sorted(result.metrics)},
         "summary": summary,
         "instrument_failures": result.instrument_failures,
+        # F-3 (UsageLastReview): the ACTUAL cost model applied, surfaced in the
+        # report so a reader never silently trusts a zero-cost backtest.
+        "costs_bps": {
+            "commission_round_trip": plan.commission_bps_round_trip,
+            "financing_per_day": plan.financing_bps_per_day,
+            "spread": plan.spread_bps,
+            "slippage_per_side": plan.slippage_bps_per_side,
+        },
+        # F-1: per-instrument stop trigger-rate (fraction stopped out), so a
+        # 0% instrument is visibly "stop inactive" rather than an unnoticed bug.
+        "stop_trigger_rate": {
+            inst: _stop_trigger_rate(result.trades[inst])
+            for inst in sorted(result.trades)
+        },
     }
     # metrics.json is fully deterministic (I5): no wall-clock field.  The
     # generation stamp lives only in manifest.json's ``generated_at``.
