@@ -892,25 +892,140 @@ def test_append_lesson_empty_text_fails(tmp_path):
         wf.append_lesson(tmp_path, "fx-trend", "alpha", "   ")
 
 
+def _spec(parents=(), lesson=None):
+    """A minimal stand-in for a parsed StrategySpec (lineage fields only)."""
+    return types.SimpleNamespace(parents=tuple(parents),
+                                 driven_by_lesson=lesson)
+
+
 def test_adopt_branch_writes_ai_yaml_into_track(tmp_path):
     """审查 #125 gap #2: the AI's strategy file (already validated upstream)
-    becomes the track's branch file verbatim — not a skeleton."""
+    becomes the track's branch file verbatim — not a skeleton.
+    审查#128 M2: candidates start at v02 and must declare lineage."""
     _mk_direction(tmp_path)
     wf.create_track(tmp_path, "fx-trend", "alpha")
     src = tmp_path / "ai_written.yaml"
     src.write_text("version: 1\nid: ai_good\n# AI-authored body\n",
                    encoding="utf-8")
-    dest = wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v01", src)
+    dest = wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02", src,
+                           spec=_spec(parents=("v01",), lesson="stop was binding"))
     assert dest.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
     # index event recorded (append-only)
-    idx = tmp_path / "strategies" / "fx-trend" / "index" / "talpha.jsonl"
-    if not idx.exists():
-        # find the index jsonl by listing the index dir
-        idxdir = tmp_path / "strategies" / "fx-trend" / "index"
-        idxs = list(idxdir.glob("*.jsonl")) if idxdir.exists() else []
-        assert idxs, "no index jsonl written by adopt_branch"
-        idx = idxs[0]
-    assert "v01" in idx.read_text(encoding="utf-8")
+    idxdir = tmp_path / "strategies" / "fx-trend" / "index"
+    idxs = list(idxdir.glob("*.jsonl")) if idxdir.exists() else []
+    assert idxs, "no index jsonl written by adopt_branch"
+    idx = idxs[0]
+    assert "v02" in idx.read_text(encoding="utf-8")
+
+
+def test_adopt_branch_immutable_same_content_idempotent(tmp_path):
+    """审查#128 M1: re-adopting an EXISTING branch with byte-identical content
+    is a safe no-op (no overwrite, no second index event, no cap consumed)."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "a.yaml"
+    src.write_text("version: 1\nid: same\n", encoding="utf-8")
+    spec = _spec(parents=("v01",), lesson="L")
+    dest = wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02", src, spec)
+    before = (tmp_path / "strategies" / "fx-trend" / "index")
+    first = before.joinpath(list(before.glob("*.jsonl"))[0].name)
+    n_before = len(first.read_text(encoding="utf-8").splitlines())
+    # second adopt of the same content → no new event
+    dest2 = wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02", src, spec)
+    assert dest2 == dest
+    n_after = len(first.read_text(encoding="utf-8").splitlines())
+    assert n_before == n_after, "idempotent re-adopt must not append a new event"
+
+
+def test_adopt_branch_immutable_diff_content_refused(tmp_path):
+    """审查#128 M1: re-adopting an EXISTING branch with DIFFERENT content is
+    refused (a branch is immutable; its historical runs point at it)."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "a.yaml"
+    src.write_text("version: 1\nid: v1-content\n", encoding="utf-8")
+    wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02", src,
+                    spec=_spec(parents=("v01",), lesson="L"))
+    src.write_text("version: 1\nid: v2-different\n", encoding="utf-8")
+    with pytest.raises(wf.WorkflowError, match="IMMUTABLE"):
+        wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02", src,
+                        spec=_spec(parents=("v01",), lesson="L"))
+
+
+def test_adopt_refresh_existing_branch_at_cap(tmp_path):
+    """D8.1 (审查#128): at the 8-branch cap, re-submitting an EXISTING branch
+    (idempotent, byte-identical) must NOT consume a new slot — only a genuinely
+    new branch hits the cap."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "a.yaml"
+    src.write_text("version: 1\nid: x\n", encoding="utf-8")
+    spec = _spec(parents=("v01",), lesson="L")
+    # fill the cap with 8 distinct branches
+    for i in range(2, 10):
+        s = tmp_path / f"b{i}.yaml"
+        s.write_text(f"version: 1\nid: b{i}\n", encoding="utf-8")
+        wf.adopt_branch(tmp_path, "fx-trend", "alpha", f"v{i:02d}", s, spec)
+    # re-adopt an EXISTING branch with identical content → allowed at cap
+    existing = wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v02",
+                               tmp_path / "b2.yaml", spec)
+    assert existing.exists()
+    # but a genuinely NEW 9th branch is still refused
+    new = tmp_path / "n9.yaml"
+    new.write_text("version: 1\nid: n9\n", encoding="utf-8")
+    with pytest.raises(wf.WorkflowError, match="cap"):
+        wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v99", new, spec)
+
+
+def test_lesson_with_newlines_stays_one_line(tmp_path):
+    """D8.2 (审查#128): a pasted multi-line lesson is flattened to ONE line
+    (embedded newlines → spaces), so the one-line-per-lesson invariant holds
+    and the digest renders it as a single entry."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    wf.append_lesson(tmp_path, "fx-trend", "alpha", "line one\nline two\n  line three")
+    p = wf.track_lessons_path(tmp_path, "fx-trend", "alpha")
+    body = [ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(body) == 1, f"expected 1 line, got {body!r}"
+    assert "line one line two  line three" in body[0] or "line one line two line three" in body[0]
+
+
+def test_adopt_branch_v01_reserved(tmp_path):
+    """审查#128 M2: v01 is the direction baseline — a track must not own it."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "x.yaml"
+    src.write_text("version: 1\nid: x\n", encoding="utf-8")
+    with pytest.raises(wf.WorkflowError, match="baseline and is reserved"):
+        wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v01", src)
+
+
+def test_adopt_branch_vnn_requires_lineage(tmp_path):
+    """审查#128 M2: a track vNN (N>=2) must declare parent + driven_by_lesson."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "x.yaml"
+    src.write_text("version: 1\nid: x\n", encoding="utf-8")
+    # no parent, no lesson → rejected
+    with pytest.raises(wf.WorkflowError, match="lineage"):
+        wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v03", src,
+                        spec=_spec(parents=(), lesson=None))
+    # parent + lesson present → accepted
+    dest = wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v03", src,
+                           spec=_spec(parents=("v01",), lesson="L"))
+    assert dest.exists()
+
+
+def test_adopt_branch_unknown_parent_refused(tmp_path):
+    """审查#128 M2: a parent that resolves to neither the baseline nor an
+    existing track branch is refused — lineage cannot be fabricated."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    src = tmp_path / "x.yaml"
+    src.write_text("version: 1\nid: x\n", encoding="utf-8")
+    with pytest.raises(wf.WorkflowError, match="does not exist"):
+        wf.adopt_branch(tmp_path, "fx-trend", "alpha", "v03", src,
+                        spec=_spec(parents=("v99",), lesson="L"))
 
 
 def test_adopt_branch_invalid_slug_fails(tmp_path):

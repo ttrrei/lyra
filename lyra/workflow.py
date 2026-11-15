@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -329,18 +330,25 @@ def enforce_branch_cap(workspace: Path, direction: str, track_id: str) -> None:
         )
 
 
-def prune_branch(workspace: Path, direction: str, track_id: str, branch: str) -> None:
+def prune_branch(workspace: Path, direction: str, track_id: str, branch: str,
+                 reason: str = "") -> None:
     """Explicitly drop a branch from the track's active list (cap relief).
 
     H10: appends a prune EVENT — earlier lines are never rewritten, so the
     JSONL stays a verbatim line-superset (I17 append-only) and the prune is
     pushable (the old snapshot rewrite was rejected by the gate).
+
+    审查#128 D9.1: a ``reason`` (why this branch died) is recorded in the
+    event so the digest's "tried" line can show ``pruned: <reason>`` — the
+    next AI reads *why* a candidate was dropped, not just that it was.
     """
     validate_ident(branch, "branch")
     if branch not in _track_active(workspace, direction, track_id):
         raise WorkflowError(f"branch {branch!r} is not active on track {track_id}")
-    _append_index_event(workspace, direction, track_id,
-                        {"op": "prune", "branch": branch, "at": _now_iso()})
+    ev: dict[str, Any] = {"op": "prune", "branch": branch, "at": _now_iso()}
+    if reason.strip():
+        ev["reason"] = reason.strip()
+    _append_index_event(workspace, direction, track_id, ev)
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +389,19 @@ def new_version(
             f"invalid branch name {branch!r} — branches are vNN with optional "
             f"lowercase sibling/cross suffix (v02a, v04ab) per requirements R12"
         )
+    # M2 (审查#128): v01 is the direction-level shared read-only baseline —
+    # a track must never own it (a candidate shadowing the baseline breaks
+    # the common-ancestor contract). Candidates start at v02.
+    _m = _VNN_FILE_RE.match(branch + ".yaml")
+    if _m is not None and int(_m.group(1)) <= 1:
+        raise WorkflowError(
+            f"branch v01 is the DIRECTION baseline and is reserved — a track "
+            f"({direction}/{track}) must not own it. Start candidates at v02.")
+    # NOTE (D7/D8): `new_version` is the *skeleton generator* — it may be
+    # called before the author fills in `parent`/`driven_by_lesson` (the
+    # template carries quoted placeholders that pass `lyra validate`). The
+    # real lineage gate is `adopt_branch`/`submit`, which sees the final
+    # strategy spec (see `_validate_new_branch_lineage`).
     validate_ident(direction, "direction")
     get_track(workspace, direction, track)  # must exist (I18 identity)
     if branch in _track_active(workspace, direction, track):
@@ -496,7 +517,15 @@ def append_lesson(workspace: Path, direction: str, track_id: str, text: str) -> 
     (I18 identity).
     """
     get_track(workspace, direction, track_id)  # must exist (I18 identity)
-    text = text.strip().rstrip("\n")
+    # D8.2 (审查#128): a lesson is ONE line (the digest/context render the last
+    # N lines as one entry each). Flatten embedded whitespace so a pasted
+    # multi-line block cannot break the one-line-per-lesson invariant, strip
+    # control characters, and cap length (a lesson that enters the next AI's
+    # prompt is a data-in-prompt channel — keep it small and well-formed).
+    text = " ".join(str(text).split())
+    text = "".join(ch for ch in text if ch == " " or ch.isprintable())
+    if len(text) > 300:
+        text = text[:300].rstrip() + "…"
     if not text:
         raise WorkflowError("lesson text is empty — a lesson must say something")
     p = track_lessons_path(workspace, direction, track_id)
@@ -509,32 +538,144 @@ def append_lesson(workspace: Path, direction: str, track_id: str, text: str) -> 
     return p
 
 
-def adopt_branch(workspace: Path, direction: str, track_id: str, branch: str,
-                 source_yaml: Path) -> Path:
-    """Make the web-AI's strategy file the ACTUAL branch (审查 #125 gap #2).
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    ``new_version`` writes a *skeleton* and the AI's file stays a separate
-    one-off — so ``context`` showed the skeleton while the run came from a
-    different file. This writes the AI's (already-validated) YAML into the
-    track's branch location, registering/refreshing the branch in the index
-    and enforcing the 8-branch cap (I19). The caller is responsible for
-    validating the YAML first (``submit`` does this before calling).
+
+def _branch_ever_seen(events: list[dict[str, Any]], branch: str) -> bool:
+    """True if *branch* was ever activated or pruned (slug already consumed)."""
+    for e in events:
+        if e.get("branch") == branch and e.get("op") in ("activate", "prune"):
+            return True
+    return False
+
+
+def _validate_new_branch_lineage(workspace: Path, direction: str, track_id: str,
+                                 branch: str, spec: Any) -> None:
+    """M2 / R12 lineage gate, enforced at the ONE seam where a track branch is
+    created (``adopt_branch``) — fail-closed, no exceptions.
+
+    - **v01 is reserved** as the direction-level shared read-only baseline
+      (``strategies/<direction>/v01.yaml``); a track must never own it.
+      Rejecting it here means the direction baseline stays the common
+      ancestor and a track's candidate can't silently shadow it.
+    - **vNN (N>=2) must declare its provenance** (R12): a ``parent`` (or
+      ``parents``) that resolves to the direction baseline (v01) or an existing
+      track branch, AND a non-empty ``driven_by_lesson`` (a one-line pointer
+      into lessons.md). No parent, or a parent naming a branch that doesn't
+      exist, is rejected — you cannot fabricate a lineage by copying YAML.
+
+    ``spec`` is the parsed ``StrategySpec`` (only ``.parents`` and
+    ``.driven_by_lesson`` are read; typed ``Any`` to avoid a schema import
+    cycle — ``parse_strategy`` guarantees both fields exist).
+    """
+    m = _VNN_FILE_RE.match(branch + ".yaml")
+    if m is None:
+        return  # not a vNN slug (e.g. a direction-level slug) — nothing to gate
+    n = int(m.group(1))
+    if n <= 1:
+        raise WorkflowError(
+            f"branch v01 is the DIRECTION baseline and is reserved — a track "
+            f"(direction/{track_id}) must not own it. Start this track's "
+            f"candidates at v02 (v02a/v02b/…).")
+    parents = tuple(getattr(spec, "parents", ()) or ())
+    lesson = (getattr(spec, "driven_by_lesson", None) or "").strip()
+    problems: list[str] = []
+    if not parents:
+        problems.append(
+            f"a track branch vNN (v{n}) must declare its provenance: add "
+            f"`parent: <父版本 slug>` (or `parents: [v01, …]`) — v01 is the "
+            f"direction baseline, or an existing track branch.")
+    else:
+        for p in parents:
+            # A valid parent resolves to the direction baseline (v01) or an
+            # existing file on this track. Either must actually be present.
+            baseline = workspace / "strategies" / direction / f"{p}.yaml"
+            on_track = workspace / "strategies" / direction / track_id / f"{p}.yaml"
+            if not (baseline.exists() or on_track.exists()):
+                problems.append(
+                    f"declared parent {p!r} does not exist as the direction "
+                    f"baseline (strategies/{direction}/{p}.yaml) or on this "
+                    f"track (strategies/{direction}/{track_id}/{p}.yaml).")
+    if not lesson:
+        problems.append(
+            f"a track branch vNN (v{n}) must declare `driven_by_lesson:` — a "
+            f"one-line pointer into lessons.md explaining what evidence drove "
+            f"this candidate.")
+    if problems:
+        raise WorkflowError(
+            f"branch {branch} on track {direction}/{track_id} rejected "
+            f"(R12 lineage):\n  - " + "\n  - ".join(problems))
+
+
+def adopt_branch(workspace: Path, direction: str, track_id: str, branch: str,
+                 source_yaml: Path, spec: Any = None) -> Path:
+    """Make the web-AI's strategy file the ACTUAL branch (审查 #125 gap #2,
+    hardened by 审查#128 M1: **branch content is immutable**).
+
+    A branch slug is a stable identity that historical runs point at
+    (``run_meta.branch``). Overwriting ``v02a.yaml`` in place would silently
+    change what those runs mean, and ``context`` would then show the new YAML
+    next to the *old* runs — the AI would read stale evidence as current. So:
+
+    - **new branch** → enforced against the 8-cap (I19), then the AI's
+      (already-validated) YAML is written **atomically** (tmp + ``os.replace``)
+      and one ``activate`` event is appended (I17 append-only).
+    - **branch file already present, byte-identical** → **idempotent no-op**
+      (same branch re-run; no write, no new event, no cap consumed).
+    - **branch file already present, different bytes** → **fail-closed**: a
+      branch is immutable; the AI must use a NEW branch slug (history is
+      never mutated).
+    - **slug already pruned** → **fail-closed**: slugs are never reused
+      (a pruned branch is a historical record, not a reusable name).
+
+    The cap check runs **only** for a genuinely new branch, so re-submitting
+    an existing branch at 8/8 is allowed (it consumes no new slot).
     """
     get_track(workspace, direction, track_id)      # track must exist (I18)
     if not _BRANCH_NAME_RE.match(branch):
         raise WorkflowError(f"invalid branch name '{branch}'")
-    enforce_branch_cap(workspace, direction, track_id)  # I19, fail-closed
     src = Path(source_yaml)
     if not src.exists():
         raise WorkflowError(f"source strategy file not found: {src}")
     track_dir = workspace / "strategies" / direction / track_id
     dest = track_dir / f"{branch}.yaml"
-    # Re-adopting an existing branch refreshes it in place (a branch is the
-    # track's single mutable line; the index stays append-only). No-op for a
-    # new branch.
+
+    # --- existing branch: immutable (M1) ---------------------------------
+    if dest.exists():
+        same = (_file_sha256(dest) == _file_sha256(src))
+        if same:
+            # idempotent re-run of the same branch — nothing to do (no new
+            # cap slot, no new event). Safe to call repeatedly.
+            return dest
+        raise WorkflowError(
+            f"branch {branch!r} on track {direction}/{track_id} already exists "
+            f"with different content — branches are IMMUTABLE (their historical "
+            f"runs point at them). Do NOT overwrite: register a NEW branch slug "
+            f"(e.g. v02a → v02b) with the changed strategy."
+        )
+
+    # --- slug already consumed by a pruned branch: never reused (M1) -----
+    events = read_index_events(workspace, direction, track_id)
+    active = active_branches_of(events)
+    if _branch_ever_seen(events, branch) and branch not in active:
+        raise WorkflowError(
+            f"branch {branch!r} was previously pruned on track "
+            f"{direction}/{track_id} — its slug is a historical record and can "
+            f"NOT be re-activated. Use a new branch slug (v02a → v02b)."
+        )
+
+    # --- genuinely new branch: M2 lineage, then cap check + atomic write --
+    _validate_new_branch_lineage(workspace, direction, track_id, branch, spec)
+    enforce_branch_cap(workspace, direction, track_id)  # I19, fail-closed
     track_dir.mkdir(parents=True, exist_ok=True)
-    # Copy content verbatim (the AI's validated YAML) — not a symlink/skeleton.
-    dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    # Atomic single-file write: tmp in the SAME dir + os.replace (no partial
+    # file visible; a write that lands but whose index append fails is
+    # detectable by doctor as an orphan YAML, never silent).
+    content = src.read_text(encoding="utf-8")
+    tmp = dest.with_name(dest.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, dest)
     rel = f"{track_id}/{branch}.yaml"  # path relative to strategies/<direction>/
     _append_index_event(workspace, direction, track_id, {
         "op": "activate", "branch": branch, "file": rel,
@@ -578,6 +719,102 @@ def _branch_file(workspace: Path, direction: str, branch: str,
                 if pm and int(pm.group(1)) == int(m.group(1)):
                     return p
     return None
+
+
+def render_digest(
+    workspace: Path,
+    direction: str,
+    *,
+    track: str | None = None,
+    n_lessons: int = 3,
+) -> str:
+    """A COMPACT (<~3KB) history digest of a direction/track (审查#128 P0-2).
+
+    ``render_context`` is the full self-contained package (hypothesis text,
+    full YAML of every active branch, every run row). That is the right
+    artifact for a coding AI that can open files — but a **web/chat AI**
+    reading it in a chat window pays the full token cost every iteration.
+    ``render_digest`` is the low-token view: one screen of *what this track
+    is about*, *which branches are active*, and *what each has scored* —
+    enough to decide "iterate / prune / try a new angle" without dumping a
+    90KB report. Full detail is always one ``lyra context`` away.
+
+    Reads exactly the same sidecars/artifacts as ``render_context``; it is a
+    projection of the same facts, not a second source of truth.
+    """
+    validate_ident(direction, "direction")
+    d = workspace / "strategies" / direction
+    out: list[str] = [f"# digest — {direction}" + (f" / track {track}" if track else "")]
+
+    # hypothesis — one line (the first non-empty line), not the full text
+    hyp = d / "hypothesis.md"
+    if hyp.exists():
+        first = next((ln.strip() for ln in hyp.read_text(encoding="utf-8").splitlines()
+                      if ln.strip()), "")
+        # drop a leading '#' heading marker for brevity
+        first = first.lstrip("# ").strip()
+        out.append(f"hypothesis: {first[:160]}{'…' if len(first) > 160 else ''}")
+    else:
+        out.append("hypothesis: (none)")
+
+    from .features import build_registry
+    feats = build_registry().names()
+    out.append(f"features: {len(feats)} registered (FEATURE_VERSION={FEATURE_VERSION}) — "
+               f"see `lyra context {direction}` for the full list")
+
+    tracks_list = list_tracks(workspace, direction)
+    if track is not None:
+        tracks_list = [t for t in tracks_list if t["track_id"] == track]
+        if not tracks_list:
+            raise WorkflowError(f"unknown track: {direction}/{track}")
+
+    shared_lessons = d / "lessons.md"
+    for t in tracks_list:
+        tid = t["track_id"]
+        active = _track_active(workspace, direction, tid)
+        cap = MAX_ACTIVE_BRANCHES_PER_TRACK
+        out.append(f"\n## track {tid} — {len(active)}/{cap} active branches")
+        for b in (active or ["(none)"]):
+            runs = _runs_for_branch(workspace, direction, b, track=tid)
+            if not runs:
+                out.append(f"  {b}: (no runs yet)")
+                continue
+            # show the latest run's per-instrument one-liner (the decision
+            # signal), capped to keep the digest small
+            last = runs[-1]
+            parts = "  ".join(
+                f"{i['instrument']}: n={i['trade_count']} ann={i['annualized']} "
+                f"win={i['win_rate']}"
+                for i in last.get("instruments", [])[:8]
+            )
+            out.append(f"  {b} [{len(runs)} run(s)]  last: {parts or '(no data)'}")
+        # D9.3 (审查#128): pruned branches are where the track learned the
+        # most — surface them (with the prune reason, if recorded) so the
+        # next AI does not re-propose a dead end.
+        events = read_index_events(workspace, direction, tid)
+        pruned = []
+        for e in reversed(events):  # most recent first
+            if e.get("op") != "prune":
+                continue
+            reason = e.get("reason") or ""
+            pruned.append(f"{e.get('branch')}" + (f" — {reason}" if reason else ""))
+        if pruned:
+            out.append("  pruned: " + " · ".join(pruned[:8]))
+        t_lessons = track_lessons_path(workspace, direction, tid)
+        if t_lessons.exists():
+            lines = [ln for ln in t_lessons.read_text(encoding="utf-8").splitlines()
+                     if ln.strip()]
+            for ln in lines[-max(1, n_lessons):]:
+                out.append(f"  lesson: {ln}")
+        if shared_lessons.exists():
+            lines = [ln for ln in shared_lessons.read_text(encoding="utf-8").splitlines()
+                     if ln.strip()]
+            for ln in lines[-max(1, n_lessons):]:
+                out.append(f"  shared lesson: {ln}")
+
+    out.append("\n→ full detail: `lyra context " + direction +
+               (f" --track {track}" if track else "") + "`")
+    return "\n".join(out) + "\n"
 
 
 def render_context(
@@ -680,6 +917,12 @@ def render_context(
         "  * `stop_loss_pct: 0.02` is **mandatory** (the 2% hard stop, I3) — leave it at 0.02.",
         "  * `take_profit_pct` / `max_holding_bars` are optional.",
         "  * Do **not** invent keys, do **not** use Python/callbacks/SQL — only the structure below.",
+        "  * **Branch / lineage (R12, fail-closed)**: `v01` is the direction baseline and is "
+        "RESERVED — your candidates start at the first free slug after it (append a suffix, e.g. "
+        "`a`/`b`, for siblings). A candidate branch (N≥2) MUST declare `parent:` (or "
+        "`parents: [ … ]`) naming what it evolved from (the v01 baseline or an existing track "
+        "branch) AND a one-line `driven_by_lesson:`. A branch is IMMUTABLE: to change a strategy, "
+        "register a NEW slug — never overwrite an existing one.",
         "Template (validated against this registry — copy it as your starting point):",
         "```yaml",
         "version: 1",

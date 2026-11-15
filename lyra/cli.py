@@ -7,11 +7,14 @@ internal steps ``lyra pull`` runs, for inspection while developing.
 from __future__ import annotations
 
 
+import math
 import os
+import types
 import shutil
 import sys
 import tempfile
 import typer
+from typing import Any
 
 import yaml as _yaml
 
@@ -358,6 +361,43 @@ def _write_run_meta(strategy_path: Path, run_dir: Path,
         _json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _fmt_num(v: Any, pct: bool = False) -> str:
+    """Compact numeric formatter for the run digest (None → '—')."""
+    if v is None:
+        return "—"
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if math.isinf(f) or math.isnan(f):
+        return "—"
+    if pct:
+        return f"{f * 100:.2f}%"
+    return f"{f:.6g}"
+
+
+def _print_run_digest(metrics: dict[str, dict[str, Any]],
+                      instrument_failures: list[dict[str, Any]]) -> None:
+    """审查#128 P0-1: the compact per-instrument decision table.
+
+    The one thing a web-AI needs after a run — trades / annualized / win /
+    net per instrument — without the ~90KB full report. Zero-trade months
+    (annualized=None) render as '—', never a misleading 0.
+    """
+    hdr = f"{'instrument':<14}{'trades':>8}{'annualized':>12}{'win%':>9}{'net sum':>11}"
+    typer.echo(hdr)
+    typer.echo("─" * len(hdr))
+    for inst in sorted(metrics):
+        m = metrics[inst]
+        typer.echo(
+            f"{inst:<14}{m['trade_count']:>8}{_fmt_num(m.get('annualized')):>12}"
+            f"{_fmt_num(m.get('win_rate'), pct=True):>9}{_fmt_num(m.get('net_return')):>11}"
+        )
+    for f in instrument_failures:
+        typer.secho(f"  {f['instrument']}: FAILED — {f['error']}",
+                    fg=typer.colors.YELLOW)
+
+
 def _registry_for(alpha_dir: str | None, config: str):
     """Build the feature registry (core + optional alpha extension point, R3.2/I16)."""
     from . import features as feat
@@ -404,13 +444,30 @@ def run(
     if out is None:
         ws = _workspace(config)
         out = str(ws / "runs")
+
+    # M3 (审查#128): two tracks running the **same** YAML (same spec.id,
+    # same data/runtime → same run_id) on the same day with no explicit
+    # ``--name`` would produce the **same run_dir** (out/<spec.id>/<date>/<run_id>),
+    # and the second track's ``run_meta.json`` would overwrite the first's
+    # ``track_id`` — silently losing attribution. Fix: when ``--track`` is
+    # set and ``--name`` is not, scope the run name by the track so each
+    # track gets its own directory. An explicit ``--name`` always wins
+    # (operator intent overrides auto-scoping).
+    effective_name = name
+    if effective_name is None and track is not None:
+        try:
+            _spec = schema_mod.parse_strategy(strategy, reg)
+            effective_name = f"{_spec.id}__{track}"
+        except Exception:
+            pass  # will be caught by the schema check inside run_strategy
+
     try:
         # C2 (batch-4 review): the flat ``--financing-days`` scalar was
         # removed from the engine (it mischarged every trade the same day
         # count). The default is per-trade natural days; a real trading-day
         # calendar is a future enhancement (O17).
         result = runner_mod.run_strategy(
-            strategy, data_dir, registry=reg, name=name, out_dir=out,
+            strategy, data_dir, registry=reg, name=effective_name, out_dir=out,
             strict=strict,
         )
     except schema_mod.SchemaError as exc:
@@ -457,7 +514,8 @@ def submit(
     out: str | None = typer.Option(None, "--out", help="Artifact root (default <workspace>/runs; 0009 D2)"),
     strict: bool = typer.Option(False, "--strict", help="Fail if any instrument failed (I16)"),
     track: str | None = typer.Option(None, "--track", help="Research track id to attribute this run to (0009 D2)"),
-    branch: str | None = typer.Option(None, "--branch", help="Branch to register the strategy under (with --track). Default = the strategy's own id."),
+    branch: str | None = typer.Option(None, "--branch", help="Branch slug to register the strategy under (REQUIRED with --track, e.g. v04)."),
+    report: str = typer.Option("digest", "--report", help="What to print after the run: digest (compact per-instrument table, default) | full (the whole report.md) | none (nothing; full is on disk)"),
 ) -> None:
     """One-step platform loop (H4 + 审查 #125 gaps #2/#5): validate -> adopt -> run.
 
@@ -469,7 +527,7 @@ def submit(
     1. **校验先行**：INVALID 策略绝不进入引擎、也不登记任何分支（无半截状态）；
     2. **登记分支**（给了 ``--track`` 时）：把 AI 的 YAML 写为该 track 上该
        branch 的真实策略文件（gap #2：不再"骨架≠AI 策略"两个文件），并登记
-       index；``--branch`` 缺省取策略自身 ``id``；
+       index（``--branch`` 是必需参数，见 D8.3）；
     3. **运行**：委托 ``run``（原样复用 --data-dir/--track/run_meta 语义）。
        run_meta 的 branch 记策略自身 ``id``（gap #5：不再按文件名猜），track
        记 ``--track`` —— 于是 ``context --track`` 能看到该分支的**真实策略 + 它的 run**。
@@ -512,7 +570,8 @@ def submit(
             raise typer.Exit(code=1)
         direction = spec.direction
         try:
-            dest = wf.adopt_branch(_workspace(config), direction, track, branch, Path(strategy))
+            dest = wf.adopt_branch(_workspace(config), direction, track, branch,
+                                   Path(strategy), spec)
         except wf.WorkflowError as exc:
             typer.secho(f"ERROR (not run): {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
@@ -526,15 +585,172 @@ def submit(
         config=config, name=name, out=out, strict=strict, track=track,
     )
 
-    # Stage 4 — surface the FULL report (gap #1): print report.md inline so a
-    # web-AI sees the per-instrument + per-month tables directly in stdout and
-    # can iterate, without guessing how to read the run directory.
-    if res is not None:
+    # Stage 4 — surface the run result. 审查#128 P0-1 (report layering):
+    # the full report.md for a 21-instrument run is ~90KB (~25k tokens) — a
+    # web-AI paying that every iteration is exactly the token-burn the
+    # low-token goal exists to avoid. Default to a COMPACT digest (the
+    # per-instrument one-liner: trades / annualized / win / net) — the
+    # decision signal. `--report full` still dumps the whole report.md; the
+    # full report is ALWAYS on disk at res.out_dir/report.md regardless.
+    if res is not None and report != "none":
         rpt = Path(res.out_dir) / "report.md"
-        if rpt.exists():
-            typer.secho("── full report (report.md) ────────────────────────────",
-                        fg=typer.colors.CYAN)
-            typer.echo(rpt.read_text(encoding="utf-8").rstrip())
+        if report == "full":
+            if rpt.exists():
+                typer.secho("── full report (report.md) "
+                            "────────────────────────────────", fg=typer.colors.CYAN)
+                typer.echo(rpt.read_text(encoding="utf-8").rstrip())
+        else:  # digest (default)
+            typer.secho("── digest (per-instrument) "
+                        "──────────────────────────────", fg=typer.colors.CYAN)
+            try:
+                _print_run_digest(res.metrics, res.instrument_failures)
+            except Exception as exc:  # fall back to the full report if the digest is broken
+                typer.secho(f"(digest unavailable: {exc} — printing full report)",
+                            fg=typer.colors.YELLOW)
+                if rpt.exists():
+                    typer.echo(rpt.read_text(encoding="utf-8").rstrip())
+        typer.echo(f"full report on disk: {Path(res.out_dir) / 'report.md'}  "
+                   f"(re-print with `lyra report {res.out_dir}` or read the file)")
+
+
+@app.command(name="apply-batch")
+def apply_batch_cmd(
+    batch_file: str = typer.Argument(..., help="Path to a batch bundle YAML (D6)"),
+    data_dir: str | None = typer.Option(None, "--data-dir", help="Data root (required with --run)"),
+    alpha_dir: str | None = typer.Option(None, "--alpha-dir", help="Alpha feature dir; default = config local.alpha"),
+    config: str = typer.Option("config/config.yml", "--config"),
+    run_it: bool = typer.Option(False, "--run", help="Also run each adopted branch (default: adopt only)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Parse + validate only; write NOTHING (the coding AI's preview)"),
+) -> None:
+    """Apply a multi-direction proposal bundle in one command (审查#128 D6).
+
+    The web/chat AI writes ONE file (a ``directions:`` list, each item a
+    direction/track/branch + full strategy YAML) and the coding-AI runs this
+    — no hand-written per-file plumbing. Fail-closed, staged:
+
+      1. **parse**  — malformed bundle → error, nothing else.
+      2. **validate** — EVERY item is parsed + compiled. If ANY item is
+         invalid, the WHOLE batch is rejected and NOTHING is written — the
+         web-AI's "3 proposed, 1 bad" never becomes a half-applied state.
+      3. **adopt**  — each valid item becomes the track's branch (M1
+         immutable: re-proposing an existing branch with different content
+         is refused).
+      4. **run**    — with ``--run``, each adopted branch is executed
+         (a single run failure is recorded, the rest continue).
+
+    ``--dry-run`` stops after stage 2 (the coding AI previews what would
+    happen without touching the filesystem).
+    """
+    from . import batch as batch_mod
+    from . import compiler as compiler_mod
+    from . import strategy_schema as schema_mod
+    from . import workflow as wf
+
+    try:
+        text = Path(batch_file).read_text(encoding="utf-8")
+    except OSError as exc:
+        typer.secho(f"ERROR: cannot read bundle: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    try:
+        items = batch_mod.parse_batch(text)
+    except batch_mod.BatchError as exc:
+        typer.secho(f"ERROR (batch malformed): {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    reg = _registry_for(alpha_dir, config)
+    ws = _workspace(config)
+    tmp = tempfile.TemporaryDirectory()
+
+    # --- Stage 2: validate ALL items first (all-or-nothing) --------------
+    # Write every item to a temp path and parse+compile; collect ALL errors
+    # before deciding. A single invalid item rejects the whole batch.
+    resolved: list[tuple[batch_mod.BatchItem, Path, Any]] = []
+    errors: list[tuple[batch_mod.BatchItem, str]] = []
+    for it in items:
+        p = Path(tmp.name) / f"item{it.index}.yaml"
+        p.write_text(it.strategy_text, encoding="utf-8")
+        try:
+            spec = schema_mod.parse_strategy(str(p), reg)
+            compiler_mod.compile_strategy(spec, reg)
+            resolved.append((it, p, spec))
+        except Exception as exc:  # SchemaError / compile error / any
+            errors.append((it, f"{type(exc).__name__}: {exc}"))
+    if errors:
+        tmp.cleanup()
+        for it, err in errors:
+            typer.secho(f"[INVALID] {it.direction}/{it.track}/{it.branch}: {err}",
+                        fg=typer.colors.RED, err=True)
+        typer.secho("── batch summary ──────────────────────────────────────────",
+                    fg=typer.colors.CYAN)
+        typer.secho(f"0 adopted — {len(errors)} invalid of {len(items)} → NOTHING written "
+                    "(all-or-nothing, D6)", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    if dry_run:
+        typer.secho("── dry-run: all items VALID, nothing written ──",
+                    fg=typer.colors.GREEN)
+        for it, _p, _s in resolved:
+            typer.echo(f"  would adopt {it.direction}/{it.track}/{it.branch}")
+        tmp.cleanup()
+        return
+
+    # --- Stage 3: adopt each (M1 immutable; fail on first conflict) ------
+    # The bundle carries provenance at the ITEM level (parent /
+    # driven_by_lesson) as a web-AI convenience; the R12 lineage gate reads
+    # them from the strategy spec. Merge the item's provenance onto the spec
+    # (item value wins; spec value is the fallback) so a bundle item need not
+    # also repeat parent/d driven_by_lesson inside its strategy YAML block.
+    def _lineage_view(spec: Any, item: batch_mod.BatchItem) -> Any:
+        parents = tuple(spec.parents or ())
+        if item.parent:
+            parents = parents + (item.parent,)
+        lesson = (item.driven_by_lesson or spec.driven_by_lesson)
+        return types.SimpleNamespace(parents=tuple(parents),
+                                     driven_by_lesson=lesson)
+
+    adopted: list[tuple[batch_mod.BatchItem, Path]] = []
+    for it, p, spec in resolved:
+        try:
+            dest = wf.adopt_branch(ws, it.direction, it.track, it.branch, p,
+                                   _lineage_view(spec, it))
+        except wf.WorkflowError as exc:
+            tmp.cleanup()
+            typer.secho("── batch summary (adopt FAILED — batch rolled back) ──",
+                        fg=typer.colors.RED)
+            for d in adopted:  # best-effort: the items already adopted remain
+                typer.echo(f"  [already adopted] {d[0].direction}/{d[0].track}/{d[0].branch}")
+            typer.secho(f"[FAILED] {it.direction}/{it.track}/{it.branch}: {exc}",
+                        fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        adopted.append((it, dest))
+
+    # --- Stage 4: optional run (on the ADOPTED file → correct branch id) --
+    run_note = " · not run"
+    if run_it:
+        if data_dir is None:
+            typer.secho("ERROR: --run requires --data-dir.", fg=typer.colors.RED, err=True)
+            tmp.cleanup()
+            raise typer.Exit(code=2)
+        run_ok = run_fail = 0
+        for it, dest in adopted:
+            try:
+                run(strategy=str(dest), data_dir=data_dir, alpha_dir=alpha_dir,
+                    config=config, name=None, out=None, strict=False, track=it.track)
+                run_ok += 1
+                typer.echo(f"  run {it.direction}/{it.track}/{it.branch}: ok")
+            except SystemExit as exc:
+                run_fail += 1
+                typer.secho(f"  run {it.direction}/{it.track}/{it.branch}: "
+                            f"FAILED (exit {exc.code}) — others continue",
+                            fg=typer.colors.YELLOW)
+    tmp.cleanup()
+    run_note = (f" · {run_ok} run ok, {run_fail} failed" if run_it else " · not run")
+
+    typer.secho("── batch summary ──────────────────────────────────────────",
+                fg=typer.colors.GREEN)
+    for it, dest in adopted:
+        typer.echo(f"  [OK] {it.direction}/{it.track}/{it.branch} -> {dest}")
+    typer.secho(f"{len(adopted)} adopted" + run_note, fg=typer.colors.GREEN)
 
 
 @app.command()
@@ -1316,10 +1532,32 @@ def list_cmd(
 
 
 def _workspace(config: str) -> Path:
-    from .config import resolve_data_root
+    """Workspace root resolution with a graceful fallback (审查#128 D7.1).
 
-    _, local = _cfg(config)
-    return resolve_data_root(local, None).parent  # ~/.lyra/<workspace>/
+    Priority:
+      1. ``--config`` file exists and parses → use its ``local`` section.
+      2. Otherwise → ``LYRA_WORKSPACE`` env var (explicit workspace dir).
+      3. Otherwise → ``LYRA_DATA_ROOT`` env var (its parent = the workspace).
+      4. Otherwise → ``~/.lyra/default`` (a sane default; NOT an error).
+
+    Workspace-only commands (tracks / context / digest / new-version /
+    prune / lesson / …) must not hard-crash with a raw ``ConfigError``
+    traceback just because ``config/config.yml`` is absent — that is the
+    "pure ritual cost" the reviews flagged (D7: 11 commands, CI failures).
+    """
+    from .config import ConfigError, load_config, local_from_dict, resolve_data_root
+
+    try:
+        local = local_from_dict(load_config(config))
+        return resolve_data_root(local, None).parent
+    except ConfigError:
+        env = os.environ.get("LYRA_WORKSPACE")
+        if env:
+            return Path(env).expanduser()
+        env_root = os.environ.get("LYRA_DATA_ROOT")
+        if env_root:
+            return Path(env_root).expanduser().parent
+        return Path.home() / ".lyra" / "default"
 
 
 @app.command(name="tracks")
@@ -1371,6 +1609,60 @@ def context_cmd(
     ws = _workspace(config)
     try:
         typer.echo(workflow.render_context(ws, direction, track=track, n_lessons=n_lessons))
+    except workflow.WorkflowError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command(name="digest")
+def digest_cmd(
+    direction: str | None = typer.Argument(None, help="Direction name (omit with --all)"),
+    track: str | None = typer.Option(None, "--track", help="Scope to one track (I18 isolation)"),
+    all_directions: bool = typer.Option(False, "--all", help="Digest EVERY direction in a compact multi-direction view"),
+    n_lessons: int = typer.Option(3, "--n-lessons", help="Max lessons to include"),
+    config: str = typer.Option("config/config.yml", "--config"),
+) -> None:
+    """Low-token history digest (审查#128 P0-2).
+
+    One screen of *what this track is about*, *which branches are active*,
+    and *what each has scored* — the decision view for a web/chat AI that
+    must iterate on a small token budget. Full detail is ``lyra context``.
+
+    Two forms:
+      * ``lyra digest <direction> [--track T]`` — one direction (optionally
+        one track).
+      * ``lyra digest --all`` — every direction, compact: per direction a
+        hypothesis line, active-branch count, and a one-line-per-branch
+        score. The multi-AI mode-B entry point (one read → a synthesis view).
+    """
+    from . import workflow
+
+    ws = _workspace(config)
+    if all_directions:
+        strat_root = ws / "strategies"
+        directions = sorted(p.name for p in strat_root.iterdir()
+                            if p.is_dir() and (p / "hypothesis.md").exists()
+                            ) if strat_root.is_dir() else []
+        typer.echo("# digest — ALL directions (compact)")
+        for dname in directions:
+            try:
+                tks = workflow.list_tracks(ws, dname)
+            except Exception:
+                tks = []
+            parts = []
+            for t in tks:
+                act = workflow._track_active(ws, dname, t["track_id"])
+                parts.append(f"{t['track_id']}:{len(act)}/{workflow.MAX_ACTIVE_BRANCHES_PER_TRACK}")
+            typer.echo(f"  {dname}: tracks={parts or '(none)'} — "
+                       f"`lyra digest {dname}` for detail")
+        return
+
+    if direction is None:
+        typer.secho("ERROR: give a <direction> argument, or --all.",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    try:
+        typer.echo(workflow.render_digest(ws, direction, track=track, n_lessons=n_lessons))
     except workflow.WorkflowError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
@@ -1432,6 +1724,7 @@ def prune_cmd(
     direction: str = typer.Argument(...),
     branch: str = typer.Option(..., "--branch", help="Active branch slug to drop"),
     track: str = typer.Option(..., "--track", help="Owning track (I21 cap scope)"),
+    reason: str = typer.Option("", "--reason", help="Why this branch was dropped (D9.1; shown in the digest's 'tried' line)"),
     config: str = typer.Option("config/config.yml", "--config"),
 ) -> None:
     """Drop an active branch from a track's active list (relieve the 8-cap).
@@ -1444,7 +1737,7 @@ def prune_cmd(
 
     ws = _workspace(config)
     try:
-        workflow.prune_branch(ws, direction, track, branch)
+        workflow.prune_branch(ws, direction, track, branch, reason=reason)
     except workflow.WorkflowError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
