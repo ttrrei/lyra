@@ -260,20 +260,23 @@ def test_run_id_covers_consumed_feature_values(env):
     reads must change the run identity (I5); a perturbation of a column the
     strategy does NOT read must not (digest is scoped to features_used)."""
     import duckdb as _duckdb
-    import pandas as _pd
 
     feat = env["data_root"] / "features" / "ohlcv_1h" / "EURUSD.parquet"
-    original = _pd.read_parquet(feat)
+    original_bytes = feat.read_bytes()
 
     def _perturb(col: str, value: float) -> None:
-        df = original.copy()
-        df[col] = value
+        # #131 P0-1: set a single column to a constant via duckdb (no pandas
+        # dependency in CI; duckdb reads the parquet directly).
+        src = feat.with_suffix(".orig.parquet")
+        src.write_bytes(original_bytes)
         _duckdb.connect().execute(
-            f"COPY (SELECT * FROM df) TO '{feat}' (FORMAT PARQUET)"
+            f"COPY (SELECT * REPLACE ({value} AS {col}) FROM '{src}') "
+            f"TO '{feat}' (FORMAT PARQUET)"
         )
+        src.unlink(missing_ok=True)
 
     def _restore() -> None:
-        _pd.DataFrame(original.to_dict(orient="list")).to_parquet(feat)
+        feat.write_bytes(original_bytes)
 
     r_a = runner.run_strategy(env["strat"], env["data_root"],
                               registry=env["registry"],

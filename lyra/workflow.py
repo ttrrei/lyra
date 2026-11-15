@@ -300,6 +300,10 @@ def list_tracks(workspace: Path, direction: str) -> list[dict[str, Any]]:
 
 
 def get_track(workspace: Path, direction: str, track_id: str) -> dict[str, Any]:
+    # #131 (P0-4): fail-closed on path escapes before the path join — this
+    # builds `workspace/tracks/<direction>/<track_id>.json` from caller input.
+    validate_ident(direction, "direction")
+    _validate_track_id(track_id)
     tp = track_path(workspace, direction, track_id)
     if not tp.exists():
         raise WorkflowError(f"unknown track: {direction}/{track_id}")
@@ -648,6 +652,12 @@ def adopt_branch(workspace: Path, direction: str, track_id: str, branch: str,
     The cap check runs **only** for a genuinely new branch, so re-submitting
     an existing branch at 8/8 is allowed (it consumes no new slot).
     """
+    # #131 (P0-4): fail-closed on ANY path-escape before the first path join.
+    # This is the CORE write boundary — a bundle (or any caller) can pass an
+    # arbitrary direction/track/branch, and `workspace / direction / track_id`
+    # would otherwise let "../outside" or "a/b" escape the workspace.
+    validate_ident(direction, "direction")
+    _validate_track_id(track_id)
     get_track(workspace, direction, track_id)      # track must exist (I18)
     if not _BRANCH_NAME_RE.match(branch):
         raise WorkflowError(f"invalid branch name '{branch}'")
@@ -803,12 +813,33 @@ def render_digest(
             # show the latest run's per-instrument one-liner (the decision
             # signal), capped to keep the digest small
             last = runs[-1]
+            insts = last.get("instruments", [])
+            shown = insts[:8]
+            # #131 (P1-7/B8): do NOT silently truncate — a run with 21
+            # instruments must not read as if it had only the 8 shown. State
+            # the total / shown / omitted explicitly, and round the floats so
+            # they are readable instead of 17-digit reprs.
+            def _ann(v):
+                try:
+                    return f"{float(v):+.3f}"
+                except (TypeError, ValueError):
+                    return str(v)
+
+            def _win(v):
+                try:
+                    return f"{float(v) * 100:.1f}%"
+                except (TypeError, ValueError):
+                    return str(v)
+
             parts = "  ".join(
-                f"{i['instrument']}: n={i['trade_count']} ann={i['annualized']} "
-                f"win={i['win_rate']}"
-                for i in last.get("instruments", [])[:8]
+                f"{i['instrument']}: n={i['trade_count']} ann={_ann(i['annualized'])} "
+                f"win={_win(i['win_rate'])}"
+                for i in shown
             )
-            out.append(f"  {b} [{len(runs)} run(s)]  last: {parts or '(no data)'}")
+            omit = f"  (+{len(insts) - len(shown)} more instruments omitted; see report)" \
+                if len(insts) > len(shown) else ""
+            out.append(f"  {b} [{len(runs)} run(s)]  last ({len(insts)} instr): "
+                       f"{parts or '(no data)'}{omit}")
         # D9.3 (审查#128): pruned branches are where the track learned the
         # most — surface them (with the prune reason, if recorded) so the
         # next AI does not re-propose a dead end.

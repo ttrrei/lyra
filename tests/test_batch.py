@@ -123,3 +123,192 @@ def test_prune_records_reason(tmp_path):
              if ln.strip()]
     prunes = [ln for ln in lines if ln.get("op") == "prune"]
     assert prunes and prunes[-1].get("reason") == "dup of v01"
+
+
+# --- #131 batch-safety regressions ------------------------------------------
+
+_STRAT = """\
+      version: 1
+      id: s
+      direction: d1
+      timeframe_minutes: 60
+      entry:
+        long: {feature: sma_6, op: gt, value: sma_24}
+        short: {feature: sma_6, op: lt, value: sma_24}
+      exit:
+        long: {feature: sma_6, op: lt, value: sma_24}
+        short: {feature: sma_6, op: gt, value: sma_24}
+        stop_loss_pct: 0.02
+        max_holding_bars: 12
+      execution:
+        spread_bps: 2
+        slippage_bps_per_side: 0.2
+"""
+
+
+def test_parse_batch_accepts_bundle_key_alias():
+    """P0-2/B1: bundle: and items: are top-level aliases for directions:."""
+    for key in ("bundle", "items"):
+        text = f"version: 1\n{key}:\n  - direction: d1\n    track: t1\n" \
+               f"    branch: v02\n    strategy: |\n{_STRAT}"
+        items = batch_mod.parse_batch(text)
+        assert items[0].direction == "d1"
+
+
+def test_parse_batch_mapping_strategy_roundtrips_lossless():
+    """P-4/B7: a mapping `strategy:` must survive the round-trip without the
+    dict-repr mangling (backslashes, newlines, null, unicode)."""
+    tricky = (
+        "version: 1\n"
+        "id: t\n"
+        "direction: d1\n"
+        "timeframe_minutes: 60\n"
+        'hypothesis: "line1\\nline2  back\\\\slash  —"\n'
+        "entry:\n"
+        "  long: {feature: sma_6, op: gt, value: null}\n"
+        "  short: {feature: sma_6, op: lt, value: null}\n"
+        "exit:\n"
+        "  long: {feature: sma_6, op: lt, value: null}\n"
+        "  short: {feature: sma_6, op: gt, value: null}\n"
+        "  stop_loss_pct: 0.02\n"
+        "  max_holding_bars: 12\n"
+        "execution:\n"
+        "  spread_bps: 2\n"
+        "  slippage_bps_per_side: 0.2\n"
+    )
+    text = ("version: 1\ndirections:\n"
+            "  - direction: d1\n    track: t1\n    branch: v02\n"
+            "    strategy:\n" + "".join("      " + ln + "\n"
+                                        for ln in tricky.splitlines()
+                                        if ln.strip()))
+    item = batch_mod.parse_batch(text)[0]
+    # Must parse as a real YAML mapping, not a dict-repr string.
+    import yaml as _y
+    spec = _y.safe_load(item.strategy_text)
+    assert isinstance(spec, dict) and spec["id"] == "t"
+    assert "line1\nline2  back\\slash  —" == spec["hypothesis"]
+
+
+def test_apply_batch_bad_strategy_yaml_is_a_clean_error(tmp_path):
+    """B5: a malformed strategy YAML produces a clean CLI error (the item
+    name + a SchemaError/YAML message), not a raw traceback dump."""
+    from typer.testing import CliRunner
+    from lyra import cli
+    ws = tmp_path / "ws"
+    (ws / "strategies" / "d1").mkdir(parents=True)
+    bundle = tmp_path / "b.yaml"
+    bundle.write_text(
+        "version: 1\ndirections:\n"
+        "  - direction: d1\n    track: t1\n    branch: v02\n"
+        "    strategy: |\n      entry: [unclosed\n", encoding="utf-8")
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"local:\n  workspace: {ws}\n  data: {ws}/data\n"
+        f"  strategies: {ws}/strategies\n  runs: {ws}/runs\n"
+        f"  alpha: {ws}/alpha\n", encoding="utf-8")
+    r = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                     "--config", str(cfg), "--dry-run"])
+    assert "d1/t1/v02" in r.output          # clean per-item error line
+    assert "Traceback" not in r.output       # no raw Python traceback
+
+
+def test_apply_batch_direction_mismatch_rejected_before_write(tmp_path):
+    """P1-2/B3: an item whose strategy.direction != item.direction is rejected
+    in preflight — NOTHING is adopted."""
+    from typer.testing import CliRunner
+    from lyra import cli
+    import yaml as _y
+    ws = tmp_path / "ws"
+    d = ws / "strategies" / "d1"
+    (d / "t1").mkdir(parents=True)
+    base = {"version": 1, "id": "b", "direction": "d1", "timeframe_minutes": 60,
+            "entry": {"long": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                      "short": {"feature": "sma_6", "op": "lt", "value": "sma_24"}},
+            "exit": {"long": {"feature": "sma_6", "op": "lt", "value": "sma_24"},
+                     "short": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                     "stop_loss_pct": 0.02, "max_holding_bars": 12},
+            "execution": {"spread_bps": 2, "slippage_bps_per_side": 0.2}}
+    (d / "v01.yaml").write_text(_y.safe_dump(base, allow_unicode=True),
+                                encoding="utf-8")
+    from lyra import workflow as wf
+    wf.create_track(ws, "d1", "t1")
+    # strategy declares the WRONG direction
+    bad = dict(base); bad["id"] = "m"; bad["direction"] = "OTHER"
+    bundle = {"version": 1, "directions": [
+        {"direction": "d1", "track": "t1", "branch": "v02", "parent": "v01",
+         "driven_by_lesson": "L", "hypothesis": "x", "strategy": bad}]}
+    bf = tmp_path / "b.yaml"
+    bf.write_text(_y.safe_dump(bundle, allow_unicode=True), encoding="utf-8")
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"local:\n  workspace: {ws}\n  data: {ws}/data\n"
+        f"  strategies: {ws}/strategies\n  runs: {ws}/runs\n"
+        f"  alpha: {ws}/alpha\n", encoding="utf-8")
+    r = CliRunner().invoke(cli.app, ["apply-batch", str(bf),
+                                     "--config", str(cfg), "--dry-run"])
+    assert "must match" in r.output
+    assert not (d / "t1" / "v02.yaml").exists()
+
+
+def test_apply_batch_path_escape_rejected_before_write(tmp_path):
+    """P0-4: a `../evil` direction is rejected in preflight — no file anywhere."""
+    from typer.testing import CliRunner
+    from lyra import cli
+    ws = tmp_path / "ws"
+    (ws / "strategies").mkdir(parents=True)
+    bundle = tmp_path / "b.yaml"
+    bundle.write_text(
+        "version: 1\ndirections:\n"
+        "  - direction: ../evil\n    track: t1\n    branch: v01\n"
+        "    strategy: |\n" + _STRAT, encoding="utf-8")
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"local:\n  workspace: {ws}\n  data: {ws}/data\n"
+        f"  strategies: {ws}/strategies\n  runs: {ws}/runs\n"
+        f"  alpha: {ws}/alpha\n", encoding="utf-8")
+    r = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                     "--config", str(cfg), "--dry-run"])
+    assert "invalid direction" in r.output
+    assert not (tmp_path / "evil").exists()
+    assert not (ws.parent / "evil").exists()
+
+
+def test_apply_batch_lineage_persisted_in_adopted_file(tmp_path):
+    """P-5/B4: item-level parent/driven_by_lesson/hypothesis must be written
+    into the ADOPTED branch file on disk (not only the gate's in-memory view)."""
+    from typer.testing import CliRunner
+    from lyra import cli
+    import yaml as _y
+    ws = tmp_path / "ws"
+    d = ws / "strategies" / "d1"
+    (d / "t1").mkdir(parents=True)
+    base = {"version": 1, "id": "b", "direction": "d1", "timeframe_minutes": 60,
+            "entry": {"long": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                      "short": {"feature": "sma_6", "op": "lt", "value": "sma_24"}},
+            "exit": {"long": {"feature": "sma_6", "op": "lt", "value": "sma_24"},
+                     "short": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                     "stop_loss_pct": 0.02, "max_holding_bars": 12},
+            "execution": {"spread_bps": 2, "slippage_bps_per_side": 0.2}}
+    (d / "v01.yaml").write_text(_y.safe_dump(base, allow_unicode=True),
+                                encoding="utf-8")
+    from lyra import workflow as wf
+    wf.create_track(ws, "d1", "t1")
+    bundle = {"version": 1, "directions": [
+        {"direction": "d1", "track": "t1", "branch": "v02", "parent": "v01",
+         "driven_by_lesson": "v01 baseline was too tight",
+         "hypothesis": "Wider entry",
+         "strategy": dict(base, id="s2")}]}
+    bf = tmp_path / "b.yaml"
+    bf.write_text(_y.safe_dump(bundle, allow_unicode=True), encoding="utf-8")
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(
+        f"local:\n  workspace: {ws}\n  data: {ws}/data\n"
+        f"  strategies: {ws}/strategies\n  runs: {ws}/runs\n"
+        f"  alpha: {ws}/alpha\n", encoding="utf-8")
+    r = CliRunner().invoke(cli.app, ["apply-batch", str(bf),
+                                     "--config", str(cfg)])
+    assert r.exit_code == 0, r.output
+    adopted = _y.safe_load((d / "t1" / "v02.yaml").read_text(encoding="utf-8"))
+    assert "v01" in adopted["parents"]
+    assert adopted["driven_by_lesson"] == "v01 baseline was too tight"
+    assert adopted["hypothesis"] == "Wider entry"

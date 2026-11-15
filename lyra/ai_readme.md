@@ -61,7 +61,8 @@ lyra digest <direction> --track <track_id> --config config/config.yml
 ```
 
 ~1 screen. Shows: hypothesis (one line), active branches with their latest
-score, last 5 lessons. Enough to say "try X" or "prune Y".
+score, recent lessons (last 3 by default — use `--n-lessons N` for more).
+Enough to say "try X" or "prune Y".
 
 ### Step B — Write the next strategy (as YAML)
 
@@ -131,10 +132,10 @@ will see it in `lyra context` and `lyra digest`.
 | `lyra tracks <dir> --create <id>` | **Create**: a new research track in this direction |
 | `lyra tracks <dir> --list` | **Read**: list existing tracks |
 | `lyra submit <file> --track T --branch vNN` | **Write+Run**: validate, adopt, and run a new strategy |
-| `lyra lesson <dir> --track T "<text>"` | **Write**: record a lesson for future iterations |
+| `lyra lesson <dir> "<text>" --track T` | **Write**: record a lesson for future iterations |
 | `lyra apply-batch <bundle.yaml>` | **Multi-write**: apply N strategies at once (all-or-nothing) |
-| `lyra prune <dir> --track T <branch>` | **Write**: retire a weak branch (frees a slot in the 8-cap) |
-| `lyra new-version <dir> --track T` | **Read**: derive a template for the next branch number |
+| `lyra prune <dir> --track T --branch vNN` | **Write**: retire a weak branch (frees a slot in the 8-cap) |
+| `lyra new-version <dir> --track T --branch vNN` | **Read**: derive a template for the next branch (both options required) |
 | `lyra report <run_dir>` | **Read**: re-render a past run's full report |
 | `lyra validate <file>` | **Validate only** (no run): useful for quick checks |
 | `lyra doctor` | **Diagnose**: check environment + data integrity |

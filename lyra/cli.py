@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import math
 import os
-import types
 import shutil
 import sys
 import tempfile
@@ -664,11 +663,45 @@ def apply_batch_cmd(
     # --- Stage 2: validate ALL items first (all-or-nothing) --------------
     # Write every item to a temp path and parse+compile; collect ALL errors
     # before deciding. A single invalid item rejects the whole batch.
+    #
+    # #131 (P-5/B4): the bundle carries provenance at the ITEM level (parent /
+    # driven_by_lesson / hypothesis) as a web-AI convenience. Previously those
+    # fields were only used to feed the R12 gate and then DISCARDED — the file
+    # written to disk had no lineage. Now ``_merged_strategy_text`` folds them
+    # into the strategy text BEFORE adoption, so the on-disk branch file (and
+    # the OCI copy) carries the full lineage, and the lineage gate reads the
+    # SAME text that gets written (no drift between gate input and artifact).
+    # This also normalises a mapping-form ``strategy:`` (P-4/B7) into lossless
+    # YAML via safe_dump.
+    def _merged_strategy_text(it: batch_mod.BatchItem) -> str:
+        try:
+            data = _yaml.safe_load(it.strategy_text)
+        except Exception:
+            data = None
+        if not isinstance(data, dict):
+            # Not a parseable mapping — leave the text as-is; stage-2's
+            # parse_strategy will surface the real error.
+            return it.strategy_text
+        if it.parent:
+            parents = list(data.get("parents") or [])
+            if isinstance(data.get("parent"), str):
+                parents.append(data["parent"])
+                data.pop("parent", None)
+            if it.parent not in parents:
+                parents.append(it.parent)
+            data["parents"] = parents
+        if it.driven_by_lesson:
+            data["driven_by_lesson"] = it.driven_by_lesson
+        if it.hypothesis and not data.get("hypothesis"):
+            data["hypothesis"] = it.hypothesis
+        return _yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
     resolved: list[tuple[batch_mod.BatchItem, Path, Any]] = []
     errors: list[tuple[batch_mod.BatchItem, str]] = []
     for it in items:
         p = Path(tmp.name) / f"item{it.index}.yaml"
-        p.write_text(it.strategy_text, encoding="utf-8")
+        final_text = _merged_strategy_text(it)
+        p.write_text(final_text, encoding="utf-8")
         try:
             spec = schema_mod.parse_strategy(str(p), reg)
             compiler_mod.compile_strategy(spec, reg)
@@ -686,71 +719,164 @@ def apply_batch_cmd(
                     "(all-or-nothing, D6)", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
+    # --- Stage 2.5: FULL preflight (all predictable failures, zero writes) --
+    # #131 (P0-3 / P-6 / P-7 / P1-2 / B3 / B6-T10): move every check that can
+    # be predicted from the bundle + current workspace state to BEFORE any
+    # adopt writes — so `--dry-run` and a real apply share the SAME gate, and
+    # "dry-run all VALID" can no longer be followed by "real apply half-fails".
+    #  1. --run requires --data-dir (B6-T10: no longer adopted-then-errored)
+    #  2. direction/track/branch are safe single path components (P0-4)
+    #  3. track exists
+    #  4. spec.direction == item.direction (P1-2 / B3: no cross-direction
+    #     mis-file: the file lands in item.direction but run_meta uses
+    #     spec.direction, which would corrupt per-direction attribution)
+    #  5. lineage (parent resolves + driven_by_lesson non-empty, R12)
+    #  6. per (direction, track) cap: count NEW branches (skip idempotent
+    #     re-submits of an existing byte-identical file) (P-6 cap half-state)
+    #  7. no duplicate (direction, track, branch) within the batch (P-7)
+    if run_it and data_dir is None:
+        tmp.cleanup()
+        typer.secho("ERROR: --run requires --data-dir (checked before any "
+                    "writes; nothing was adopted).", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+
+    def _branch_dest(it):
+        return ws / "strategies" / it.direction / it.track / f"{it.branch}.yaml"
+
+    pre_errors: list[tuple[batch_mod.BatchItem, str]] = []
+    for it, p, spec in resolved:
+        def _err(msg):
+            pre_errors.append((it, msg))
+        try:
+            wf.validate_ident(it.direction, "direction")
+            wf.validate_ident(it.track, "track")
+            wf.validate_ident(it.branch, "branch")
+            if not wf._BRANCH_NAME_RE.match(it.branch):
+                _err(f"branch {it.branch!r} must match the vNN slug pattern")
+                continue
+            wf.get_track(ws, it.direction, it.track)          # track must exist
+            # direction cross-check (item vs strategy YAML)
+            if spec.direction is not None and spec.direction != it.direction:
+                _err(f"item.direction={it.direction!r} but the strategy YAML "
+                     f"declares direction={spec.direction!r} — they must match")
+                continue
+            wf._validate_new_branch_lineage(
+                ws, it.direction, it.track, it.branch, spec)   # R12 lineage
+        except wf.WorkflowError as exc:
+            _err(str(exc))
+
+    # per-track NEW-branch cap: a NEW branch is one whose dest file does not
+    # already exist (idempotent re-submits of an existing file consume no slot)
+    new_by_track: dict[tuple[str, str], int] = {}
+    for it, p, spec in resolved:
+        if not _branch_dest(it).exists():
+            key = (it.direction, it.track)
+            new_by_track[key] = new_by_track.get(key, 0) + 1
+    for (dname, tid), n_new in new_by_track.items():
+        if n_new == 0:
+            continue
+        cur = wf.count_active_branches(ws, dname, tid)
+        if cur + n_new > wf.MAX_ACTIVE_BRANCHES_PER_TRACK:
+            for it, p, spec in resolved:
+                if (it.direction, it.track) == (dname, tid) and \
+                        not _branch_dest(it).exists():
+                    pre_errors.append((it, f"track {dname}/{tid} would exceed "
+                        f"the {wf.MAX_ACTIVE_BRANCHES_PER_TRACK}-branch cap "
+                        f"(currently {cur}, +{n_new} new) — prune one first"))
+            break
+    # duplicate (direction, track, branch) within the same bundle (P-7)
+    seen_targets: set[tuple[str, str, str]] = set()
+    for it, p, spec in resolved:
+        tgt = (it.direction, it.track, it.branch)
+        if tgt in seen_targets:
+            pre_errors.append((it, f"duplicate target {it.direction}/"
+                f"{it.track}/{it.branch} appears more than once in this batch"))
+        seen_targets.add(tgt)
+
+    if pre_errors:
+        tmp.cleanup()
+        for it, err in pre_errors:
+            typer.secho(f"[INVALID] {it.direction}/{it.track}/{it.branch}: {err}",
+                        fg=typer.colors.RED, err=True)
+        typer.secho("── batch summary (preflight FAILED) ──────────────────────",
+                    fg=typer.colors.CYAN)
+        typer.secho(f"0 adopted — {len(pre_errors)} item(s) failed preflight of "
+                    f"{len(items)} → NOTHING written (all-or-nothing, D6)",
+                    fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
     if dry_run:
-        typer.secho("── dry-run: all items VALID, nothing written ──",
-                    fg=typer.colors.GREEN)
+        typer.secho("── dry-run: all items VALID (parse + compile + preflight), "
+                    "nothing written ──", fg=typer.colors.GREEN)
         for it, _p, _s in resolved:
             typer.echo(f"  would adopt {it.direction}/{it.track}/{it.branch}")
         tmp.cleanup()
         return
 
-    # --- Stage 3: adopt each (M1 immutable; fail on first conflict) ------
-    # The bundle carries provenance at the ITEM level (parent /
-    # driven_by_lesson) as a web-AI convenience; the R12 lineage gate reads
-    # them from the strategy spec. Merge the item's provenance onto the spec
-    # (item value wins; spec value is the fallback) so a bundle item need not
-    # also repeat parent/d driven_by_lesson inside its strategy YAML block.
-    def _lineage_view(spec: Any, item: batch_mod.BatchItem) -> Any:
-        parents = tuple(spec.parents or ())
-        if item.parent:
-            parents = parents + (item.parent,)
-        lesson = (item.driven_by_lesson or spec.driven_by_lesson)
-        return types.SimpleNamespace(parents=tuple(parents),
-                                     driven_by_lesson=lesson)
-
+    # --- Stage 3: adopt each (M1 immutable; preflight guarantees no
+    #     predictable conflict remains, so a failure here is an unexpected
+    #     I/O or concurrent-state change) ------
     adopted: list[tuple[batch_mod.BatchItem, Path]] = []
     for it, p, spec in resolved:
         try:
             dest = wf.adopt_branch(ws, it.direction, it.track, it.branch, p,
-                                   _lineage_view(spec, it))
+                                   spec)
         except wf.WorkflowError as exc:
             tmp.cleanup()
-            typer.secho("── batch summary (adopt FAILED — batch rolled back) ──",
+            # #131 (B2/P-6): honest messaging — preflight should have caught
+            # every predictable conflict, so a failure here is unexpected
+            # (I/O or concurrent-state change). Previously this printed
+            # "batch rolled back" while the already-adopted items REMAINED on
+            # disk; we now say exactly what happened.
+            typer.secho("── batch summary (adopt FAILED) ───────────────────────",
                         fg=typer.colors.RED)
-            for d in adopted:  # best-effort: the items already adopted remain
-                typer.echo(f"  [already adopted] {d[0].direction}/{d[0].track}/{d[0].branch}")
+            for d in adopted:
+                typer.echo(f"  [already adopted] {d[0].direction}/"
+                           f"{d[0].track}/{d[0].branch}")
             typer.secho(f"[FAILED] {it.direction}/{it.track}/{it.branch}: {exc}",
                         fg=typer.colors.RED)
+            typer.secho(f"{len(adopted)} of {len(items)} were adopted BEFORE "
+                        f"this failure and REMAIN on disk (branches are "
+                        f"immutable, so nothing was rolled back). Fix the "
+                        f"failed item and re-run — the already-adopted ones "
+                        f"are idempotent no-ops.", fg=typer.colors.RED)
             raise typer.Exit(code=1)
         adopted.append((it, dest))
 
     # --- Stage 4: optional run (on the ADOPTED file → correct branch id) --
-    run_note = " · not run"
+    # #131 (B6-T10): the --data-dir requirement was checked in stage 2.5
+    # (before any writes), so it is guaranteed present here.
+    run_ok = run_fail = 0
     if run_it:
-        if data_dir is None:
-            typer.secho("ERROR: --run requires --data-dir.", fg=typer.colors.RED, err=True)
-            tmp.cleanup()
-            raise typer.Exit(code=2)
-        run_ok = run_fail = 0
         for it, dest in adopted:
             try:
                 run(strategy=str(dest), data_dir=data_dir, alpha_dir=alpha_dir,
                     config=config, name=None, out=None, strict=False, track=it.track)
                 run_ok += 1
                 typer.echo(f"  run {it.direction}/{it.track}/{it.branch}: ok")
-            except SystemExit as exc:
+            except Exception as exc:  # B6-T11: typer.Exit OR any run error
+                # #131 (B6-T11): run() raises typer.Exit (a SystemExit
+                # subclass) or a plain exception; both were previously
+                # mishandled — a SystemExit propagated and ABORTED the whole
+                # batch, so only the first failure was seen. Now every item
+                # runs independently and the batch summary always prints.
                 run_fail += 1
                 typer.secho(f"  run {it.direction}/{it.track}/{it.branch}: "
-                            f"FAILED (exit {exc.code}) — others continue",
+                            f"FAILED ({type(exc).__name__}) — others continue",
                             fg=typer.colors.YELLOW)
     tmp.cleanup()
     run_note = (f" · {run_ok} run ok, {run_fail} failed" if run_it else " · not run")
 
+    # #131 (B6): exit code reflects the true batch outcome — a run failure
+    # must not masquerade as a clean exit.
     typer.secho("── batch summary ──────────────────────────────────────────",
-                fg=typer.colors.GREEN)
+                fg=typer.colors.GREEN if run_fail == 0 else typer.colors.YELLOW)
     for it, dest in adopted:
         typer.echo(f"  [OK] {it.direction}/{it.track}/{it.branch} -> {dest}")
-    typer.secho(f"{len(adopted)} adopted" + run_note, fg=typer.colors.GREEN)
+    typer.secho(f"{len(adopted)} adopted" + run_note,
+                fg=typer.colors.GREEN if run_fail == 0 else typer.colors.YELLOW)
+    if run_it and run_fail > 0:
+        raise typer.Exit(code=3)
 
 
 @app.command()
@@ -1639,22 +1765,47 @@ def digest_cmd(
 
     ws = _workspace(config)
     if all_directions:
+        # #131 (P-1/P-2): a real multi-direction view, not a stub. The old
+        # implementation (a) only listed track counts, and (b) used
+        # `hypothesis.md` presence as the *existence test* for a direction —
+        # silently dropping 11/12 real directions that only carry the
+        # hypothesis in v01.yaml. Now we enumerate EVERY direction folder
+        # (a folder with a v01.yaml, a hypothesis.md, or a track index is a
+        # direction) and reuse `render_digest` — the SAME low-token renderer
+        # the single-direction path uses — so each direction gets its
+        # hypothesis (with the v01 fallback), per-branch scores, pruned
+        # lines and lessons.
         strat_root = ws / "strategies"
-        directions = sorted(p.name for p in strat_root.iterdir()
-                            if p.is_dir() and (p / "hypothesis.md").exists()
-                            ) if strat_root.is_dir() else []
+        if not strat_root.is_dir():
+            typer.echo("# digest — ALL directions (compact)")
+            typer.echo("(no directions found)")
+            return
+        directions: list[str] = []
+        skipped: list[tuple[str, str]] = []
+        for p in sorted(strat_root.iterdir()):
+            if not p.is_dir():
+                continue
+            is_dir = (p / "v01.yaml").exists() or (p / "hypothesis.md").exists() \
+                or (p / "index").exists() or any(p.glob("*/*.yaml"))
+            if not is_dir:
+                skipped.append((p.name, "no v01.yaml / hypothesis.md / index / branch yaml"))
+                continue
+            if not workflow._IDENT_RE.match(p.name) or p.name in workflow._IDENT_BAD:
+                skipped.append((p.name, "not a valid direction identifier"))
+                continue
+            directions.append(p.name)
         typer.echo("# digest — ALL directions (compact)")
+        typer.echo(f"({len(directions)} directions"
+                   + (f", {len(skipped)} skipped" if skipped else "") + ")")
+        if skipped:
+            for name, why in skipped:
+                typer.echo(f"  (skipped: {name} — {why})")
         for dname in directions:
             try:
-                tks = workflow.list_tracks(ws, dname)
-            except Exception:
-                tks = []
-            parts = []
-            for t in tks:
-                act = workflow._track_active(ws, dname, t["track_id"])
-                parts.append(f"{t['track_id']}:{len(act)}/{workflow.MAX_ACTIVE_BRANCHES_PER_TRACK}")
-            typer.echo(f"  {dname}: tracks={parts or '(none)'} — "
-                       f"`lyra digest {dname}` for detail")
+                typer.echo(workflow.render_digest(ws, dname, track=None,
+                                                  n_lessons=n_lessons))
+            except workflow.WorkflowError as exc:
+                typer.secho(f"  (direction {dname}: {exc})", fg=typer.colors.RED)
         return
 
     if direction is None:
