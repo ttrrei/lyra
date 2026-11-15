@@ -84,7 +84,7 @@ python -m lyra.cli context mean_reversion --config config/config.yml
 ### 第 3 步：写策略 YAML
 基于 `context` 的模板，修改条件，写成一个单独 `.yaml` 文件（**放哪都行**——
 下面用 `scratch/mr_v02.yaml`；`submit` 会校验通过后把它 **adopt 到该 track 的正式路径**
-`strategies/directions/<direction>/<track>/vNN.yaml` 并登记 index，你不用手动搬文件）：
+workspace 里的 `strategies/<direction>/<track>/vNN.yaml`（即 `~/.lyra/default/strategies/<direction>/<track>/vNN.yaml`）并登记 index，你不用手动搬文件）：
 
 ```yaml
 version: 1
@@ -117,7 +117,7 @@ driven_by_lesson: >-
 
 ### 第 4 步：运行
 ```bash
-python -m lyra.cli submit strategies/directions/mean_reversion/v02.yaml \
+python -m lyra.cli submit scratch/mr_v02.yaml \
   --data-dir ~/.lyra/default/data \
   --alpha-dir ~/.lyra/default/alpha \
   --config config/config.yml \
@@ -231,7 +231,7 @@ track: <track_id>
    - 只能使用 context 中列出的特征
    - `stop_loss_pct: 0.02` 不可改
    - 只改你意图改变的条件，其他字段保持模板默认
-4. 把 YAML 写到 `strategies/directions/<direction>/<branch>.yaml`
+4. 把 YAML 写到任意临时路径（如 `scratch/mr_v03.yaml`）——`submit --branch` 会 adopt 到 workspace 正式路径
 5. 运行 `lyra submit`（完整参数见上方命令速查）
 6. 读取 stdout 中的 report，告诉我：
    - 每个 instrument 的 trades / annualized / win rate
