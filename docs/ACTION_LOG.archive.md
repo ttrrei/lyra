@@ -1,6 +1,8 @@
-# Action Log（中央行动日志）
+# Action Log（中央行动日志）— 归档（已冻结）
 
-> **English**: [ACTION_LOG.en.md](./ACTION_LOG.en.md)
+> **English**: [ACTION_LOG.archive.en.md](./ACTION_LOG.archive.en.md)
+>
+> **归档说明（2026-11-22，决策 0011）**：本文件是 #1–#133（2026-11-05 至 2026-11-15）的完整历史，**已冻结，不再修改**。下面的维护规则和"当前状态"块是当时的版本，已过时；现行日志见 [ACTION_LOG.md](./ACTION_LOG.md)。
 >
 > 本文件是 Lyra 的**中央行动日志**：谁在什么时候做了什么、为什么、落在哪个
 > 文档/规则上。各文档的"修订记录"是细粒度审计痕迹；**本文件是时间线总账**。

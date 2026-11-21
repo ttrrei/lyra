@@ -1,6 +1,8 @@
-# Action Log (Central)
+# Action Log (Central) — Archive (frozen)
 
-> **中文**: [ACTION_LOG.md](./ACTION_LOG.md)
+> **中文**: [ACTION_LOG.archive.md](./ACTION_LOG.archive.md)
+>
+> **Archive notice (2026-11-22, decision 0011)**: this file is the complete history of #1–#133 (2026-11-05 to 2026-11-15) and is **frozen — do not edit**. The maintenance rules and the "Current state" block below are the versions of that time and are obsolete; the live log is [ACTION_LOG.en.md](./ACTION_LOG.en.md).
 >
 > This file is Lyra's **central action log**: what was done, when, why,
 > and where it landed (which doc / rule / section). Per-document
