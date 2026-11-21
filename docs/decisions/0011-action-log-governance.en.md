@@ -8,7 +8,7 @@
 |---|---|
 | ID | `0011` |
 | Title | Log governance v1: Action Log archive and slimmer rules |
-| Status | proposal |
+| Status | approved |
 | Owner | `ttrrei` |
 | Created | `2026-11-22` |
 | Related proposal | none |
@@ -72,7 +72,7 @@ There is no code change; the checks are:
 
 ## 7. Approval
 
-Pending `ttrrei`. After confirmation, change "Status" to "approved" and add the date here.
+Approved (`ttrrei`, 2026-11-22).
 
 ## 8. Revision history
 
