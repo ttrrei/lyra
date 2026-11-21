@@ -1592,11 +1592,10 @@ def _pull_direction(
     # object name, and urljoin drops the last segment when the base is not
     # slash-terminated (…/data → …/strategies/…), corrupting the object URL.
     base = par_url.rstrip("/") + "/"
-    prefix_url = f"{base}{prefix}/"
     keep_prefix = f"{prefix}/{direction}/"
     transport = _push_transport()
     try:
-        objects = oci_client.list_objects(transport, prefix_url)
+        objects = oci_client.list_objects(transport, base)
     except oci_client.ParExpiredError as exc:
         typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
@@ -1606,7 +1605,7 @@ def _pull_direction(
     if not selected:
         typer.secho(
             f"pull: no {prefix}/{direction}/ objects under "
-            f"{oci_client.redact_par_url(prefix_url)}", fg=typer.colors.YELLOW,
+            f"{oci_client.redact_par_url(base)}", fg=typer.colors.YELLOW,
         )
         return
 

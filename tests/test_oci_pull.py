@@ -12,7 +12,7 @@ from __future__ import annotations
 from typer.testing import CliRunner
 
 from lyra import cli
-from tests.conftest import FakePar
+from tests.conftest import FakePar, FakeResponse
 
 
 def _write_cfg(tmp_path, par_url: str) -> str:
@@ -200,3 +200,65 @@ def test_pull_strategy_dry_run_fetches_nothing(tmp_path, monkeypatch):
     assert out.exit_code == 0, out.output
     assert "would pull" in out.output
     assert not (ws / "strategies").exists()
+
+
+class _BucketRootPar(FakePar):
+    """Models a bucket-level PAR: only the PAR root URL can list objects.
+    GET <root>/<prefix>/ is a read of an object named '<prefix>/' -> 404."""
+
+    def get(self, url: str, **kwargs):
+        from tests.conftest import PAR_PREFIX
+        if url.endswith("/") and url != PAR_PREFIX:
+            self.requests.append(url)
+            return FakeResponse(404)
+        return super().get(url, **kwargs)
+
+
+def test_pull_strategy_works_with_bucket_level_par(tmp_path, monkeypatch):
+    from tests.conftest import PAR_PREFIX as P
+
+    objects = {
+        "strategies/fx-trend/v01.yaml": b"id: base\n",
+        "strategies/other/v01.yaml": b"other\n",
+        "runs/fx-trend/t1/r1/manifest.json": b"{}",
+    }
+    rec = _BucketRootPar(objects=objects)
+    monkeypatch.setattr(cli, "_push_transport", lambda: rec)
+    ws = tmp_path / "ws"
+    (ws / "data").mkdir(parents=True)
+    monkeypatch.setenv("LYRA_DATA_ROOT", str(ws / "data"))
+
+    out = CliRunner().invoke(
+        cli.app,
+        ["pull-strategy", "fx-trend", "--config", _write_cfg(tmp_path, P)],
+    )
+    assert out.exit_code == 0, out.output
+    assert (ws / "strategies/fx-trend/v01.yaml").read_bytes() == b"id: base\n"
+    assert not (ws / "strategies/other/v01.yaml").exists()
+    listings = [u for u in rec.requests if u.endswith("/")]
+    assert listings and all(u == P for u in listings), listings
+
+
+def test_pull_runs_works_with_bucket_level_par(tmp_path, monkeypatch):
+    from tests.conftest import PAR_PREFIX as P
+
+    objects = {
+        "runs/fx-trend/t1/r1/manifest.json": b"{}",
+        "runs/other/t1/r1/manifest.json": b"{}",
+        "strategies/fx-trend/v01.yaml": b"x",
+    }
+    rec = _BucketRootPar(objects=objects)
+    monkeypatch.setattr(cli, "_push_transport", lambda: rec)
+    ws = tmp_path / "ws"
+    (ws / "data").mkdir(parents=True)
+    monkeypatch.setenv("LYRA_DATA_ROOT", str(ws / "data"))
+
+    out = CliRunner().invoke(
+        cli.app,
+        ["pull-runs", "fx-trend", "--config", _write_cfg(tmp_path, P)],
+    )
+    assert out.exit_code == 0, out.output
+    assert (ws / "runs/fx-trend/t1/r1/manifest.json").read_bytes() == b"{}"
+    assert not (ws / "runs/other/t1/r1/manifest.json").exists()
+    assert not (ws / "strategies/fx-trend/v01.yaml").exists()
+
