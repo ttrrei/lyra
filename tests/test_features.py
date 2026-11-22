@@ -566,9 +566,21 @@ def _real_data_root():
 
 
 def test_real_data_one_instrument(tmp_path):
-    root = _real_data_root()
+    """Read-only against the real data. The real ``ohlcv_1h`` aggregate is
+    symlinked into a scratch root so the features are written under
+    ``tmp_path``: ``run_features`` prunes every parquet it was not asked to
+    build, so writing into the real root would delete the other instruments'
+    1h features (it used to leave only SPX500_USD)."""
+    real = _real_data_root()
+    real_layer = os.path.join(real, "features", "ohlcv_1h")
+    before = sorted(os.listdir(real_layer)) if os.path.isdir(real_layer) else None
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "ohlcv_1h").symlink_to(os.path.join(real, "ohlcv_1h"), target_is_directory=True)
     reg = features.build_registry()
     res = features.run_features(root, 60, reg, instruments=["SPX500_USD"])
+    after = sorted(os.listdir(real_layer)) if os.path.isdir(real_layer) else None
+    assert after == before, "the real features/ohlcv_1h layer must not be modified by this test"
     assert res.total_rows > 0
     t = pq.read_table(res.paths[0])
     assert len(t.column_names) == 154   # 146 + 8
