@@ -1,114 +1,104 @@
-# 0010 — temp/ 策略迁移分诊（Triage）
+# 决策 0010 — temp/ 策略迁移分诊（Triage）
 
-> **English**: [0010-temp-triage.en.md](./0010-temp-triage.en.md)（待补）
+> **English**: [0010-temp-triage.en.md](./0010-temp-triage.en.md)
 >
-> 范围：`strategies/temp/` 下 146 nova campaign + 132 moneta S 系列的
-> promote / archive 分诊（HLD §8 第 10 行，#99 新增）。
->
-> **用户裁决（2026-11-14）**：
-> 1. nova 迁移件使用**独立 track id `nova`**（不复用方向级 v01 的默认空间，
->    不与任何 AI 工作 track 混淆）；
-> 2. moneta S 系列**无 direction 归属，不拆进任何 direction，保留在 temp 下**
->    （只登记、不迁移）；
-> 3. 本工作**同时要求程序正确与内容正确**；自检 → 对抗性检查 → 内容检查，
->    修复后对改动内容再做一轮同样三查（防止修复引入新 bug）。
+> 范围：`strategies/temp/` 下 146 nova campaign + 132 moneta S 系列的 promote / drop / archive 分诊（HLD §8 第 10 行，#99 新增）。
 
-## 1. 输入盘点（已核实，2026-11-14）
+## 元信息
 
-| 语料 | 数量 | 形态 | 现状 |
-|---|---|---|---|
-| nova campaign | **146** YAML + 146 meta.json | `temp/nova_campaign/<family>/<20位hex>/{strategy.yaml,meta.json}` | 0008 只读索引，未迁移 |
-| moneta S 系列 | **132** 条记录 | Python 库（moneta 仓库内，**未拷贝进 lyra**），temp 下仅 `_index.json` | 0008 只读索引，verdict=null |
+| 字段 | 值 |
+|---|---|
+| ID | `0010` |
+| 标题 | temp/ 策略迁移分诊（Triage） |
+| 状态 | 提案 |
+| Owner | `ttrrei` |
+| 创建日期 | `2026-11-14` |
+| 相关提案 | 无 |
+| 相关需求 | `docs/requirements.md` §R8, §R12 |
+| 相关 HLD | `docs/hld.md` §8 |
+| 取代 | 无 |
 
-已核实事实（非推测）：
-- 146 个 `id` **全部唯一**（0 重复），可安全映射为分支名；
-- id 形态：`*_p1_rNN` 主族 + 1 个特例 `directions_volatility_expansion`
-  （**内容 = 正式库 `strategies/directions/volatility_expansion/v01.yaml` 逐字节相同**，
-  是 nova 侧对正式基线的 campaign 副本）；
-- `lyra validate`（registry feat-6/154 列实测）：**122 有效 / 24 无效**；
-  24 个无效**全部**是 `rsi_14` 幽灵引用（0008 裁决：不注册 rsi_14，改写 rsi_12）；
-- 146 全部 `timeframe_minutes: 60`（1h 单档）；
-- 活体特征表 feat-6 含 `rsi_12`（154 列），**不含 rsi_14**；
-- `classify_path`：`nova/vp1_r06.yaml` → **immutable**（I17 合法，可推送）；
-- track 激活上限 **8/track（I21 机器门禁）**——见 §3.2 处置；
-- pass_instruments 分布：0→12 / 1→9 / 2→9 / 3→14 / 4→26 / 5→11 / 6→13 /
-  7→18 / 8→8 / 9→12 / 10→9 / 11→3 / 12→1 / 13→1（"pass" 语义见 nova 原始研究，
-  仅作分诊参考，**不作为 lyra 结论**——O18 附加裁决要求一切以 lyra bar 集重算）。
+## 1. 问题
 
-## 2. 布局与身份（裁决落地）
+解决从历史仓库（Nova、Moneta）沉淀的 278 条候选策略语料在 Lyra 中的系统性分诊、清洗、验证与纳管问题。这些历史语料不能直接当作有效策略使用（包含过时特征引用、未在 Lyra 数据集验证、未纳入 Track 治理），也不能简单丢弃，需要一套可重放、符合 Alpha 边界且受门禁约束的分诊机制。
 
-```
-strategies/directions/<direction>/
-├── v01.yaml            # 方向级共享只读基线（0008 迁入，不动）
-└── nova/               # track `nova` 的候选（0010 迁移落地）
-    ├── vp1_r06.yaml    # 分支名 = v + 原始 id 的 rNN（id 唯一 → 无碰撞）
-    └── ...
-```
+## 2. 背景
 
-- **track id = `nova`**（满足 `_TRACK_ID_RE`，且语义 = 来源 provenance，
-  对应"tracks 身份可以对应 AI/来源"的既有裁决）；
-- 分支名取 `v<原始 rNN>`（如 `campaign_failed_breakout_p1_r06` → `vp1_r06`）：
-  - 保留原始 id 的可追溯性（原 id 仍在 `provenance.source_id` 与 temp 索引）；
-  - `vp1_r06` 匹配 `_VNN_RE`/`_BRANCH_RE`（I17 immutable、I21 可激活）；
-  - 同方向内 rNN 实测**无碰撞**（146 id 唯一已验证）；
-- 迁移件 YAML 头部追加 **provenance 注释块**（不改变任何机器字段）：
-  源 id / 源路径 / content_sha256_12 / hypothesis / pass_instruments /
-  triage 裁决 + 日期。**内容其余部分逐字节不动**（可 diff 审计）。
+- **语料现状**：
+  - **Nova campaign**：146 个 YAML + 146 个 `meta.json`，位于 `strategies/corpus/nova_campaign/<family>/<hex>/`（或本地 `temp/`）。全部为 60m 单档策略。146 个 ID 全部唯一。实测 122 个通过 `lyra validate`，24 个因引用 `rsi_14`（Lyra 特征层仅注册 `rsi_12`）失败；1 个特例 `directions_volatility_expansion` 与正式库基线逐字节相同。
+  - **Moneta S 系列**：132 条记录，原始形态为 Python 策略代码（位于 Moneta 仓库内，未直接拷入 Lyra），在 temp/corpus 下仅有 `_index.json` 索引，原始 verdict=null。
+- **历史裁决**：
+  - **O18 裁决（2026-11-11）**：Nova/Moneta 语料的历史成绩不可直接沿用，进入 Lyra 的策略必须在 Lyra 真实 bar 集上全部重算。
+  - **用户裁决（2026-11-14）**：Nova 迁移件使用独立 track ID `nova`；Moneta S 系列无 direction 归属，不拆进任何 direction，保留在 temp/ 登记；工作同时要求程序正确与内容正确。
+  - **F2 裁决**：分诊裁决写入 OCI corpus `_index.json`（append-only），不进入 git。
 
-## 3. 分诊规则（三态）
+## 3. 方案
 
-| 裁决 | 条件 | 落地 |
+### 3.1 做什么
+
+1. **分诊对象与清单**：
+   - 清单以 OCI corpus（`strategies/corpus/…` + `_index.json`）为准；本地 temp/ 原稿若在即只读使用，不在则通过 pull 拉回。若 Moneta 132 条两边均缺源代码，则记录缺口，分诊只用可得素材。
+   - 首轮分诊不一次性处理全量 278 条，而是选择 1 个方向家族的子集（20–40 条）作为实验场，逐条裁决由用户拍板。
+2. **分诊三态与判定标准**：
+   - **promote**：通过 `lyra validate`（语法合规、特征存在、SQL 可编译）且具备研究价值。复制到 `directions/<family>/nova/v<NN>.yaml`，在头部追加 provenance 注释块（源 ID、源路径、content sha256、假设、nova 历史 pass 数、分诊日期与裁决），其余部分逐字节不动。
+   - **drop / archive**：无法通过 validate（如 24 个 rsi_14 件）或历史表现无效（pass=0 等）。保留在 temp/ 语料中，不迁移，在索引中标记 `verdict: archive` 并记录具体原因（例如待改写 rsi_12 后重审）。
+   - **duplicate**：与正式库基线逐字节完全一致（如 `directions_volatility_expansion`）。不迁移，索引标记 `verdict: duplicate_of_baseline`。
+   - **keep-in-temp**：Moneta S 系列全部 132 条，保持在 temp 登记，不迁移到任何 direction（`verdict: keep_in_temp`）。
+3. **入库与重跑流程（O18 强制）**：
+   - promote 的策略进入 `strategies/<family>/nova/`，track ID 为 `nova`。
+   - 必须在 Lyra 活体特征数据（21 标的 1h）上执行完整 `lyra run`，产生标准运行产物，严禁直接信赖或抄录 Nova 历史绩效。
+4. **I21 激活上限（8 active/track）合规**：
+   - 迁移件入库登记不等同于全部激活。Track `nova` 的 `active_branches` 只激活通过 validate 且初筛表现领先的至多 8 个候选。其余件以 inactive 文件和索引形式存在，后续通过 `lyra prune` / 轮换管理。
+
+### 3.2 不做什么
+
+- 不一次性把 278 条全部粗暴迁入（首轮只做 1 个家族 20–40 条子集）。
+- 不把真实策略 YAML、真实绩效数字或批次归档提交到 git（严格遵守 Alpha 边界）。
+- 不为容纳历史语料而破坏 I21（不改大每 track 8 个 active branch 的上限）。
+- 不自动改写 rsi_14 特征定义来迎合历史无效件；不注册幽灵特征。
+
+### 3.3 边界
+
+- **OCI 边界**：语料清单与追加的 verdict 记录在 OCI `strategies/corpus/**/_index.json`，遵循 append-only（F2 裁决）。
+- **Git 边界**：仅分诊脚本（如 `scripts/triage_0010.py`）与决策/报告文档进入 git，策略 YAML 与运行数据全部在 workspace / OCI。
+- **与 0012 边界**：0010 负责历史语料的分类与存量候选入库；入库后的候选如何参与多候选批量演进研究由 0012 规定。
+
+## 4. 不变量
+
+| # | 不变量 | 来源 |
 |---|---|---|
-| **promote** | `lyra validate` 通过（122） | 复制到 `directions/<family>/nova/v<NN>.yaml` + provenance 注释 + temp 索引记 verdict |
-| **archive** | 24 个 rsi_14 无效件 + 12 个 pass=0 无效件（实际 24+12 中按实测拆分，见 triage 报告） | **留在 temp**（只读保留，不改写源）；temp 索引 verdict=archive + 原因；TODO 注：改写 rsi_12 后可重审 |
-| **duplicate** | `directions_volatility_expansion`（= 正式 v01 逐字节同） | 不迁移；索引 verdict=duplicate_of_baseline |
-| **keep-in-temp** | moneta S 系列全部 132 | 不拆 direction、不迁移（用户裁决 2）；索引 verdict=keep_in_temp + 原因（Python 形态 + 无 direction + 28 个有 matrix 结果者全部 3 标的、多数负于 buy-hold，历史结论按 O18 附加裁决不可直接沿用） |
+| I17 | OCI 双层不可变与追加规则：策略文件不可变，索引只增不减 | HLD §4 |
+| I18 | Track 隔离与身份绑定：所有 nova 迁移件均在 track `nova` 下 | HLD §4 |
+| I21 | 激活上限门禁：每个 track 最多 8 个 active branch | HLD §4 |
+| O18 | 结果必须重算：进入 Lyra 的策略必须在 Lyra bar 集上重算，严禁沿用历史数值 | 决策 O18 |
+| B13/B14 | Alpha 边界：策略与运行产物严格保留在 workspace，不进 git | Proposal |
 
-> **内容正确性说明**：nova 的 `pass_instruments` 是 nova bar 集上的研究结论。
-> O18 附加裁决（2026-11-11）：一切进入 lyra 的结果必须在 lyra bar 集上重算。
-> 因此 0010 的 triage 报告**只陈述 lyra 侧事实**（validate 通过/失败、
-> 迁移后重跑结果），nova 的 pass 数仅作为 provenance 记录，不作为筛选依据。
+## 5. 测试
 
-## 3.1 迁移后重跑（内容检查的核心）
+| 测试 | 场景 |
+|---|---|
+| `test_triage_0010_dry_run` | 验证分诊脚本 dry-run 幂等性，不产生意外写操作 |
+| `test_triage_promoted_validate` | 验证所有 promote 候选 100% 通过 `lyra validate` |
+| `test_triage_duplicate_skipped` | 验证基线重复项（如 directions_volatility_expansion）被正确跳过 |
+| `test_triage_provenance_comments` | 验证添加 provenance 注释后策略的 plan_hash 与原策略完全一致 |
+| `test_triage_i21_active_cap` | 验证 track `nova` 激活候选数量严格不超过 8 个 |
 
-- 迁移后对**每个 promote 件**在 lyra 活体数据（feat-6 + catalog，21 标的 1h）
-  执行 `lyra run --track nova --name <分支名>`，产物落 `runs/<direction>/nova/<run_id>/`；
-- 报告逐件：交易数 / annualized / win_rate（R5 冻结集），逐标的隔离（I7/I16）；
-- **禁止跨标的求和**（universal = 逐标的报告，工作合同）；
-- 重跑失败（数据覆盖/引擎错误）的件单独列出，**不静默**。
+## 6. 回滚
 
-## 3.2 I21 上限（8 active/track）处置
+- **代码层面**：分诊脚本和文档可通过 git 提交直接 revert。
+- **数据层面**：清空 workspace 下对应的 `strategies/<family>/nova/` 目录与相关 run 产物；OCI 端通过更新 append-only 索引标注废弃或通过版本标记隔离。
+- **兼容性**：不改变任何引擎代码或现有正式基线策略，回滚无连锁破坏。
 
-`nova` track 的候选远超 8——I21 的"8 active 上限"是**研究推进的机器门禁**
-（防单个 AI track 无限膨胀），不是语料归档上限。处置：
-- 迁移 = 文件入库 + 索引登记（**全部 122 件激活会违反 I21**）；
-- 因此：track `nova` 的 `active_branches` **只激活 triage 头部候选**
-  （按 validate 通过 + lyra 重跑 annualized 排序的**前 8**），其余 114 件
-  以文件 + 索引形式存在（inactive），后续用 `lyra tracks --prune` 显式轮换；
-- 此处置写入 triage 报告并在 `tracks/<direction>/nova.lessons.md` 记录，
-  不改 I21 常数（改门禁需用户裁决，本轮不改）。
+## 7. 审批
 
-## 4. 验证矩阵（用户要求的四层）
+- [ ] 用户 review
+- [ ] AI review（另一模型）
+- [ ] 测试全绿
+- [ ] OCI 端到端验证
 
-1. **自检**：迁移脚本 dry-run → 实迁 → 复跑幂等；122 件 validate 全绿；
-   diff 审计（迁移件 vs temp 原件：仅 provenance 注释差异）；
-   全仓测试 + pyflakes 回归。
-2. **对抗性检查**：至少覆盖——特例 id（directions_volatility_expansion）
-   不产生重复分支、rsi_14 件未泄漏进正式库、分支名/track id 全部过
-   `validate_ident`/`_VNN_RE`、classify_path 全 immutable、I21 只激活 8、
-   temp 原件零改动（before/after sha256 对账）、provenance 注释未破坏 YAML
-   语义（validate 前后 plan_hash 一致）、moneta 零文件生成、
-   迁移可被 `push-strategy` 正常 staging（干跑）。
-3. **内容检查**：§3.1 全量重跑 + 抽样人读（每个方向至少 1 件的
-   hypothesis ↔ YAML 条件 ↔ 重跑结果三方一致）+ 报告数字与 run 产物对账。
-4. **修复后复查**：任何检查触发的修复，其改动文件重跑 1–3 全量
-   （防止修复引入新 bug）。
+## 8. 修订记录
 
-## 5. 交付物
-
-- `scripts/triage_0010.py`（或等价脚本，幂等、可重放）
-- 122 个迁移件 + provenance 注释
-- `temp/nova_campaign/_index.json` / `temp/moneta_s_series/_index.json`
-  的 `verdict` 字段更新（只增字段，不删原有）
-- `docs/reports/0010-triage-report.md`（+ .en.md）：三态清单 + 全量重跑表
-- HLD §8 0010 行 ✅ + ACTION_LOG 状态块与条目（双语）
+| 日期 | 版本 | 变更 |
+|---|---|---|
+| 2026-11-14 | 0.1 | 初稿：完成输入盘点、命名规范与三态分诊定义。 |
+| 2026-11-22 | 1.0 | 补全标准决策文档结构（问题、边界、不变量、测试、回滚），对齐 HLD §8 要求与 P1 规划。 |
