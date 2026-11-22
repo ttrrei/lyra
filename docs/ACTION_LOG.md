@@ -20,11 +20,11 @@
 | 项 | 值 |
 |---|---|
 | 更新于 | 2026-11-22 |
-| 阶段 | 0001–0009 收口；批量候选研究改造 Phase 1 执行中（决策 0010/0012 落地）。 |
+| 阶段 | 0001–0009 收口；批量候选研究改造 Phase 1 全部完成（决策 0010/0012 与 ai_readme C2 落地，首轮 Pilot 跑通）。 |
 | 代码 | 406 passed, 3 skipped；`pyflakes` 与 `alpha-gate` 干净；`doctor` 0 fail/0 warn。 |
-| 进行中 | 批量候选研究改造 Phase 1（步骤 1.1 决策文档已完成，准备步骤 1.2 Pilot）。 |
-| 下一步 | 步骤 1.2 手动 Pilot 第 1 轮（验证 8 席位周转、两堵墙摩擦）；随后步骤 1.3 重写 `ai_readme.md`（C2）。 |
-| 待用户输入 | ① 检查点 CP1：审阅 0010/0012 决策要点。② 2026-11-22 列出 OCI 策略 bucket 时，`alpha/` 与 `tracks/` 下为 0 个对象的已知挂账。 |
+| 进行中 | 计划 1 收口交接（HANDOFF.md 已就绪，待用户审阅后进入计划 2）。 |
+| 下一步 | 批量候选研究计划 2/3（决策 0013：跨特征候选 data_digest 可比性松绑）。 |
+| 待用户输入 | 审阅 Pilot 报告与新版 ai_readme.md，确认启动计划 2。 |
 | 未决问题 | O1–O18 均已关闭或已裁决；GitHub branch protection 不开设（#127 裁决）。 |
 
 ## 条目（#134 起）
@@ -36,3 +36,4 @@
 | 136 | 2026-11-22 | fix | 测试覆盖了真实数据：`tests/test_features.py::test_real_data_one_instrument` 在 `~/.lyra/default/data` 存在时直接对真实数据运行 `run_features(…, 60, instruments=["SPX500_USD"])`，而发布步骤会删除本次未出现的标的文件，所以跑完 pytest 后 1h 特征层只剩 SPX500_USD（5m 层不受影响），`lyra run` 因此只评估 SPX。修复：测试把真实 `ohlcv_1h` 软链进临时目录再运行，并断言真实 `features/ohlcv_1h` 的文件列表不变；已在合成数据上复现并验证（修复前剩 1 个标的，修复后 3 个都在）。已有环境的恢复方法：`lyra features --minutes 60`。 | `tests/test_features.py` |
 | 137 | 2026-11-22 | code | `lyra doctor` 增加"特征层标的覆盖"检查：对每个已存在的 `features/<层>`，比较其 parquet 集合与对应 `ohlcv_<层>` 聚合里的标的集合，缺失或多余时给出 WARN 并提示 `lyra features --minutes N`。原因：#136 的事故里特征层被删减为 1 个标的，但 manifest 随之重写，原有的"generation 一致"检查看不出来。只增加警告，不改变退出码；新增 4 条测试，其中一条复现 #136 的事故（没有检查代码时该测试失败）。 | `lyra/features.py`（`layer_coverage`）、`lyra/cli.py`（`doctor`）、`tests/test_doctor.py` |
 | 138 | 2026-11-22 | doc | 补全历史语料分诊决策 0010（补充标准结构与英文对 0010.en.md）并新建 AI 批量候选研究契约 0012（中英对）。规范历史 Nova/Moneta 278 条语料的分诊纳管（首轮单家族试点 + O18 重跑 + 8 席位门禁），并确立多候选批次研究契约（每批 3–4 候选、禁止纯参数微调、解释结构差异），防范单线爬山局部最优。未改动任何引擎代码，测试与门禁保持全绿。 | `docs/decisions/0010-temp-triage(.en).md`、`docs/decisions/0012-ai-batch-candidate-research(.en).md` |
+| 139 | 2026-11-22 | doc | 重写 `lyra/ai_readme.md`（决策 0012 落地）：全面废除单分支迭代与调参示范，建立 3–4 候选批次提出、严禁纯参数微调、解释结构差异与 8 席位池化流转标准协议；示例完整替换为批次与剪枝闭环。0012 决策追加首轮 Pilot 实测结论修订行，未改动引擎代码，测试与门禁保持全绿。 | `lyra/ai_readme.md`、`docs/decisions/0012-ai-batch-candidate-research(.en).md` |

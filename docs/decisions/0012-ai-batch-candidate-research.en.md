@@ -106,3 +106,4 @@ Under the single-line iteration workflow, AI models tend to repeatedly tweak num
 | Date | Version | Change |
 |---|---|---|
 | 2026-11-22 | 1.0 | Initial draft: establish 3–4 candidate batch structure, anti-micro-tuning contract, and 8-seat pool rotation rules. |
+| 2026-11-22 | 1.1 | Revision incorporating Round 1 manual pilot (failed_breakout/pilot) findings: validated 8-seat rotation loop (3 proposed / 3 adopted / 1 pruned), confirmed empirical friction in data_digest incomparability across distinct features and lack of cross-instrument summary in digest, serving as inputs for decisions 0013/0014. |

@@ -7,6 +7,9 @@ ChatGPT, Gemini, etc.) that read and write strategy YAML files and execute
 > **Principle**: The AI writes strategy YAML. Everything else — validation,
 > compilation, execution, trade simulation, metrics — is handled by `lyra`.
 > The AI never writes Python. The AI never touches the codebase.
+> **Core Contract (Decision 0012)**: Research progresses via diverse candidate
+> pools (3–4 structurally distinct candidates per batch), never through
+> single-line parameter micro-tuning.
 
 ---
 
@@ -29,97 +32,88 @@ lyra pull-strategy --direction trend_continuation --config config/config.yml
 ```
 
 > **Data location**: `~/.lyra/default/data/`. Pass `--data-dir ~/.lyra/default/data`
-> to commands that need it (`submit`, `run`). Do not copy data.
+> to commands that need it (`apply-batch`, `run`, `submit`). Do not copy data.
+> **Data boundary**: AI accesses only the Research window and authorized feedback
+> summaries. Sealed Holdout data (reserved boundary) is never directly accessible.
 
 ---
 
 ## 2. The Loop (every iteration)
 
-This is the **complete** workflow. No other steps are needed.
+This is the **complete** workflow. Research iterates in batches of 3–4 candidates.
 
-### Step A — Read current state
+### Step A — Read current state (compact reading protocol)
 
-```bash
-lyra context <direction> --config config/config.yml
-```
+To prevent context bloat and focus on diversity:
+1. First read the compact history digest:
+   ```bash
+   lyra digest <direction> --track <track_id> --config config/config.yml
+   ```
+   Shows: direction hypothesis, active pool branches (up to 8 seats) with latest
+   scores, pruned memory, and recent lessons.
+2. Read the full context only when setting up a new track or referencing the grammar:
+   ```bash
+   lyra context <direction> --track <track_id> --config config/config.yml
+   ```
+3. **Reading Protocol**: In each round, inspect:
+   - The compact whole-pool digest (`lyra digest`);
+   - Full YAMLs for only 3–4 most relevant candidates;
+   - 1 instructive failure retrospective (pruned branch);
+   - Recent lessons memory.
 
-Returns a **self-contained document** with:
-- `## hypothesis` — what this direction is about (from `hypothesis.md` or v01.yaml)
-- `## features` — the complete list of available features (146)
-- `## grammar` — the exact YAML schema + a copyable valid template
-- `## track <id>` sections (if tracks exist) — frozen baseline, active branch
-  YAMLs, and the latest lessons
+### Step B — Propose 3–4 structurally distinct candidates (Batch bundle)
 
-If no tracks exist yet, the output will show only hypothesis + features +
-grammar. That is expected.
+Write **one batch bundle YAML** containing 3–4 candidate branches.
 
-**Lower-token alternative** (use this when you just need to decide what to
-try next):
+**The Golden Rule: No Pure Parameter Micro-tuning (Decision 0012)**:
+- **PROHIBITED**: Simply tweaking numeric thresholds (e.g. RSI 30→35), altering
+  smoothing windows (e.g. SMA 20→25), or presenting parameter variants as structural
+  innovations.
+- **REQUIRED**: Explain the structural difference relative to in-pool candidates in
+  plain text.
+- **Recommended batch mix**:
+  - 2 new hypotheses (e.g. novel indicator, regime conditioning);
+  - 1 logical combination (e.g. sweep combined with volume/momentum filter);
+  - 1 mechanism replacement (e.g. replace static exit with dynamic volatility exit).
+- **Cost consistency**: All 4 execution cost fields (`spread_bps`, `slippage_bps_per_side`,
+  `commission_bps_round_trip`, `financing_bps_per_day`) must match the track baseline
+  **exactly**.
+- **Scope**: All candidates in a batch must target the **same direction and track**.
 
-```bash
-lyra digest <direction> --track <track_id> --config config/config.yml
-```
-
-~1 screen. Shows: hypothesis (one line), active branches with their latest
-score, recent lessons (last 3 by default — use `--n-lessons N` for more).
-Enough to say "try X" or "prune Y".
-
-### Step B — Write the next strategy (as YAML)
-
-Use the grammar + template from `lyra context` as your guide. The key rules:
-
-1. **`version: 1`** — always. This is the YAML schema version, not the
-   strategy version.
-2. **`id`** — a unique name for this branch (e.g. `me_exhaustion_v03`).
-3. **`direction`** — must match the direction you are working in.
-4. **`parent`** — (required for vNN ≥ 2) the branch you are building on
-   (e.g. `v02` or `v01`).
-5. **`driven_by_lesson`** — (required for vNN ≥ 2) a short explanation of
-   what you learned from the parent branch that motivates this change.
-6. **`entry.long.all` / `entry.short.all`** — a flat list of
-   `{feature, op, value}` dicts. Use only features from the registered list.
-7. **`exit.long` / `exit.short`** — a single condition dict.
-8. **`stop_loss_pct: 0.02`** — always include (2% hard stop).
-9. **`max_holding_bars`** — number of bars to hold before forced exit.
-10. **`execution`** — copy from the v01 baseline; do not change unless you
-    have a specific reason.
-
-**Temporal conditions** (optional, advanced):
-You can use `within:` and `held_for:` to express "feature X stayed at value Y
-for N bars" or "feature X crossed value Y within the last N bars". See the
-grammar section in `lyra context` for exact syntax.
-
-### Step C — Submit and run
+### Step C — Preview, Apply, and Run
 
 ```bash
-lyra submit <your_file>.yaml \
-  --data-dir ~/.lyra/default/data \
-  --config config/config.yml \
-  --track <track_id> \
-  --branch <vNN>
+# 1. Preview (dry-run: parse + compile + preflight; zero writes)
+lyra apply-batch batch-0001.yaml --config config/config.yml --dry-run
+
+# 2. Adopt & Run all candidates across all instruments
+lyra apply-batch batch-0001.yaml --config config/config.yml --run \
+  --data-dir ~/.lyra/default/data
 ```
 
-This does: validate → adopt → run. If validation fails, you get a clear error
-with the feature/column that is wrong and a hint (did-you-mean or
-"run `lyra context`"). If the run succeeds, you get a **digest**
-(per-instrument: trades, annualized, win rate, net sum) plus the full report
-path on disk.
+This operates under **all-or-nothing** semantics: if any candidate in the bundle is
+invalid, the whole batch is rejected and nothing is written.
 
-> **If the track does not exist yet**: run
-> `lyra tracks <direction> --create <track_id> --config config/config.yml`
-> before submitting.
+### Step D — Analyze, Prune, and Record Lessons
 
-### Step D — Record what you learned
-
-```bash
-lyra lesson <direction> --track <track_id> \
-  "v03 (rsi 35/65, mhb=12): +4.47% ann, 896 trades. Wider entry > tighter exit.
-   Next: try rsi 40/60 + efficiency filter" \
-  --config config/config.yml
-```
-
-This is appended to the track's memory. The next AI (or your next session)
-will see it in `lyra context` and `lyra digest`.
+1. Review run outcomes via `lyra digest <direction> --track <track_id>` and
+   `lyra report <run_dir>`.
+2. Inspect sibling comparisons:
+   ```bash
+   lyra compare <direction> --track <track_id> --siblings
+   ```
+3. **Manage the 8-seat pool**: If a branch fails its hypothesis or adds uncompensated drag,
+   explicitly prune it to free active capacity:
+   ```bash
+   lyra prune <direction> --track <track_id> --branch <branch_slug> \
+     --reason "Explain why this mechanism failed"
+   ```
+4. Append lessons to track memory:
+   ```bash
+   lyra lesson <direction> --track <track_id> \
+     "L2: <Mechanism X> failed due to overtrading; <Mechanism Y> improved selectivity on indices; explore <Direction Z>." \
+     --config config/config.yml
+   ```
 
 ---
 
@@ -127,184 +121,197 @@ will see it in `lyra context` and `lyra digest`.
 
 | Command | Purpose |
 |---------|---------|
-| `lyra context <dir> [--track T]` | **Read**: full context (hypothesis + features + grammar + branches + lessons) |
-| `lyra digest <dir> --track T` | **Read**: compact 1-screen history (lower token cost) |
-| `lyra tracks <dir> --create <id>` | **Create**: a new research track in this direction |
-| `lyra tracks <dir> --list` | **Read**: list existing tracks |
-| `lyra submit <file> --track T --branch vNN` | **Write+Run**: validate, adopt, and run a new strategy |
-| `lyra lesson <dir> "<text>" --track T` | **Write**: record a lesson for future iterations |
-| `lyra apply-batch <bundle.yaml>` | **Multi-write**: apply N strategies at once (all-or-nothing) |
-| `lyra prune <dir> --track T --branch vNN` | **Write**: retire a weak branch (frees a slot in the 8-cap) |
-| `lyra new-version <dir> --track T --branch vNN` | **Read**: derive a template for the next branch (both options required) |
+| `lyra digest <dir> --track T` | **Read**: compact 1-screen pool summary (primary decision tool) |
+| `lyra context <dir> [--track T]` | **Read**: reference context (hypothesis + features + grammar + full track) |
+| `lyra apply-batch <bundle.yaml>` | **Batch Write**: validate and adopt 3–4 candidates (all-or-nothing) |
+| `lyra apply-batch <b.yaml> --run --data-dir D` | **Batch Write + Run**: adopt and evaluate whole batch end-to-end |
+| `lyra compare <dir> --track T --siblings` | **Compare**: horizontal evidence table across sibling runs |
+| `lyra prune <dir> --track T --branch vNN` | **Prune**: retire a failed branch with reason (frees an 8-cap slot) |
+| `lyra lesson <dir> "<text>" --track T` | **Learn**: record empirical lessons in track append-only memory |
+| `lyra tracks <dir> --create <id>` | **Create**: initialize a research track |
+| `lyra tracks <dir> --list` | **Read**: list existing tracks and active capacity (N/8) |
 | `lyra report <run_dir>` | **Read**: re-render a past run's full report |
-| `lyra validate <file>` | **Validate only** (no run): useful for quick checks |
+| `lyra validate <file>` | **Validate only** (single file syntax check) |
 | `lyra doctor` | **Diagnose**: check environment + data integrity |
 
-> **Not available** (commonly confused): `lyra history` (use `lyra context`),
-> `lyra search` (use `lyra context` + feature list), `lyra metrics` (use
-> `lyra digest` or `lyra report`).
+> **Single-branch commands** (`lyra submit`, `lyra new-version`) remain supported for
+> legacy single tests, but the standard research protocol is `lyra apply-batch`.
 
 ---
 
-## 4. Multi-direction AI (batch mode)
+## 4. Batch Proposal Bundle Specification
 
-When a single AI needs to propose strategies for multiple directions at once
-(e.g. a "master" AI coordinating specialist AIs), use `lyra apply-batch`:
+The web-AI packages 3–4 candidates into a single YAML file:
 
-**bundle.yaml** (the web-AI writes this file):
 ```yaml
+version: 1
 bundle:
-  - direction: momentum_exhaustion
-    track: t_me
-    branch: v05
-    hypothesis: "Wider RSI + efficiency filter"
-    parent: v04
-    driven_by_lesson: "v04 efficiency filter worked; push rsi to 42/58"
+  # Candidate 1: New hypothesis (Regime conditioning)
+  - direction: failed_breakout
+    track: t_fb
+    branch: v02a
+    parent: v01
+    driven_by_lesson: "L1: v01 unconditioned sweeps generate excess noise; require regime filter."
+    hypothesis: "New hypothesis: False breakout sweeps mean-revert only during low market efficiency."
     strategy:
       version: 1
-      id: me_v05
-      direction: momentum_exhaustion
-      # … full strategy YAML (same fields as a standalone file)
-      entry: { long: { all: [...] }, short: { all: [...] } }
-      exit:  { long: {...}, short: {...}, stop_loss_pct: 0.02, max_holding_bars: 12 }
-      execution: { spread_bps: 2, slippage_bps_per_side: 0.2,
-                   commission_bps_round_trip: 2, financing_bps_per_day: 1 }
+      id: fb_t_fb_v02a
+      family: failed_breakout
+      timeframe_minutes: 60
+      hypothesis: "Sweeps conditioned on low market efficiency (<0.35) mean-revert to range midpoint."
+      entry:
+        long:
+          all:
+            - {feature: failed_breakout_down_24, op: eq, value: true}
+            - {feature: range_position_24, op: lt, value: 0.5}
+            - {feature: efficiency_24, op: lt, value: 0.35}
+        short:
+          all:
+            - {feature: failed_breakout_up_24, op: eq, value: true}
+            - {feature: range_position_24, op: gt, value: 0.5}
+            - {feature: efficiency_24, op: lt, value: 0.35}
+      exit:
+        stop_loss_pct: 0.02
+        take_profit_pct: 0.02
+        max_holding_bars: 12
+        long: {feature: range_position_24, op: gte, value: 0.5}
+        short: {feature: range_position_24, op: lte, value: 0.5}
+      execution:
+        spread_bps: 2
+        slippage_bps_per_side: 0.2
+        commission_bps_round_trip: 0
+        financing_bps_per_day: 0
 
-  - direction: trend_continuation
-    track: t_tc
-    branch: v03
-    hypothesis: "…"
-    parent: v02
-    driven_by_lesson: "…"
+  # Candidate 2: Logical combination (Momentum exhaustion confirmation)
+  - direction: failed_breakout
+    track: t_fb
+    branch: v02b
+    parent: v01
+    driven_by_lesson: "L1: v01 unconditioned sweeps suffer momentum continuation; require exhaustion check."
+    hypothesis: "Logical combination: Sweeps combined with extreme RSI exhaustion (oversold/overbought) confirm reversal."
     strategy:
-      # … full strategy YAML
+      version: 1
+      id: fb_t_fb_v02b
+      family: failed_breakout
+      timeframe_minutes: 60
+      hypothesis: "Sweeps with momentum exhaustion confirmation (RSI 12 extreme) mean-revert."
+      entry:
+        long:
+          all:
+            - {feature: failed_breakout_down_24, op: eq, value: true}
+            - {feature: range_position_24, op: lt, value: 0.5}
+            - {feature: rsi_12, op: lt, value: 30.0}
+        short:
+          all:
+            - {feature: failed_breakout_up_24, op: eq, value: true}
+            - {feature: range_position_24, op: gt, value: 0.5}
+            - {feature: rsi_12, op: gt, value: 70.0}
+      exit:
+        stop_loss_pct: 0.02
+        take_profit_pct: 0.02
+        max_holding_bars: 12
+        long: {feature: range_position_24, op: gte, value: 0.5}
+        short: {feature: range_position_24, op: lte, value: 0.5}
+      execution:
+        spread_bps: 2
+        slippage_bps_per_side: 0.2
+        commission_bps_round_trip: 0
+        financing_bps_per_day: 0
+
+  # Candidate 3: Mechanism replacement (Dynamic volatility band exit)
+  - direction: failed_breakout
+    track: t_fb
+    branch: v02c
+    parent: v01
+    driven_by_lesson: "L1: v01 static midpoint exit holds through reversals; test dynamic exit."
+    hypothesis: "Mechanism replacement: Replace static range midpoint exit with dynamic Bollinger band percentile exit."
+    strategy:
+      version: 1
+      id: fb_t_fb_v02c
+      family: failed_breakout
+      timeframe_minutes: 60
+      hypothesis: "Dynamic volatility band exit captures impulse without holding through retracements."
+      entry:
+        long:
+          all:
+            - {feature: failed_breakout_down_24, op: eq, value: true}
+            - {feature: range_position_24, op: lt, value: 0.5}
+        short:
+          all:
+            - {feature: failed_breakout_up_24, op: eq, value: true}
+            - {feature: range_position_24, op: gt, value: 0.5}
+      exit:
+        stop_loss_pct: 0.02
+        take_profit_pct: 0.04
+        max_holding_bars: 6
+        long: {feature: bband_pctb_24, op: gte, value: 0.8}
+        short: {feature: bband_pctb_24, op: lte, value: 0.2}
+      execution:
+        spread_bps: 2
+        slippage_bps_per_side: 0.2
+        commission_bps_round_trip: 0
+        financing_bps_per_day: 0
 ```
-
-```bash
-# Preview only (no writes, no runs)
-lyra apply-batch bundle.yaml --config config/config.yml --dry-run
-
-# Full apply (all-or-nothing: if any item is invalid, NOTHING is written)
-lyra apply-batch bundle.yaml --config config/config.yml
-
-# Apply + run all valid items
-lyra apply-batch bundle.yaml --config config/config.yml --run \
-  --data-dir ~/.lyra/default/data
-```
-
-> **All-or-nothing**: if item 3 of 10 fails validation, items 1, 2, 4–10 are
-> also rejected. Fix item 3 and retry the whole batch.
 
 ---
 
-## 5. Practical rules for AI agents
+## 5. Practical Rules for AI Agents
 
-1. **One branch per iteration**. Write vNN → submit → read result → lesson →
-   write vNN+1. Do not write multiple branches in the same session unless you
-   are using `apply-batch`.
-
-2. **Always record a lesson** after a run, even if the result was bad. The
-   next AI needs to know what was tried and why it failed.
-
-3. **Use `lyra digest`** to decide what to try next, not `lyra context`.
-   `context` is the reference; `digest` is the decision tool.
-
-4. **Feature names are exact**. `return_3` is not a feature; `return_6_atr`
-   is. If you get "unknown feature", the error will suggest close matches.
-
-5. **The 8-branch cap**: each track holds at most 8 active branches. When you
-   need to prune, use `lyra prune` and record why in the lesson.
-
-6. **v01 is the direction baseline** — never try to overwrite or modify it.
-   All your work goes into vNN (N ≥ 2) under a track.
-
-7. **Track IDs are permanent slugs**. Choose them thoughtfully (e.g. `t_me`
-   for momentum exhaustion) — they appear in file paths and OCI object keys.
-
-### Interpreting the numbers — do not over-trust them
-
-These caveats are the difference between "the AI thinks it found alpha" and
-"the AI understands what it actually measured". Read them before judging any
-run:
-
-- **`annualized` / `score` is a SUM, not a rate.** It is the net return of
-  every trade divided by full calendar years — it is *not* annualised like a
-  CAGR, and it is *not* a per-trade rate. A big number can come from a handful
-  of big trades, not from a robust edge.
-- **Choice bias ("best of N" is overstated).** If you (or a previous AI)
-  tried 10 parameter sets and this is the best one, its score is the maximum
-  of 10 noisy draws — systematically inflated. Treat a single top result as a
-  *candidate*, not a conclusion. More trials → the best one looks better even
-  when there is no edge.
-- **Low-sample flag.** The report marks instruments with **< 20 trades** as
-  `⚠ <20 trades`. A "win rate" on 3 trades is noise, not a signal. Weight
-  lessons toward the instruments with real trade counts.
-- **Costs matter — a zero-cost backtest is optimistic.** The report prints the
-  applied cost model (`commission`, `financing`, `spread`, `slippage`) and
-  warns if all are zero. A positive result that only survives *after* costs
-  are set is far more believable than a cost-free one.
-- **Instruments are correlated — don't sum them.** Each instrument's number
-  is reported separately (never summed into a portfolio). But if several
-  instruments are the same underlying (e.g. SPX500 vs SPX500_USD, or two
-  indices), a "multi-instrument" result is really one bet counted several
-  times. Treat correlated instruments as one exposure, not several.
-- **Financing is charged per calendar day.** For FX/CFD on margin this is
-  reasonable; for an index or cash position the day count overstates the real
-  cost. Read the `financing day basis` line in the report before comparing
-  instruments with different holding periods.
-- **The 2% stop is fixed (not volatility-normalized).** The report shows each
-  instrument's **stop%** (share of trades stopped out). An instrument at 0%
-  had an *inactive* stop — its tail risk was never cut by the design, so its
-  losses can be gap-driven and larger than 2%.
-- **This is trade-level research, NOT an account backtest.** The 2% stop is a
-  per-trade *price* stop. It is NOT account equity 2% HWM drawdown, not a 2%
-  risk-per-trade budget, not margin/leverage/liquidation protection, and there
-  is no sizing, portfolio, or cross-instrument exposure model. Never describe
-  a result as "the account won't drop more than X".
-- **Quotes are mid + synthetic spread (FIN-03).** The engine models the
-  long/short bid/ask branch in code, but the current runner feeds only *mid*
-  OHLC — so fills are mid price ± a fixed `spread_bps`, not real broker bid/ask
-  execution. Treat fills as a research assumption, not a live-quote simulation.
-- **Volume is quote/tick activity, not traded volume (FIN-04).** If the source
-  is OANDA candle data, `volume` is the *number of price updates* in the bar —
-  a tick/quote-activity proxy. MFI / OBV / relative volume derived from it
-  measure quoting activity, not real order flow or money in/out. Don't read a
-  volume indicator as "money flow" without verifying the source.
+1. **Batch iteration of 3–4 candidates**: Submit a single `apply-batch` bundle per round.
+   Never iterate by submitting single-branch micro-adjustments.
+2. **Prohibit parameter micro-tuning**: Do not submit candidates differing only by numeric
+   constants (e.g. 30 vs 35, 12 vs 14). Structural differences must be declared and
+   defensible.
+3. **Execution costs are immutable**: Cost parameters (`spread_bps`, `slippage_bps_per_side`,
+   `commission_bps_round_trip`, `financing_bps_per_day`) must be identical to the track baseline.
+4. **Intra-track comparison only**: Sibling comparison and batches operate strictly within
+   one direction and one track.
+5. **The 8-seat pool limit (I21)**: Each track holds at most 8 active branches. Always prune
+   inferior or refuted branches before applying a new batch.
+6. **Always record a lesson**: Document what structural change was tested, what worked,
+   what failed, and the next structural exploration direction.
+7. **v01 is the immutable baseline**: Never modify or overwrite `v01.yaml`.
 
 ---
 
-## 6. Example complete session
+## 6. Example Complete Batch Session
 
 ```
-AI:  lyra context momentum_exhaustion --config config/config.yml
-     → reads hypothesis, features, grammar
-     → sees no tracks yet
+AI:  lyra digest failed_breakout --track t_fb --config config/config.yml
+     → reads current pool: 1 active baseline (v01), 0/8 candidates, recent lessons (L1)
+     → protocol: inspects v01 YAML + L1 lesson ("unconditioned sweeps negative on 19/21 assets")
 
-AI:  lyra tracks momentum_exhaustion --create t_me --config config/config.yml
+AI:  writes batch-0001.yaml (3 structurally distinct candidates:
+       - v02a: New hypothesis (efficiency_24 < 0.35 filter)
+       - v02b: Logical combination (rsi_12 momentum exhaustion)
+       - v02c: Mechanism replacement (dynamic Bollinger percentile exit)
+     All execution costs copied identically from v01 baseline.)
 
-AI:  writes v02_me.yaml (rsi 30/70 entry, mhb=6, based on v01)
-     lyra submit v02_me.yaml --data-dir ~/.lyra/default/data \
-       --config config/config.yml --track t_me --branch v02
-     → digest: SPX500_USD 714 trades, annualized -1.7%, win 50.1%
+AI:  lyra apply-batch batch-0001.yaml --config config/config.yml --dry-run
+     → dry-run: all items VALID (parse + compile + preflight), 3 would adopt
 
-AI:  lyra lesson momentum_exhaustion --track t_me \
-       "v02 (mhb=6, rsi_exit=55/45): -1.7% ann. Too fast. Next: wider entry."
+AI:  lyra apply-batch batch-0001.yaml --config config/config.yml --run \
+       --data-dir ~/.lyra/default/data
+     → 3 adopted · 3 run ok (v02a, v02b, v02c)
 
-AI:  writes v03_me.yaml (rsi 35/65 entry, mhb=12)
-     lyra submit v03_me.yaml --data-dir ~/.lyra/default/data \
-       --config config/config.yml --track t_me --branch v03
-     → digest: SPX500_USD 896 trades, annualized +4.47%, win 56.5%
+AI:  lyra digest failed_breakout --track t_fb --config config/config.yml
+     → v02a: trade count down 20%, positive on SPX500/UK100
+     → v02b: trade count down 65%, positive on CN50/HK33, cut drawdown
+     → v02c: trade count increased, negative on 20/21 assets due to turnover drag
 
-AI:  lyra lesson momentum_exhaustion --track t_me \
-       "v03 (rsi 35/65, mhb=12): +4.47% ann. Wider entry wins. Next: + quality filter."
+AI:  lyra compare failed_breakout --track t_fb --siblings
+     → reviews cross-branch evidence table
 
-AI:  writes v04_me.yaml (rsi 40/60 + efficiency_24 > 0.3)
-     lyra submit v04_me.yaml --data-dir ~/.lyra/default/data \
-       --config config/config.yml --track t_me --branch v04
-     → digest: SPX500_USD 677 trades, annualized +5.12%, win 56.7%
+AI:  lyra prune failed_breakout --track t_fb --branch v02c \
+       --reason "v02c dynamic band exit increased turnover and fee drag, negative on 20/21 assets."
+     → track t_fb: 2/8 active branches (v02a, v02b retained)
 
-AI:  lyra lesson momentum_exhaustion --track t_me \
-       "v04 (rsi 40/60, efficiency>0.3): +5.12% ann. Best. Next: within() temporal."
+AI:  lyra lesson failed_breakout --track t_fb \
+       "L2: Dynamic band exit (v02c) increases overtrading; regime efficiency (v02a) and RSI exhaustion (v02b) improve equities but fail on FX; next explore session temporal filtering." \
+       --config config/config.yml
 
-→ loop continues…
+AI:  lyra backup --config config/config.yml
+     → syncs active tracks, runs, and strategies to OCI
+
+→ loop continues with next batch (proposing 3 new structural candidates into remaining capacity)…
 ```
