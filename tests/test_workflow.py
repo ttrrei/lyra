@@ -666,8 +666,12 @@ def test_d1_context_without_track_shows_live_labelled(tmp_path):
 # --- 0009 D2/D3: run identity + comparability (R2/R9) -----------------------
 
 
+_OMIT = object()
+
+
 def _mk_run_with_meta(ws, direction, branch, track, run_id, snapshot=None,
-                      data_digest=None, feature_version=None):
+                      data_digest=None, feature_version=None,
+                      market_data_snapshot_id=_OMIT):
     import json as _json
 
     run_dir = ws / "runs" / f"{branch}-{run_id}" / "20261110" / run_id
@@ -679,12 +683,19 @@ def _mk_run_with_meta(ws, direction, branch, track, run_id, snapshot=None,
         "per_instrument": {"EURUSD": {"trade_count": 5, "annualized": 0.1,
                                        "win_rate": 0.6, "net_return": 0.02}},
     }
-    # 0009 D13 (H2): per-run data identity fields (legacy runs omit both →
-    # the comparability verdict degrades to unknown, which the tests assert).
+    # 0009 D13 & 0013: per-run data identity fields.
     if data_digest is not None:
         payload["data_digest"] = data_digest
     if feature_version is not None:
         payload["feature_version"] = feature_version
+    if market_data_snapshot_id is not _OMIT:
+        if market_data_snapshot_id is not None:
+            payload["market_data_snapshot_id"] = market_data_snapshot_id
+    else:
+        # Default market_data_snapshot_id to data_digest if data_digest is present,
+        # so legacy test setups that pass data_digest get market_data_snapshot_id set.
+        if data_digest is not None:
+            payload["market_data_snapshot_id"] = data_digest
     (run_dir / "metrics.json").write_text(_json.dumps(payload), encoding="utf-8")
     (run_dir / "run_meta.json").write_text(_json.dumps({
         "direction": direction, "branch": branch, "track_id": track,
@@ -755,38 +766,78 @@ def test_d3_compare_marks_incomparable_across_generations(tmp_path):
     assert result3["distinct_feature_generations"] == 1
 
 
-def test_d13_compare_uses_data_digest_and_feature_version(tmp_path):
-    """0009 D13 (H2): comparability now also requires identical data_digest
-    and feature_version — same snapshot alone is NOT sufficient."""
+def test_d13_compare_uses_market_data_snapshot_and_feature_version(tmp_path):
+    """0009 D13 amended by 0013: comparability requires identical market_data_snapshot_id
+    and feature_version. Different market data -> not comparable."""
     _mk_direction(tmp_path)
     wf.create_track(tmp_path, "fx-trend", "alpha")
-    # same snapshot, DIFFERENT data digest → not comparable (the H2 case)
+    # same snapshot, DIFFERENT market data snapshot → not comparable
     _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "runE",
-                      snapshot="snap1", data_digest="dig1", feature_version=6)
+                      snapshot="snap1", data_digest="dig1", feature_version=6,
+                      market_data_snapshot_id="mkt1")
     _mk_run_with_meta(tmp_path, "fx-trend", "v02", "alpha", "runF",
-                      snapshot="snap1", data_digest="dig2", feature_version=6)
+                      snapshot="snap1", data_digest="dig2", feature_version=6,
+                      market_data_snapshot_id="mkt2")
     result = wf.compare_siblings(tmp_path, "fx-trend", ["v01", "v02"])
     assert result["comparable"] is False
-    assert result["distinct_data_digests"] == 2
+    assert result["distinct_market_data_snapshots"] == 2
     # the per-run reason names the differing dimension
     reasons = {r["incomparable_reason"] for row in result["siblings"]
                for r in row["runs"]}
-    assert reasons == {"data_digest"}
+    assert reasons == {"market_data_snapshot_id"}
 
-    # same snapshot + same digest, DIFFERENT feature version → not comparable
+    # same snapshot + same market_data, DIFFERENT feature version → not comparable
     ws2 = tmp_path / "ws2"; ws2.mkdir()
     _mk_direction(ws2)
     wf.create_track(ws2, "fx-trend", "alpha")
     _mk_run_with_meta(ws2, "fx-trend", "v01", "alpha", "runG",
-                      snapshot="snap1", data_digest="dig1", feature_version=5)
+                      snapshot="snap1", data_digest="dig1", feature_version=5,
+                      market_data_snapshot_id="mkt1")
     _mk_run_with_meta(ws2, "fx-trend", "v02", "alpha", "runH",
-                      snapshot="snap1", data_digest="dig1", feature_version=6)
+                      snapshot="snap1", data_digest="dig1", feature_version=6,
+                      market_data_snapshot_id="mkt1")
     result2 = wf.compare_siblings(ws2, "fx-trend", ["v01", "v02"])
     assert result2["comparable"] is False
     assert result2["distinct_feature_versions"] == 2
     reasons2 = {r["incomparable_reason"] for row in result2["siblings"]
                 for r in row["runs"]}
     assert reasons2 == {"feature_version"}
+
+
+def test_0013_compare_different_features_same_market_data_is_comparable(tmp_path):
+    """0013: two candidates consuming DIFFERENT features on the SAME market data
+    share the same market_data_snapshot_id and ARE comparable (comparable=True),
+    even though their data_digests differ."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "runA",
+                      snapshot="snap1", feature_version=6,
+                      market_data_snapshot_id="mkt_common", data_digest="dig_rsi")
+    _mk_run_with_meta(tmp_path, "fx-trend", "v02", "alpha", "runB",
+                      snapshot="snap1", feature_version=6,
+                      market_data_snapshot_id="mkt_common", data_digest="dig_bb")
+    result = wf.compare_siblings(tmp_path, "fx-trend", ["v01", "v02"])
+    assert result["comparable"] is True
+    assert result["distinct_market_data_snapshots"] == 1
+    assert result["distinct_data_digests"] == 2
+
+
+def test_0013_missing_market_data_snapshot_id_treated_as_unknown(tmp_path):
+    """0013: if a legacy run is missing market_data_snapshot_id, comparable is None."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "runLegacy",
+                      snapshot="snap1", feature_version=6, data_digest="dig1",
+                      market_data_snapshot_id=None)
+    _mk_run_with_meta(tmp_path, "fx-trend", "v02", "alpha", "runModern",
+                      snapshot="snap1", feature_version=6, data_digest="dig1",
+                      market_data_snapshot_id="mkt1")
+    result = wf.compare_siblings(tmp_path, "fx-trend", ["v01", "v02"])
+    assert result["comparable"] is None
+    assert result["runs_without_data_identity"] == 1
+    legacy_run = [r for row in result["siblings"] for r in row["runs"] if r["run_id"] == "runLegacy"][0]
+    assert legacy_run["comparable"] is None
+    assert legacy_run["incomparable_reason"] == "unknown (missing identity field)"
 
 
 def test_d13_legacy_run_makes_comparable_unknown(tmp_path):

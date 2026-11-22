@@ -156,3 +156,4 @@ strategies/<direction>/
 | 2026-11-12 | 0.1 | 初版设计定稿：D1–D11 决策表 + 关键设计说明 + 测试计划 + 验收判据。 |
 | 2026-11-12 | 0.2 | 设计自检修正：D8 改为 `pyproject.toml` 上下界 + 单一 `requirements.lock`（不另造 requirements.txt）；D9 补 TA-Lib C 库依赖的 CI 前置；D10 拆两级（硬失败=环境/配置类，警告=数据/运行状态类），避免未 pull 前 doctor 必红。 |
 | 2026-11-12 | 0.3 | 对抗性检验（见 §3a）：修 **P1 lock/CI 3.11 与 numpy 2.5.4 不兼容**（支持面钉 3.12）；P2 `run_meta`/`push-runs` 身份匹配漏 `direction` 守卫；P3 D4 陈旧 instrument parquet 未清理（已实现 prune + 回归测试）、doctor compile 冒烟依赖 cwd、compare 可比性 `distinct_feature_generations` 语义、README/HLD/requirements 的 3.11–3.12 表述对齐为 3.12。全部回归验证。 |
+| 2026-11-22 | 1.0 | 修订 D13 可比性维度：决策 0013 将水平可比性第一维度由 data_digest 替换为 market_data_snapshot_id（解耦特征差异与底层行情数据），data_digest 仅保留为复现性身份，详见 docs/decisions/0013-market-data-snapshot-id.md。 |

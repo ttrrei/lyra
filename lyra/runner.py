@@ -121,6 +121,21 @@ def _data_digest(con: duckdb.DuckDBPyConnection, view: str,
     return h.hexdigest()
 
 
+def market_data_snapshot_id(con: duckdb.DuckDBPyConnection, view: str,
+                            instruments: Sequence[str]) -> str:
+    """Compact O(n) digest of the underlying market data (view + instruments
+    + OHLC columns: time, mid_o, mid_h, mid_l, mid_c). Does NOT include
+    strategy-consumed feature columns (Decision 0013).
+
+    Used for horizontal comparability: runs consuming different features
+    over the exact same market data share this ID and are judged comparable.
+    """
+    return _data_digest(con, view, instruments, feature_cols=())
+
+
+_market_data_snapshot_id = market_data_snapshot_id
+
+
 def _feature_layer_for_view(view: str) -> str | None:
     """Map a Catalog strategy view to its physical feature layer dir.
 
@@ -378,8 +393,10 @@ def run_strategy(
                 })
 
         # 4) reproducibility manifest inputs (D5/I5; computed while conn open)
-        # 批次1-H2: the strategy's actual feature columns are consumed data —
-        # include them so a feature-only perturbation changes run_id.
+        # 0013: market_data_snapshot_id hashes OHLC columns only (for cross-candidate
+        # comparability); data_digest includes strategy-consumed feature columns (for
+        # single-run reproducibility identity).
+        market_data_id = market_data_snapshot_id(con, plan.view, instruments)
         data_digest = _data_digest(
             con, plan.view, instruments, feature_cols=plan.features_used,
         )
@@ -424,7 +441,8 @@ def run_strategy(
     run_dir = Path(result.out_dir) / run_name / run_date / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_artifacts(run_dir, plan, spec, result, run_id, trading_days_for,
-                     feature_catalog_snapshot, data_digest=data_digest)
+                     feature_catalog_snapshot, data_digest=data_digest,
+                     market_data_snapshot_id=market_data_id)
     result.out_dir = run_dir
 
     if strict and result.instrument_failures:
@@ -737,6 +755,7 @@ def _write_artifacts(
     trading_days_for: TradingDaysCounter | None,
     feature_snapshot_id: str | None,
     data_digest: str | None = None,
+    market_data_snapshot_id: str | None = None,
 ) -> None:
     generated_at = datetime.now(timezone.utc).isoformat()
 
@@ -781,9 +800,10 @@ def _write_artifacts(
         "instruments": sorted(result.metrics),
         "window": window,
         "feature_snapshot_id": feature_snapshot_id,
-        # 0009 D13 (H2): per-run data identity — the feature values actually
-        # consumed (digest) + the feature-code generation. compare_siblings
-        # reads these from metrics.json to judge comparability per run.
+        # 0009 D13 (H2) & 0013: per-run data identity — market_data_snapshot_id
+        # (OHLC values, 0013 comparability) + data_digest (consumed features,
+        # reproducibility) + feature_version (feature-code generation).
+        "market_data_snapshot_id": market_data_snapshot_id,
         "data_digest": data_digest,
         "feature_version": features_mod.FEATURE_VERSION,
         "git_commit": git_commit,
@@ -830,6 +850,7 @@ def _write_artifacts(
         "features_used": sorted(plan.features_used),
         "feature_snapshot_id": feature_snapshot_id,
         "feature_version": features_mod.FEATURE_VERSION,
+        "market_data_snapshot_id": market_data_snapshot_id,
         "data_digest": data_digest,
         "compiler_version": plan.compiler_version,
         "engine_version": _ENGINE_VERSION,

@@ -2116,7 +2116,8 @@ def compare_cmd(
     label = {True: "COMPARABLE", False: "NOT COMPARABLE",
              None: "UNKNOWN (missing identity fields)"}[verdict]
     typer.echo(f"comparable: {label}  "
-               f"(data_digests={result['distinct_data_digests']}, "
+               f"(market_data_snapshots={result.get('distinct_market_data_snapshots', 0)}, "
+               f"data_digests={result['distinct_data_digests']}, "
                f"feature_versions={result['distinct_feature_versions']}, "
                f"feature_generations={result['distinct_feature_generations']}, "
                f"runs_without_identity={result['runs_without_data_identity']})")

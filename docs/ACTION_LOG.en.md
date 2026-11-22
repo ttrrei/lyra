@@ -20,12 +20,11 @@
 | Item | Value |
 |---|---|
 | Updated | 2026-11-22 |
-| Phase | 0001–0009 closed; Batch Candidate Research Transformation Phase 1 complete (decisions 0010/0012 & ai_readme C2 landed, Pilot Round 1 completed). |
-| Code | 406 passed, 3 skipped; `pyflakes` and `alpha-gate` clean; `doctor` 0 fail/0 warn. |
-| In progress | Phase 1 handoff (HANDOFF.md ready, awaiting user review to proceed to Phase 2). |
-| Next | Batch Candidate Research Phase 2/3 (decision 0013: decouple data_digest comparability across features). |
-| Awaiting user | Review Pilot report and revised ai_readme.md, confirm kickoff of Phase 2. |
-| Open questions | O1–O18 are closed or decided; GitHub branch protection not enabled (#127 ruling). |
+| Phase | Phase 2/3 in progress; C3 (decision 0013) committed, C4 (decision 0014) pending. |
+| Code | 411 passed, 2 skipped; `pyflakes` and `alpha-gate` clean. |
+| In progress | Phase 2 C4: digest cross-instrument summary (decision 0014) — decision doc to write, then code. |
+| Next | Decision 0014 doc → C4 code → tests → commit → update HANDOFF.md. |
+| Open questions | O1–O18 closed or decided; exit-month diagnosis deferred to Phase 3. |
 
 ## Entries (from #134)
 
@@ -37,3 +36,4 @@
 | 137 | 2026-11-22 | code | `lyra doctor` gains a "feature-layer instrument coverage" check: for every existing `features/<layer>` it compares the parquet set with the instruments in the matching `ohlcv_<layer>` aggregate and warns on missing or extra ones, pointing to `lyra features --minutes N`. Why: in #136 the layer was cut down to one instrument but its manifest was rewritten to match, so the existing "generation consistent" check could not see it. Warning only, exit code unchanged; 4 new tests, one of which reproduces the #136 incident (it fails without the check). | `lyra/features.py` (`layer_coverage`), `lyra/cli.py` (`doctor`), `tests/test_doctor.py` |
 | 138 | 2026-11-22 | doc | Completed legacy corpus triage decision 0010 (added standard sections and English pair 0010.en.md) and created AI batch candidate research contract 0012 (bilingual pair). Standardized triage governance for 278 legacy Nova/Moneta candidates (single-family initial pilot + O18 re-run + 8-seat active gate) and established the multi-candidate batch research contract (3–4 candidates per batch, prohibition of pure parameter tuning, explainable structural differences) to avoid local optima. Zero engine code modified; tests and gates remain completely green. | `docs/decisions/0010-temp-triage(.en).md`, `docs/decisions/0012-ai-batch-candidate-research(.en).md` |
 | 139 | 2026-11-22 | doc | Rewrote `lyra/ai_readme.md` (decision 0012 implementation): completely eliminated single-branch iteration and parameter tuning examples, establishing standard protocols for 3–4 candidate batch proposals, prohibition of pure parameter tuning, explainable structural differences, and 8-seat pool rotation. Complete session example replaced with full batch and prune loop. Appended pilot findings revision row to decision 0012; zero engine code modified; tests and gates remain completely green. | `lyra/ai_readme.md`, `docs/decisions/0012-ai-batch-candidate-research(.en).md` |
+| 140 | 2026-11-22 | code | Market data snapshot ID and cross-feature comparability decoupling (decision 0013, commit C3): introduced `market_data_snapshot_id` in `runner.py` (hashes OHLC base columns only), recorded in metrics and manifest; replaced `data_digest` with `market_data_snapshot_id` as the primary comparability check in `workflow._run_comparable_reason`, allowing candidates consuming different features on identical market data to be judged comparable while preserving `data_digest` for single-run reproducibility. All regression tests pass; real pilot track smoke confirms sibling `comparable=True`. | `lyra/runner.py`, `lyra/workflow.py`, `lyra/cli.py`, `tests/test_runner.py`, `tests/test_workflow.py`, `docs/decisions/0013-market-data-snapshot-id(.en).md` |

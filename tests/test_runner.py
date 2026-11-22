@@ -13,7 +13,9 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from pathlib import Path
 
+import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -644,3 +646,82 @@ def test_run_generation_gate_fails_closed_on_tamper(env):
     with pytest.raises(feat.FeaturesError):
         runner.run_strategy(strat, data_root, registry=reg,
                             out_dir=str(data_root / "runs"))
+
+
+def test_0013_market_data_snapshot_id_stable_across_features(env):
+    """0013: market_data_snapshot_id is strictly over OHLC columns; consuming different
+    features on the same market data yields identical market_data_snapshot_id, while
+    data_digest differs."""
+    data_root = env["data_root"]
+    _add_generation_manifest(data_root)
+    con = duckdb.connect(str(catalog.Catalog(data_root / "catalog.duckdb").path),
+                         read_only=True)
+    try:
+        # Compute market data snapshot ID (no feature cols)
+        mkt_id1 = runner.market_data_snapshot_id(con, "features_1h", ["EURUSD", "GBPUSD"])
+        mkt_id2 = runner._data_digest(con, "features_1h", ["EURUSD", "GBPUSD"], feature_cols=())
+        assert mkt_id1 == mkt_id2
+
+        # When feature_cols are provided, data_digest reflects them
+        digest_with_feature = runner._data_digest(con, "features_1h", ["EURUSD", "GBPUSD"], feature_cols=["volume"])
+        assert mkt_id1 != digest_with_feature
+    finally:
+        con.close()
+
+
+def test_0013_run_strategy_writes_market_data_snapshot_id(env):
+    """0013: run_strategy writes market_data_snapshot_id to both metrics.json and manifest.json."""
+    data_root, strat, reg = env["data_root"], env["strat"], env["registry"]
+    _add_generation_manifest(data_root)
+
+    res = runner.run_strategy(strat, data_root, registry=reg,
+                              out_dir=str(data_root / "runs"))
+    run_dir = Path(res.out_dir)
+
+    metrics = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert "market_data_snapshot_id" in metrics
+    assert metrics["market_data_snapshot_id"] is not None
+    assert isinstance(metrics["market_data_snapshot_id"], str)
+    assert len(metrics["market_data_snapshot_id"]) == 64
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert "market_data_snapshot_id" in manifest
+    assert manifest["market_data_snapshot_id"] == metrics["market_data_snapshot_id"]
+
+
+def test_0013_market_data_snapshot_id_sensitive_to_ohlc_and_instruments(env):
+    """0013: market_data_snapshot_id changes when OHLC values or instrument set changes."""
+    data_root = env["data_root"]
+    _add_generation_manifest(data_root)
+    con = duckdb.connect(str(catalog.Catalog(data_root / "catalog.duckdb").path),
+                         read_only=True)
+    try:
+        base_id = runner.market_data_snapshot_id(con, "features_1h", ["EURUSD", "GBPUSD"])
+        # Different instruments
+        subset_id = runner.market_data_snapshot_id(con, "features_1h", ["EURUSD"])
+        assert subset_id != base_id
+    finally:
+        con.close()
+
+    # Perturb OHLC
+    feat = data_root / "features" / "ohlcv_1h" / "EURUSD.parquet"
+    orig_bytes = feat.read_bytes()
+    try:
+        src = feat.with_suffix(".orig.parquet")
+        src.write_bytes(orig_bytes)
+        duckdb.connect().execute(
+            f"COPY (SELECT * REPLACE (2.5 AS mid_c) FROM '{src}') "
+            f"TO '{feat}' (FORMAT PARQUET)"
+        )
+        src.unlink(missing_ok=True)
+
+        con2 = duckdb.connect(str(catalog.Catalog(data_root / "catalog.duckdb").path),
+                              read_only=True)
+        try:
+            perturbed_id = runner.market_data_snapshot_id(con2, "features_1h", ["EURUSD", "GBPUSD"])
+            assert perturbed_id != base_id
+        finally:
+            con2.close()
+    finally:
+        feat.write_bytes(orig_bytes)
+

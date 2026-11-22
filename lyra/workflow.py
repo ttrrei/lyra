@@ -1257,8 +1257,9 @@ def _runs_for_branch(workspace: Path, direction: str, branch: str,
             "track_id": track_id,
             "spec_id": spec or None,
             "feature_snapshot_id": m.get("feature_snapshot_id"),
-            # 0009 D13 (H2): per-run data identity fields (judged in
+            # 0009 D13 (H2) & 0013: per-run data identity fields (judged in
             # compare_siblings; legacy runs carry None).
+            "market_data_snapshot_id": m.get("market_data_snapshot_id"),
             "data_digest": m.get("data_digest"),
             "feature_version": m.get("feature_version"),
             "instruments": per_list,
@@ -1272,13 +1273,16 @@ def _runs_for_branch(workspace: Path, direction: str, branch: str,
 
 
 def _run_comparable_reason(a: dict[str, Any], b: dict[str, Any]) -> str | None:
-    """0009 D13 (H2): the reason two runs are NOT comparable, or None if they
-    are comparable. Three independent identity dimensions — any mismatch is a
-    distinct reason (the first differing dimension is reported)."""
-    if a.get("data_digest") is None or b.get("data_digest") is None:
-        return "missing_data_digest"
-    if a["data_digest"] != b["data_digest"]:
-        return "data_digest"
+    """0009 D13 (H2) amended by 0013: the reason two runs are NOT comparable,
+    or None if they are comparable. Three independent identity dimensions —
+    market_data_snapshot_id (OHLC market data identity, Decision 0013),
+    feature_version (feature code generation), and feature_snapshot_id (feature
+    registry snapshot). Any mismatch is a distinct reason (the first differing
+    dimension is reported)."""
+    if a.get("market_data_snapshot_id") is None or b.get("market_data_snapshot_id") is None:
+        return "missing_market_data_snapshot_id"
+    if a["market_data_snapshot_id"] != b["market_data_snapshot_id"]:
+        return "market_data_snapshot_id"
     if a.get("feature_version") is None or b.get("feature_version") is None:
         return "missing_feature_version"
     if a["feature_version"] != b["feature_version"]:
@@ -1297,16 +1301,14 @@ def compare_siblings(workspace: Path, direction: str, branches: list[str],
 
     Reads only; never writes any file.
 
-    0009 D13 (H2): comparability is judged per run-set on THREE identity
-    dimensions — ``data_digest`` (the feature values actually consumed),
-    ``feature_version`` (the feature-code generation), and
+    0009 D13 (H2) amended by 0013: comparability is judged per run-set on THREE
+    identity dimensions — ``market_data_snapshot_id`` (underlying OHLC market
+    data, 0013), ``feature_version`` (the feature-code generation), and
     ``feature_snapshot_id`` (the 0009 D3 snapshot digest). A run missing any
     field (legacy) is marked ``comparable=None`` (unknown — NOT presumed
     comparable) and counted in ``runs_without_data_identity``; runs with all
     fields present but differing across the set are ``comparable=False`` with
-    a per-run ``incomparable_reason``. Every run row carries its
-    ``data_digest`` / ``feature_version`` so an AI can see *why* two runs are
-    not directly comparable.
+    a per-run ``incomparable_reason``.
     """
     if len(branches) < 1:
         raise WorkflowError("compare needs at least one branch (use --siblings to pass 2+)")
@@ -1329,9 +1331,9 @@ def compare_siblings(workspace: Path, direction: str, branches: list[str],
                     best, best_ann = inst, ann
         rows.append({"branch": b, "runs": runs, "best": best})
 
-    # --- H2: three-dimension per-run comparability -------------------------
+    # --- H2/0013: three-dimension per-run comparability -------------------------
     def _identity_ok(r: dict[str, Any]) -> bool:
-        return (r.get("data_digest") is not None
+        return (r.get("market_data_snapshot_id") is not None
                 and r.get("feature_version") is not None
                 and r.get("feature_snapshot_id") is not None)
 
@@ -1374,6 +1376,7 @@ def compare_siblings(workspace: Path, direction: str, branches: list[str],
         "siblings": rows,
         "comparable": comparable,
         "distinct_feature_generations": len({r["feature_snapshot_id"] for r in known}),
+        "distinct_market_data_snapshots": len({r["market_data_snapshot_id"] for r in known}),
         "distinct_data_digests": len({r["data_digest"] for r in known}),
         "distinct_feature_versions": len({str(r["feature_version"]) for r in known}),
         "runs_without_data_identity": runs_without,
