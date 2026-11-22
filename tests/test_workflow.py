@@ -1340,3 +1340,203 @@ def test_red02_prune_validates_direction_and_track(tmp_path):
     for bad in ("../x", "a/b"):
         with pytest.raises(wf.WorkflowError):
             wf.prune_branch(tmp_path, "fx-trend", bad, "v02")
+
+
+# --- 0014: Candidate pool digest cross-instrument summary & median re-sort ---
+
+def test_0014_run_stats_math():
+    """0014: Validate mathematical accuracy of median/min/ratio calculations."""
+    run = {
+        "instruments": [
+            {"instrument": "A", "trade_count": 100, "annualized": 0.10, "net_return": 0.20, "expectancy": 0.002},
+            {"instrument": "B", "trade_count": 50, "annualized": -0.05, "net_return": -0.10, "expectancy": -0.002},
+            {"instrument": "C", "trade_count": 80, "annualized": 0.02, "net_return": 0.05, "expectancy": 0.0006},
+        ],
+        "instrument_failures": [],
+    }
+    stats = wf.compute_cross_instrument_stats(run)
+    assert stats["median_annualized"] == pytest.approx(0.02)
+    assert stats["median_net_return"] == pytest.approx(0.05)
+    assert stats["median_expectancy"] == pytest.approx(0.0006)
+    assert stats["profitable_instruments_count"] == 2
+    assert stats["expected_instruments_count"] == 3
+    assert stats["profitable_instrument_ratio"] == pytest.approx(2 / 3)
+    assert stats["total_trades"] == 230
+    assert stats["low_trade_instruments_count"] == 0
+    assert stats["worst_instrument"] == {"instrument": "B", "annualized": -0.05}
+    assert stats["best_single_instrument"]["instrument"] == "A"
+    assert stats["is_incomplete"] is False
+
+
+def test_0014_run_stats_empty_runs():
+    """0014: Safe handling for empty runs or runs without instrument records."""
+    stats = wf.compute_cross_instrument_stats({})
+    assert stats["median_annualized"] == 0.0
+    assert stats["median_net_return"] == 0.0
+    assert stats["median_expectancy"] == 0.0
+    assert stats["profitable_instrument_ratio"] == 0.0
+    assert stats["worst_instrument"] is None
+    assert stats["best_single_instrument"] is None
+    assert stats["total_trades"] == 0
+    assert stats["is_incomplete"] is False
+
+
+def test_0014_run_stats_single_instrument():
+    """0014: Single-instrument dataset boundary case."""
+    run = {
+        "instruments": [
+            {"instrument": "EURUSD", "trade_count": 15, "annualized": 0.08, "net_return": 0.16, "expectancy": 0.01}
+        ],
+        "instrument_failures": [],
+    }
+    stats = wf.compute_cross_instrument_stats(run)
+    assert stats["median_annualized"] == pytest.approx(0.08)
+    assert stats["median_net_return"] == pytest.approx(0.16)
+    assert stats["median_expectancy"] == pytest.approx(0.01)
+    assert stats["profitable_instrument_ratio"] == pytest.approx(1.0)
+    assert stats["low_trade_instruments_count"] == 1
+    assert stats["worst_instrument"] == {"instrument": "EURUSD", "annualized": 0.08}
+    assert stats["best_single_instrument"]["instrument"] == "EURUSD"
+    assert stats["is_incomplete"] is False
+
+
+def test_0014_run_stats_zero_trade_instruments():
+    """0014: Zero-trade instruments must be counted in universe denominator with 0.0 annualized return."""
+    run = {
+        "instruments": [
+            {"instrument": "A", "trade_count": 50, "annualized": 0.10, "net_return": 0.20, "expectancy": 0.004},
+            {"instrument": "B", "trade_count": 0, "annualized": None, "net_return": 0.0, "expectancy": 0.0},
+        ],
+        "instrument_failures": [],
+    }
+    stats = wf.compute_cross_instrument_stats(run)
+    assert stats["expected_instruments_count"] == 2
+    assert stats["actual_instruments_count"] == 2
+    assert stats["profitable_instruments_count"] == 1
+    assert stats["profitable_instrument_ratio"] == pytest.approx(0.5)
+    # Median of [0.10, 0.0] -> 0.05
+    assert stats["median_annualized"] == pytest.approx(0.05)
+    assert stats["worst_instrument"] == {"instrument": "B", "annualized": 0.0}
+    assert stats["low_trade_instruments_count"] == 1
+
+
+def test_0014_run_stats_instrument_failures():
+    """0014: Failed instruments must count in universe denominator and trigger is_incomplete."""
+    run = {
+        "instruments": [
+            {"instrument": "EURUSD", "trade_count": 50, "annualized": 0.10, "net_return": 0.20, "expectancy": 0.004},
+            {"instrument": "GBPUSD", "trade_count": 40, "annualized": 0.05, "net_return": 0.10, "expectancy": 0.0025},
+        ],
+        "instrument_failures": [{"instrument": "USDJPY", "error": "file corrupt"}],
+    }
+    stats = wf.compute_cross_instrument_stats(run)
+    assert stats["expected_instruments_count"] == 3
+    assert stats["actual_instruments_count"] == 2
+    assert stats["failure_count"] == 1
+    assert stats["is_incomplete"] is True
+    assert stats["profitable_instruments_count"] == 2
+    assert stats["profitable_instrument_ratio"] == pytest.approx(2 / 3)
+
+
+def test_0014_compare_siblings_median_sort(tmp_path):
+    """0014: Sibling comparison sorts branches by median_annualized descending (not best single),
+    and excludes incomparable runs from ranking."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+
+    # v01: median=0.06, best=0.10
+    _mk_run_with_meta(tmp_path, "fx-trend", "v01", "alpha", "run01",
+                      snapshot="snap1", feature_version=6, market_data_snapshot_id="mkt_1")
+    # overwrite metrics with 2 instruments
+    r01 = tmp_path / "runs" / "v01-run01" / "20261110" / "run01" / "metrics.json"
+    import json as _json
+    r01.write_text(_json.dumps({
+        "spec_id": "v01", "run_id": "run01",
+        "feature_snapshot_id": "snap1", "feature_version": 6, "market_data_snapshot_id": "mkt_1", "data_digest": "dig1",
+        "per_instrument": {
+            "EURUSD": {"trade_count": 50, "annualized": 0.10, "win_rate": 0.6, "net_return": 0.05, "expectancy": 0.001},
+            "GBPUSD": {"trade_count": 40, "annualized": 0.02, "win_rate": 0.5, "net_return": 0.01, "expectancy": 0.00025},
+        }
+    }), encoding="utf-8")
+
+    # v02: median=0.05, best=0.20 (higher best, but lower median than v01)
+    _mk_run_with_meta(tmp_path, "fx-trend", "v02", "alpha", "run02",
+                      snapshot="snap1", feature_version=6, market_data_snapshot_id="mkt_1")
+    r02 = tmp_path / "runs" / "v02-run02" / "20261110" / "run02" / "metrics.json"
+    r02.write_text(_json.dumps({
+        "spec_id": "v02", "run_id": "run02",
+        "feature_snapshot_id": "snap1", "feature_version": 6, "market_data_snapshot_id": "mkt_1", "data_digest": "dig2",
+        "per_instrument": {
+            "EURUSD": {"trade_count": 50, "annualized": 0.20, "win_rate": 0.6, "net_return": 0.10, "expectancy": 0.002},
+            "GBPUSD": {"trade_count": 40, "annualized": -0.10, "win_rate": 0.4, "net_return": -0.05, "expectancy": -0.00125},
+        }
+    }), encoding="utf-8")
+
+    # v03: missing market_data_snapshot_id -> incomparable
+    _mk_run_with_meta(tmp_path, "fx-trend", "v03", "alpha", "run03",
+                      snapshot="snap1", feature_version=6, market_data_snapshot_id=None)
+
+    result = wf.compare_siblings(tmp_path, "fx-trend", ["v01", "v02", "v03"])
+    siblings = result["siblings"]
+    assert len(siblings) == 3
+
+    # v01 ranked #1 because median 0.06 > v02 median 0.05
+    assert siblings[0]["branch"] == "v01"
+    assert siblings[0]["median_annualized"] == pytest.approx(0.06)
+    assert siblings[0]["is_comparable"] is True
+
+    # v02 ranked #2 despite having best_single of 0.20
+    assert siblings[1]["branch"] == "v02"
+    assert siblings[1]["median_annualized"] == pytest.approx(0.05)
+    assert siblings[1]["best_single_instrument"]["annualized"] == pytest.approx(0.20)
+    assert siblings[1]["best"]["annualized"] == pytest.approx(0.20)
+    assert siblings[1]["is_comparable"] is True
+
+    # v03 excluded from ranking
+    assert siblings[2]["branch"] == "v03"
+    assert siblings[2]["is_comparable"] is False
+
+    # Summary
+    assert result["summary"]["median_annualized"] == pytest.approx(0.055)
+    assert result["summary"]["min_annualized"] == pytest.approx(0.05)
+    assert result["summary"]["incomplete_count"] == 0
+
+
+def test_0014_digest_size_budget(tmp_path):
+    """0014: An 8-branch active pool with 21 instruments each produces digest text <= ~5KB."""
+    _mk_direction(tmp_path)
+    wf.create_track(tmp_path, "fx-trend", "alpha")
+    import json as _json
+
+    inst_names = [
+        "AUD_USD", "BCO_USD", "BTC_USD", "CN50_USD", "DE30_EUR", "ETH_USD", "EUR_USD",
+        "GBP_USD", "HK33_HKD", "JP225_USD", "NAS100_USD", "NZD_USD", "SPX500_USD",
+        "UK100_GBP", "US30_USD", "USD_CAD", "USD_CHF", "USD_JPY", "WTICO_USD",
+        "XAG_USD", "XAU_USD",
+    ]
+
+    for i, suffix in enumerate("abcdefgh", start=1):
+        bname = f"v02{suffix}"
+        wf.new_version(tmp_path, "fx-trend", bname, track="alpha")
+        r_dir = tmp_path / "runs" / f"{bname}-r{i}" / "20261110" / f"r{i}"
+        r_dir.mkdir(parents=True)
+        (r_dir / "run_meta.json").write_text(_json.dumps({
+            "direction": "fx-trend", "branch": bname, "track_id": "alpha", "run_id": f"r{i}"
+        }), encoding="utf-8")
+        per_inst = {
+            name: {"trade_count": 1000 + i, "annualized": -0.02 + 0.005 * i,
+                   "win_rate": 0.55, "net_return": -0.05 + 0.01 * i, "expectancy": 0.0001}
+            for name in inst_names
+        }
+        (r_dir / "metrics.json").write_text(_json.dumps({
+            "spec_id": bname, "run_id": f"r{i}", "market_data_snapshot_id": "mkt_1",
+            "feature_snapshot_id": "snap_1", "feature_version": 6, "data_digest": f"dig_{i}",
+            "per_instrument": per_inst, "instrument_failures": []
+        }), encoding="utf-8")
+
+    digest = wf.render_digest(tmp_path, "fx-trend", track="alpha")
+    assert len(digest) <= 5120  # Under 5KB budget
+    assert "8/8 active branches" in digest
+    assert "med_ann=" in digest
+    assert "worst=" in digest
+

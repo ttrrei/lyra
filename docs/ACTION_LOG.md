@@ -20,11 +20,12 @@
 | 项 | 值 |
 |---|---|
 | 更新于 | 2026-11-22 |
-| 阶段 | 计划 2/3 进行中；C3（决策 0013）已提交，C4（决策 0014）待实施。 |
-| 代码 | 411 passed, 2 skipped；`pyflakes` 与 `alpha-gate` 干净。 |
-| 进行中 | 计划 2 C4：摘要跨标的统计（决策 0014）——决策文档待写，之后编码。 |
-| 下一步 | 决策 0014 文档 → C4 编码 → 测试 → 提交 → 更新 HANDOFF.md。 |
-| 未决问题 | O1–O18 均已关闭或已裁决；exit-month 诊断待计划 3。 |
+| 阶段 | 计划 2/3（执行计划 2）全部完成：C3（决策 0013 可比性解耦）与 C4（决策 0014 跨标的摘要与中位数排序）均已落地。 |
+| 代码 | 419 passed, 2 skipped；`pyflakes` 与 `alpha-gate` 干净；`doctor` 0 fail/0 warn。 |
+| 进行中 | 计划 2 收口交接（HANDOFF.md 已更新，冒烟证据已保存至 workspace）。 |
+| 下一步 | 批量候选研究计划 3/3（commit C5，决策 0015：结构指纹与成本锁定；可选收口 exit-month 诊断）。 |
+| 待用户输入 | 审阅计划 2 成果，确认启动计划 3。 |
+| 未决问题 | O1–O18 均已关闭或已裁决；exit-month 诊断移交计划 3 §2.0。 |
 
 ## 条目（#134 起）
 
@@ -37,3 +38,4 @@
 | 138 | 2026-11-22 | doc | 补全历史语料分诊决策 0010（补充标准结构与英文对 0010.en.md）并新建 AI 批量候选研究契约 0012（中英对）。规范历史 Nova/Moneta 278 条语料的分诊纳管（首轮单家族试点 + O18 重跑 + 8 席位门禁），并确立多候选批次研究契约（每批 3–4 候选、禁止纯参数微调、解释结构差异），防范单线爬山局部最优。未改动任何引擎代码，测试与门禁保持全绿。 | `docs/decisions/0010-temp-triage(.en).md`、`docs/decisions/0012-ai-batch-candidate-research(.en).md` |
 | 139 | 2026-11-22 | doc | 重写 `lyra/ai_readme.md`（决策 0012 落地）：全面废除单分支迭代与调参示范，建立 3–4 候选批次提出、严禁纯参数微调、解释结构差异与 8 席位池化流转标准协议；示例完整替换为批次与剪枝闭环。0012 决策追加首轮 Pilot 实测结论修订行，未改动引擎代码，测试与门禁保持全绿。 | `lyra/ai_readme.md`、`docs/decisions/0012-ai-batch-candidate-research(.en).md` |
 | 140 | 2026-11-22 | code | 行情数据快照 ID 与跨特征候选可比性解耦（决策 0013，commit C3）：在 `runner.py` 引入 `market_data_snapshot_id`（仅对 OHLC 基础列哈希），写入 metrics 与 manifest；`workflow._run_comparable_reason` 首位比较维度由 `data_digest` 替换为 `market_data_snapshot_id`，解除相同行情下不同特征候选被误判为不可比的限制；保留 `data_digest` 原有复现性职责。全套回归测试通过，真实 pilot 数据冒烟验证兄弟候选 `comparable=True`。 | `lyra/runner.py`、`lyra/workflow.py`、`lyra/cli.py`、`tests/test_runner.py`、`tests/test_workflow.py`、`docs/decisions/0013-market-data-snapshot-id(.en).md` |
+| 141 | 2026-11-22 | code | 候选池摘要跨标的统计与兄弟比较中位数重排（决策 0014，commit C4）：`render_digest` 引入跨品种中位数（年化/净收益/期望值）、全宇宙盈利标的比例（含零交易与失败品种）、最差品种暴露及紧凑单行输出（8 分支 ≤5KB）；`compare_siblings` 与 CLI 排序机制改为按中位数年化收益降序重排，排除不可比分支，原单品种最高项保留为 `best_single_instrument` 并明确标注非综合分。全套回归测试通过，真实 pilot 数据冒烟验证中位数排序与摘要输出生效。 | `lyra/workflow.py`、`lyra/cli.py`、`tests/test_workflow.py`、`docs/decisions/0014-digest-cross-instrument-summary(.en).md` |

@@ -2105,12 +2105,33 @@ def compare_cmd(
     for row in result["siblings"]:
         b = row["branch"]
         runs = row["runs"]
-        best = row["best"]
-        if best:
-            typer.echo(f"  {b}: best net={best.get('net_return')} ann={best.get('annualized')} "
-                       f"trades={best.get('trades')} (runs={len(runs)})")
-        else:
+        if not runs:
             typer.echo(f"  {b}: (no runs)")
+            continue
+        if not row.get("is_comparable"):
+            reason = row.get("incomparable_reason") or "incomparable"
+            typer.echo(f"  {b}: [EXCLUDED from ranking — {reason}] (runs={len(runs)})")
+            continue
+        ann = f"{row['median_annualized']:+.3f}"
+        net = f"{row['median_net_return']:+.3f}"
+        exp = f"{row['median_expectancy']:+.4f}"
+        ratio = f"{row['profitable_instruments_count']}/{row['expected_instruments_count']} ({row['profitable_instrument_ratio'] * 100:.1f}%)"
+        worst = row.get("worst_instrument")
+        worst_str = f"{worst['instrument']} ({worst['annualized']:+.3f})" if worst else "(none)"
+        best = row.get("best_single_instrument")
+        best_str = (
+            f"{best['instrument']} ann={best['annualized']:+.3f} (最好的一次，非综合分)"
+            if best and best.get("annualized") is not None
+            else "(none)"
+        )
+        inc = " [INCOMPLETE]" if row.get("is_incomplete") else ""
+        typer.echo(f"  {b}{inc}: median_ann={ann} (net={net} exp={exp}) prof_ratio={ratio} "
+                   f"worst={worst_str} [best_single: {best_str}] (runs={len(runs)})")
+
+    sm = result.get("summary")
+    if sm and sm.get("median_annualized") is not None:
+        typer.echo(f"summary: median_ann={sm['median_annualized']:+.3f}, min_ann={sm['min_annualized']:+.3f}, "
+                   f"median_prof_ratio={sm['median_profitable_ratio'] * 100:.1f}%, incomplete={sm['incomplete_count']}")
     # 0009 D13 (H2): the comparability verdict + why (per-run identity).
     verdict = result.get("comparable")
     label = {True: "COMPARABLE", False: "NOT COMPARABLE",

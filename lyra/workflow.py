@@ -36,6 +36,7 @@ import hashlib
 import json
 import os
 import re
+import statistics
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -835,6 +836,104 @@ def _branch_file(workspace: Path, direction: str, branch: str,
     return None
 
 
+def compute_cross_instrument_stats(run: dict[str, Any]) -> dict[str, Any]:
+    """0014: Macro cross-instrument statistical summary for a strategy run.
+
+    Pure in-memory projection over instruments and failures.
+    - Universe denominator for profitable ratio = per_instrument keys ∪ instrument_failures
+      (including zero-trade and failed instruments).
+    - Medians: median_annualized, median_net_return, median_expectancy.
+      Zero-trade instruments contribute 0.0 to annualized return.
+    - Identifies worst-performing instrument by annualized return.
+    - Tracks trade count sample size (<20 threshold) and completeness.
+    """
+    insts = run.get("instruments", [])
+    failures = run.get("instrument_failures", [])
+    inst_names = {i["instrument"] for i in insts if isinstance(i, dict) and "instrument" in i}
+    fail_names = {f["instrument"] for f in failures if isinstance(f, dict) and "instrument" in f}
+    universe = sorted(inst_names | fail_names)
+    expected_count = len(universe)
+    actual_count = len(inst_names)
+    failure_count = len(fail_names)
+    is_incomplete = (failure_count > 0) or (actual_count < expected_count)
+
+    # profitable ratio: count(ann > 0) / len(universe)
+    # 0014: denominator includes zero-trade and failed instruments
+    profitable_count = sum(
+        1 for i in insts
+        if i.get("annualized") is not None and float(i["annualized"]) > 0.0
+    )
+    prof_ratio = (profitable_count / expected_count) if expected_count > 0 else 0.0
+
+    ann_list: list[float] = []
+    net_list: list[float] = []
+    exp_list: list[float] = []
+    worst_inst = None
+    min_ann = float("inf")
+    best_inst = None
+    max_ann = float("-inf")
+    total_trades = 0
+    low_trade_count = 0
+
+    for i in insts:
+        tc = i.get("trade_count")
+        tc_int = int(tc) if tc is not None else 0
+        total_trades += tc_int
+        if tc_int < 20:
+            low_trade_count += 1
+
+        ann = i.get("annualized")
+        if ann is not None:
+            ann_f = float(ann)
+            ann_list.append(ann_f)
+        elif tc_int == 0:
+            ann_f = 0.0
+            ann_list.append(ann_f)
+        else:
+            ann_f = None
+
+        if ann_f is not None:
+            if ann_f < min_ann:
+                min_ann = ann_f
+                worst_inst = {"instrument": i["instrument"], "annualized": ann_f}
+            if ann_f > max_ann:
+                max_ann = ann_f
+                best_inst = {
+                    "instrument": i["instrument"],
+                    "annualized": ann_f,
+                    "net_return": i.get("net_return"),
+                    "trades": tc_int,
+                }
+
+        net = i.get("net_return")
+        if net is not None:
+            net_list.append(float(net))
+
+        exp = i.get("expectancy")
+        if exp is not None:
+            exp_list.append(float(exp))
+
+    median_ann = float(statistics.median(ann_list)) if ann_list else 0.0
+    median_net = float(statistics.median(net_list)) if net_list else 0.0
+    median_exp = float(statistics.median(exp_list)) if exp_list else 0.0
+
+    return {
+        "median_annualized": median_ann,
+        "median_net_return": median_net,
+        "median_expectancy": median_exp,
+        "profitable_instrument_ratio": prof_ratio,
+        "profitable_instruments_count": profitable_count,
+        "expected_instruments_count": expected_count,
+        "actual_instruments_count": actual_count,
+        "failure_count": failure_count,
+        "is_incomplete": is_incomplete,
+        "worst_instrument": worst_inst,
+        "best_single_instrument": best_inst,
+        "total_trades": total_trades,
+        "low_trade_instruments_count": low_trade_count,
+    }
+
+
 def render_digest(
     workspace: Path,
     direction: str,
@@ -843,7 +942,7 @@ def render_digest(
     n_lessons: int = 3,
     standalone: bool = True,
 ) -> str:
-    """A COMPACT (<~3KB) history digest of a direction/track (审查#128 P0-2).
+    """A COMPACT (<~5KB) history digest of a direction/track (0014, 审查#128).
 
     ``render_context`` is the full self-contained package (hypothesis text,
     full YAML of every active branch, every run row). That is the right
@@ -853,6 +952,10 @@ def render_digest(
     is about*, *which branches are active*, and *what each has scored* —
     enough to decide "iterate / prune / try a new angle" without dumping a
     90KB report. Full detail is always one ``lyra context`` away.
+
+    0014: Emits macro cross-instrument summary per branch (median_ann,
+    median_net, median_exp, prof_ratio, worst instrument, trades sample size)
+    and compresses per-instrument one-liners to keep an 8-branch pool <= ~5KB.
 
     Reads exactly the same sidecars/artifacts as ``render_context``; it is a
     projection of the same facts, not a second source of truth.
@@ -906,36 +1009,37 @@ def render_digest(
             if not runs:
                 out.append(f"  {b}: (no runs yet)")
                 continue
-            # show the latest run's per-instrument one-liner (the decision
-            # signal), capped to keep the digest small
             last = runs[-1]
             insts = last.get("instruments", [])
-            shown = insts[:8]
-            # #131 (P1-7/B8): do NOT silently truncate — a run with 21
-            # instruments must not read as if it had only the 8 shown. State
-            # the total / shown / omitted explicitly, and round the floats so
-            # they are readable instead of 17-digit reprs.
+            stats = compute_cross_instrument_stats(last)
+
             def _ann(v):
                 try:
                     return f"{float(v):+.3f}"
                 except (TypeError, ValueError):
                     return str(v)
 
-            def _win(v):
-                try:
-                    return f"{float(v) * 100:.1f}%"
-                except (TypeError, ValueError):
-                    return str(v)
-
-            parts = "  ".join(
-                f"{i['instrument']}: n={i['trade_count']} ann={_ann(i['annualized'])} "
-                f"win={_win(i['win_rate'])}"
-                for i in shown
+            ann_str = _ann(stats["median_annualized"])
+            net_str = _ann(stats["median_net_return"])
+            exp_str = f"{stats['median_expectancy']:+.4f}"
+            ratio_str = f"{stats['profitable_instruments_count']}/{stats['expected_instruments_count']}({stats['profitable_instrument_ratio'] * 100:.1f}%)"
+            worst_str = (
+                f"{stats['worst_instrument']['instrument']}({_ann(stats['worst_instrument']['annualized'])})"
+                if stats["worst_instrument"]
+                else "(none)"
             )
-            omit = f"  (+{len(insts) - len(shown)} more instruments omitted; see report)" \
-                if len(insts) > len(shown) else ""
-            out.append(f"  {b} [{len(runs)} run(s)]  last ({len(insts)} instr): "
-                       f"{parts or '(no data)'}{omit}")
+            inc_tag = " [INCOMPLETE]" if stats["is_incomplete"] else ""
+            low_samp = f" <20={stats['low_trade_instruments_count']}" if stats['low_trade_instruments_count'] > 0 else ""
+            out.append(
+                f"  {b} [{len(runs)} run(s)]{inc_tag}: med_ann={ann_str} med_net={net_str} "
+                f"med_exp={exp_str} prof_ratio={ratio_str} worst={worst_str} "
+                f"trades={stats['total_trades']}{low_samp}"
+            )
+            inst_parts = " ".join(
+                f"{i['instrument']}:{_ann(i.get('annualized'))}({i.get('trade_count', 0)})"
+                for i in insts
+            )
+            out.append(f"    {inst_parts or '(no data)'}")
         # D9.3 (审查#128): pruned branches are where the track learned the
         # most — surface them (with the prune reason, if recorded) so the
         # next AI does not re-propose a dead end.
@@ -1236,7 +1340,8 @@ def _runs_for_branch(workspace: Path, direction: str, branch: str,
              "trade_count": v.get("trade_count"),
              "annualized": v.get("annualized"),
              "win_rate": v.get("win_rate"),
-             "net_return": v.get("net_return")}
+             "net_return": v.get("net_return"),
+             "expectancy": v.get("expectancy")}
             for inst, v in sorted(per.items()) if isinstance(v, dict)
         ]
         run_id = str(m.get("run_id", mf.parent.name))
@@ -1263,6 +1368,7 @@ def _runs_for_branch(workspace: Path, direction: str, branch: str,
             "data_digest": m.get("data_digest"),
             "feature_version": m.get("feature_version"),
             "instruments": per_list,
+            "instrument_failures": m.get("instrument_failures", []),
         })
     return out
 
@@ -1309,27 +1415,23 @@ def compare_siblings(workspace: Path, direction: str, branches: list[str],
     comparable) and counted in ``runs_without_data_identity``; runs with all
     fields present but differing across the set are ``comparable=False`` with
     a per-run ``incomparable_reason``.
+
+    0014: Ranks branches by cross-instrument ``median_annualized`` descending
+    instead of single-instrument best. Excludes incomparable runs/branches from
+    ranking. Retains best single instrument as ``best_single_instrument``
+    (aliased to ``best`` for backward compatibility). Computes top-level
+    summary across comparable branches.
     """
     if len(branches) < 1:
         raise WorkflowError("compare needs at least one branch (use --siblings to pass 2+)")
-    rows = []
+
     all_runs: list[dict[str, Any]] = []
+    branch_runs: dict[str, list[dict[str, Any]]] = {}
     for b in branches:
         runs = _runs_for_branch(workspace, direction, b, track=track)
-        # best = highest per-instrument ANNUALIZED score across the run's
-        # instruments. 2026-11-14 审查 C4：合同定义的评分指标是 annualized
-        # （净收益和 / 完整日历年），sibling 比较应按该口径排序；原用 net_return
-        # 会因持有期不同而不可比（持有 3 天的 20% 与持有 30 天的 8% 直接比 net
-        # 会把前者判胜）。annualized 可为 < -100%，故哨兵用 -inf 而非 -1。
-        best = None
-        best_ann = float("-inf")
+        branch_runs[b] = runs
         for r in runs:
             all_runs.append(r)
-            for inst in r.get("instruments", []):
-                ann = inst.get("annualized")
-                if ann is not None and ann > best_ann:
-                    best, best_ann = inst, ann
-        rows.append({"branch": b, "runs": runs, "best": best})
 
     # --- H2/0013: three-dimension per-run comparability -------------------------
     def _identity_ok(r: dict[str, Any]) -> bool:
@@ -1370,10 +1472,123 @@ def compare_siblings(workspace: Path, direction: str, branches: list[str],
         else:
             comparable = (states == {True})
 
+    # --- 0014: per-branch evaluation and ranking by median_annualized -----------
+    rows = []
+    for b in branches:
+        runs = branch_runs[b]
+        best_across_all = None
+        best_ann_across_all = float("-inf")
+        for r in runs:
+            for inst in r.get("instruments", []):
+                ann = inst.get("annualized")
+                if ann is not None and ann > best_ann_across_all:
+                    best_across_all, best_ann_across_all = inst, ann
+
+        comp_runs = [r for r in runs if r.get("comparable") is True]
+        if comp_runs:
+            rep_run = comp_runs[-1]
+            stats = compute_cross_instrument_stats(rep_run)
+            best_single = stats["best_single_instrument"] or best_across_all
+            rows.append({
+                "branch": b,
+                "runs": runs,
+                "is_comparable": True,
+                "comparable_run": rep_run,
+                "median_annualized": stats["median_annualized"],
+                "median_net_return": stats["median_net_return"],
+                "median_expectancy": stats["median_expectancy"],
+                "profitable_instrument_ratio": stats["profitable_instrument_ratio"],
+                "profitable_instruments_count": stats["profitable_instruments_count"],
+                "expected_instruments_count": stats["expected_instruments_count"],
+                "actual_instruments_count": stats["actual_instruments_count"],
+                "failure_count": stats["failure_count"],
+                "is_incomplete": stats["is_incomplete"],
+                "worst_instrument": stats["worst_instrument"],
+                "best_single_instrument": best_single,
+                "best": best_single,
+                "total_trades": stats["total_trades"],
+                "low_trade_instruments_count": stats["low_trade_instruments_count"],
+            })
+        elif runs:
+            last_run = runs[-1]
+            stats = compute_cross_instrument_stats(last_run)
+            reasons = [r.get("incomparable_reason") for r in runs if r.get("incomparable_reason")]
+            reason_str = reasons[0] if reasons else "unknown"
+            rows.append({
+                "branch": b,
+                "runs": runs,
+                "is_comparable": False,
+                "incomparable_reason": reason_str,
+                "median_annualized": None,
+                "median_net_return": None,
+                "median_expectancy": None,
+                "profitable_instrument_ratio": stats["profitable_instrument_ratio"],
+                "profitable_instruments_count": stats["profitable_instruments_count"],
+                "expected_instruments_count": stats["expected_instruments_count"],
+                "actual_instruments_count": stats["actual_instruments_count"],
+                "failure_count": stats["failure_count"],
+                "is_incomplete": stats["is_incomplete"],
+                "worst_instrument": stats["worst_instrument"],
+                "best_single_instrument": stats["best_single_instrument"] or best_across_all,
+                "best": stats["best_single_instrument"] or best_across_all,
+                "total_trades": stats["total_trades"],
+                "low_trade_instruments_count": stats["low_trade_instruments_count"],
+            })
+        else:
+            rows.append({
+                "branch": b,
+                "runs": [],
+                "is_comparable": False,
+                "incomparable_reason": "no runs",
+                "median_annualized": None,
+                "median_net_return": None,
+                "median_expectancy": None,
+                "profitable_instrument_ratio": 0.0,
+                "profitable_instruments_count": 0,
+                "expected_instruments_count": 0,
+                "actual_instruments_count": 0,
+                "failure_count": 0,
+                "is_incomplete": False,
+                "worst_instrument": None,
+                "best_single_instrument": None,
+                "best": None,
+                "total_trades": 0,
+                "low_trade_instruments_count": 0,
+            })
+
+    comp_rows = [r for r in rows if r.get("is_comparable")]
+    comp_rows.sort(
+        key=lambda r: (r["median_annualized"] if r["median_annualized"] is not None else float("-inf")),
+        reverse=True,
+    )
+    incomp_rows = [r for r in rows if not r.get("is_comparable")]
+    sorted_rows = comp_rows + incomp_rows
+
+    if comp_rows:
+        anns = [r["median_annualized"] for r in comp_rows if r.get("median_annualized") is not None]
+        ratios = [r["profitable_instrument_ratio"] for r in comp_rows if r.get("profitable_instrument_ratio") is not None]
+        top_median_ann = float(statistics.median(anns)) if anns else None
+        top_min_ann = min(anns) if anns else None
+        top_median_ratio = float(statistics.median(ratios)) if ratios else None
+        inc_count = sum(1 for r in comp_rows if r.get("is_incomplete"))
+    else:
+        top_median_ann = None
+        top_min_ann = None
+        top_median_ratio = None
+        inc_count = sum(1 for r in rows if r.get("is_incomplete"))
+
+    summary = {
+        "median_annualized": top_median_ann,
+        "min_annualized": top_min_ann,
+        "median_profitable_ratio": top_median_ratio,
+        "incomplete_count": inc_count,
+    }
+
     return {
         "direction": direction,
         "track": track,
-        "siblings": rows,
+        "siblings": sorted_rows,
+        "summary": summary,
         "comparable": comparable,
         "distinct_feature_generations": len({r["feature_snapshot_id"] for r in known}),
         "distinct_market_data_snapshots": len({r["market_data_snapshot_id"] for r in known}),
