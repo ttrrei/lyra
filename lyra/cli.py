@@ -2190,8 +2190,8 @@ def doctor(
     needs).
     Warnings (exit 0, WARN count printed): the push-only OCI slots
     (features/strategies/runs) — optional for a pull-only setup (P1-4);
-    catalog/views presence; feature-generation integrity (D4 gate); one
-    compile smoke.
+    catalog/views presence; feature-generation integrity (D4 gate); feature-
+    layer instrument coverage vs the aggregates (#137); one compile smoke.
     """
     failures: list[str] = []
     warnings: list[str] = []
@@ -2295,6 +2295,36 @@ def doctor(
             typer.echo(f"PASS feature generation consistent ({len(checked)} files)")
         except Exception as exc:
             warnings.append(f"feature generation check failed: {exc}")
+
+        # Coverage (#137): the generation check above cannot see a layer that
+        # was rebuilt for fewer instruments than its aggregate holds (#136).
+        try:
+            from . import features as feat
+
+            coverage = feat.layer_coverage(data_root)
+            bad = [c for c in coverage if c["missing"] or c["extra"]]
+            for c in bad:
+                if c["missing"]:
+                    shown = ", ".join(c["missing"][:5])
+                    more = len(c["missing"]) - 5
+                    if more > 0:
+                        shown += f", … +{more} more"
+                    warnings.append(
+                        f"feature layer features/{c['layer']} holds {c['features']} of "
+                        f"{c['source']} instruments (missing: {shown}) — run "
+                        f"`lyra features --minutes {c['minutes']}` to rebuild it"
+                    )
+                if c["extra"]:
+                    warnings.append(
+                        f"feature layer features/{c['layer']} has files for instruments "
+                        f"not in the {c['layer']} aggregate: {', '.join(c['extra'][:5])} — "
+                        f"run `lyra features --minutes {c['minutes']}`"
+                    )
+            if coverage and not bad:
+                typer.echo("PASS feature layers cover every instrument ("
+                           + ", ".join(f"{c['layer']}: {c['source']}" for c in coverage) + ")")
+        except Exception as exc:
+            warnings.append(f"feature layer coverage check failed: {exc}")
 
     # --- warn: compile smoke -------------------------------------------------
     try:

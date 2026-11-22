@@ -1084,6 +1084,45 @@ def list_instruments(con, view: str) -> list[str]:
     return [r[0] for r in rows]
 
 
+def layer_coverage(data_root: str | Path) -> list[dict[str, Any]]:
+    """Doctor check: does each existing ``features/<layer>`` hold a parquet for
+    every instrument in its ``<layer>`` aggregate?
+
+    ``validate_generation`` only proves the files on disk agree with their own
+    manifest; a layer that was rebuilt for a single instrument is rewritten
+    *with a matching manifest* and still passes it.  This compares against the
+    aggregate (``<root>/<layer>/<layer>.parquet``), the source of truth for
+    which instruments exist.  A layer whose directory or aggregate is absent is
+    skipped (a partial setup is not an error).  Read-only.
+    """
+    import duckdb
+
+    root = Path(data_root)
+    out: list[dict[str, Any]] = []
+    for minutes, view in sorted(_MINUTES_TO_VIEW.items()):
+        layer_dir = root / "features" / view
+        src = root / view / f"{view}.parquet"
+        if not layer_dir.is_dir() or not src.is_file():
+            continue
+        have = {p.stem for p in layer_dir.glob("*.parquet")}
+        con = duckdb.connect(":memory:")
+        try:
+            want = {r[0] for r in con.execute(
+                "SELECT DISTINCT instrument FROM read_parquet(?)", [str(src)]
+            ).fetchall()}
+        finally:
+            con.close()
+        out.append({
+            "layer": view,
+            "minutes": minutes,
+            "source": len(want),
+            "features": len(have),
+            "missing": sorted(want - have),
+            "extra": sorted(have - want),
+        })
+    return out
+
+
 def run_features(
     data_root: str | Path,
     minutes: int,
