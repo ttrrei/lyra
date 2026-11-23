@@ -24,7 +24,7 @@
 | 代码 | 419 passed, 2 skipped；`pyflakes` 与 `alpha-gate` 干净；`doctor` 0 fail/0 warn。 |
 | 进行中 | 计划 2 收口交接（HANDOFF.md 已更新，冒烟证据已保存至 workspace）。 |
 | 下一步 | 批量候选研究计划 3/3（commit C5，决策 0015：结构指纹与成本锁定；可选收口 exit-month 诊断）。 |
-| 待用户输入 | 审阅计划 2 成果，确认启动计划 3。 |
+| 待用户输入 | 审阅计划 2 成果，确认启动计划 3；OCI alpha/tracks 0 对象挂账（tracks 相关 alpha 尚未推送至 OCI，待用户裁决）。 |
 | 未决问题 | O1–O18 均已关闭或已裁决；exit-month 诊断移交计划 3 §2.0。 |
 
 ## 条目（#134 起）
