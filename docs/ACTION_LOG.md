@@ -20,11 +20,11 @@
 | 项 | 值 |
 |---|---|
 | 更新于 | 2026-11-23 |
-| 阶段 | 计划 3/3 执行中；§2.0 exit-month 诊断与 C5（决策 0015）均已落地。 |
+| 阶段 | 计划 3/3 执行中；§2.0 exit-month 诊断、C5 与 Pilot Round 2 已完成，OCI backup 被 6 个不可变 run 对象冲突阻塞。 |
 | 代码 | 434 passed, 2 skipped；`pyflakes` 与 `alpha-gate` 干净。 |
-| 进行中 | Pilot 第 2–3 轮候选研究与校准；尚未运行。 |
-| 下一步 | 整理 Round 2 候选供用户审阅，再 dry-run / run / prune / lesson / archive；随后完成 Round 3 与终验收。 |
-| 待用户输入 | Pilot Round 2 候选需审阅后才能执行；OCI alpha/tracks 0 对象挂账仍待用户裁决。 |
+| 进行中 | Round 2 本地归档、剪枝、lesson 均完成；Round 3 尚未开始。 |
+| 下一步 | 用户裁决 OCI 不可变冲突的处理方案；解除后完成 backup，再准备 Round 3 候选供审阅。 |
+| 待用户输入 | 决定是否恢复/协调 v02a 与 v02b 的 OCI run 冲突；OCI alpha/tracks 0 对象挂账仍待裁决。 |
 | 未决问题 | O1–O18 均已关闭或已裁决。 |
 
 ## 条目（#134 起）
@@ -43,3 +43,5 @@
 
 | 143 | 2026-11-23 | code | 完成计划 3 §2.0 的只读 exit-month 诊断：新增 `lyra exit-months <run_dir>`，按退出时间、标的汇总交易并为研究窗口内零交易月份补零行；字段使用 `exit_month_*` 前缀，不写回 `metrics.json`。该诊断独立于指标与执行语义，细节及覆盖见决策 0014 v0.2。 | `lyra/diagnostics.py`、`lyra/cli.py`、`tests/test_diagnostics.py`、`docs/decisions/0014*(.en).md` |
 | 144 | 2026-11-23 | code | C5（决策 0015）落地批次护栏与留痕：`apply-batch` 现在锁定四项成本、限制 3–4 个同 direction/track 候选，并输出复杂度/结构关系；真实尝试归档 bundle、拒绝原因、运行状态与 run ID 到 workspace。全套回归 434 passed / 2 skipped，`pyflakes` 和 `alpha-gate` 通过；细节在 0015 与 `lyra/ai_readme.md`。 | `lyra/cli.py`、`lyra/strategy_schema.py`、`lyra/workflow.py`、`lyra/ai_readme.md`、`tests/test_batch.py`、`docs/decisions/0015*(.en).md` |
+
+| 145 | 2026-11-23 | review | Pilot Round 2 已完成 3 候选运行、跨标的 compare、prune、lesson 与 workspace 归档；一支保留、两支淘汰。backup dry-run 发现 v02a/v02b 的 6 个历史 run 对象与 OCI immutable SHA 不同，因此未执行上传；详细校准数据仅在 workspace 报告，等待用户裁决冲突处理。 | `/home/coder/.lyra/default/research-batches/failed_breakout/pilot/pilot-round-2.md`、`batch-0003-result.md`、`tracks/failed_breakout/pilot.lessons.md`、OCI backup dry-run |

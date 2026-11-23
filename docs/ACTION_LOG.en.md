@@ -20,11 +20,11 @@
 | Item | Value |
 |---|---|
 | Updated | 2026-11-23 |
-| Phase | Plan 3/3 in progress; both the §2.0 exit-month diagnostic and C5 (Decision 0015) have landed. |
+| Phase | Plan 3/3 in progress; §2.0 exit-month diagnosis, C5, and Pilot Round 2 are complete; OCI backup is blocked by 6 immutable run-object conflicts. |
 | Code | 434 passed, 2 skipped; `pyflakes` and `alpha-gate` are clean. |
-| In progress | Pilot rounds 2–3 candidate research and calibration; they have not run yet. |
-| Next | Prepare Round 2 candidates for user review, then dry-run / run / prune / lesson / archive; follow with Round 3 and final acceptance. |
-| Awaiting user | Pilot Round 2 candidates need review before execution; OCI alpha/tracks 0-object backlog remains for user adjudication. |
+| In progress | Round 2 local archive, pruning, and lesson are complete; Round 3 has not started. |
+| Next | User adjudicates the immutable OCI conflicts; after resolution, complete backup and prepare Round 3 candidates for review. |
+| Awaiting user | Decide how to resolve the v02a/v02b OCI run conflicts; the OCI alpha/tracks 0-object backlog also remains for adjudication. |
 | Open questions | O1–O18 are closed or decided. |
 
 ## Entries (from #134)
@@ -43,3 +43,5 @@
 
 | 143 | 2026-11-23 | code | Completed the read-only Plan 3 §2.0 exit-month diagnostic: added `lyra exit-months <run_dir>` to group trades by exit time and instrument and zero-fill months within the study window. Output fields use the `exit_month_*` prefix and never write to `metrics.json`. This diagnostic is separate from metric and execution semantics; details and coverage are in Decision 0014 v0.2. | `lyra/diagnostics.py`, `lyra/cli.py`, `tests/test_diagnostics.py`, `docs/decisions/0014*(.en).md` |
 | 144 | 2026-11-23 | code | C5 (Decision 0015) adds batch guards and records: `apply-batch` locks four cost fields, enforces 3–4 candidates in one direction/track, and reports complexity/structural relations; real attempts archive the bundle, rejection reasons, run outcomes, and run IDs in the workspace. Full regression: 434 passed / 2 skipped; `pyflakes` and `alpha-gate` pass. Details are in Decision 0015 and `lyra/ai_readme.md`. | `lyra/cli.py`, `lyra/strategy_schema.py`, `lyra/workflow.py`, `lyra/ai_readme.md`, `tests/test_batch.py`, `docs/decisions/0015*(.en).md` |
+
+| 145 | 2026-11-23 | review | Pilot Round 2 completed three candidate runs, cross-instrument comparison, pruning, lesson, and workspace archive; one branch was retained and two pruned. Backup dry-run found six historical v02a/v02b run objects whose OCI immutable SHA differs, so no upload was attempted; detailed calibration stays in the workspace report pending user adjudication of the conflicts. | `/home/coder/.lyra/default/research-batches/failed_breakout/pilot/pilot-round-2.md`, `batch-0003-result.md`, `tracks/failed_breakout/pilot.lessons.md`, OCI backup dry-run |
