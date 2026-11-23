@@ -77,7 +77,11 @@ Write **one batch bundle YAML** containing 3–4 candidate branches.
   - 1 mechanism replacement (e.g. replace static exit with dynamic volatility exit).
 - **Cost consistency**: All 4 execution cost fields (`spread_bps`, `slippage_bps_per_side`,
   `commission_bps_round_trip`, `financing_bps_per_day`) must match the track baseline
-  **exactly**.
+  **exactly**, including the difference between omitted (`null`) and explicit `0`.
+  The baseline is the shared, read-only direction file `strategies/<direction>/v01.yaml`.
+- **Structure report**: `apply-batch` reports AST complexity and compares each candidate
+  with active siblings. `identical`, `parameter_only`, `structural_change`, and
+  `exit_structure_changed` are diagnostic labels; they do not reject candidates.
 - **Scope**: All candidates in a batch must target the **same direction and track**.
 
 ### Step C — Preview, Apply, and Run
@@ -93,6 +97,12 @@ lyra apply-batch batch-0001.yaml --config config/config.yml --run \
 
 This operates under **all-or-nothing** semantics: if any candidate in the bundle is
 invalid, the whole batch is rejected and nothing is written.
+Every real submission, including a zero-write preflight rejection, attempts to archive
+the original bundle and `result.md` under
+`~/.lyra/<workspace>/research-batches/<direction>/<track>/batch-NNNN.*`. The archive
+records rejections, adoption/run counts, run IDs (or failure reasons), and leaves a
+branch-decision slot for the researcher. Dry-runs are not archived. Archive errors
+print a warning and do not change the apply/run result.
 
 ### Step D — Analyze, Prune, and Record Lessons
 
@@ -296,6 +306,7 @@ bundle:
    defensible.
 3. **Execution costs are immutable**: Cost parameters (`spread_bps`, `slippage_bps_per_side`,
    `commission_bps_round_trip`, `financing_bps_per_day`) must be identical to the track baseline.
+   Omitted and explicit zero are distinct for this check. A zero-cost batch emits a warning.
 4. **Intra-track comparison only**: Sibling comparison and batches operate strictly within
    one direction and one track.
 5. **The 8-seat pool limit (I21)**: Each track holds at most 8 active branches. Always prune
@@ -328,6 +339,7 @@ AI:  lyra apply-batch batch-0001.yaml --config config/config.yml --dry-run
 AI:  lyra apply-batch batch-0001.yaml --config config/config.yml --run \
         --data-dir ~/.lyra/default/data
      → 4 adopted · 4 run ok (v02a, v02b, v02c, v02d)
+     → archived under research-batches/mean_reversion/t_mr/batch-0001.*
 
 AI:  lyra digest mean_reversion --track t_mr --config config/config.yml
      → v02a: fewer trades, positive on quiet ranges;

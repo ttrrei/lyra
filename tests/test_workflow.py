@@ -1540,3 +1540,33 @@ def test_0014_digest_size_budget(tmp_path):
     assert "med_ann=" in digest
     assert "worst=" in digest
 
+
+def test_digest_signature_hints_accept_configured_alpha_registry(tmp_path):
+    import yaml
+    from lyra.features import build_registry
+    from lyra.registry import FeatureKind
+    ws = tmp_path
+    _mk_direction(ws)
+    wf.create_track(ws, "fx-trend", "alpha")
+    reg = build_registry()
+    reg.register("alpha_gate", None, kind=FeatureKind.VALUE, unit="ratio",
+                 warmup_bars=0, family="alpha")
+    track_dir = ws / "strategies" / "fx-trend" / "alpha"
+    track_dir.mkdir(parents=True)
+    for branch, value in (("v02a", 1), ("v02b", 2)):
+        spec = {
+            "version": 1, "id": branch, "direction": "fx-trend",
+            "timeframe_minutes": 60,
+            "entry": {"long": {"feature": "alpha_gate", "op": "gt", "value": value},
+                      "short": {"feature": "alpha_gate", "op": "lt", "value": value}},
+            "exit": {"stop_loss_pct": 0.02},
+        }
+        (track_dir / f"{branch}.yaml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+        wf._append_index_event(ws, "fx-trend", "alpha", {
+            "op": "activate", "branch": branch,
+            "file": f"strategies/fx-trend/alpha/{branch}.yaml",
+        })
+        _mk_run(ws, branch, track="alpha", direction="fx-trend")
+    digest = wf.render_digest(ws, "fx-trend", track="alpha", registry=reg)
+    assert "≈v02a" in digest
+

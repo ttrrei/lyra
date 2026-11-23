@@ -703,7 +703,7 @@ def apply_batch_cmd(
 
       1. **parse**  — malformed bundle → error, nothing else.
       2. **validate** — EVERY item is parsed + compiled. If ANY item is
-         invalid, the WHOLE batch is rejected and NOTHING is written — the
+         invalid, the WHOLE batch is rejected and no strategy branch is written — the
          web-AI's "3 proposed, 1 bad" never becomes a half-applied state.
       3. **adopt**  — each valid item becomes the track's branch (M1
          immutable: re-proposing an existing branch with different content
@@ -729,6 +729,23 @@ def apply_batch_cmd(
     except batch_mod.BatchError as exc:
         typer.secho(f"ERROR (batch malformed): {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
+
+    # P3: every research batch has one direction/track and 3–4 candidates.
+    # Preserve a real rejected attempt when its archive target is identifiable.
+    archive_target = (items[0].direction, items[0].track)
+    archive_lines: list[str] = []
+
+    def _archive_attempt() -> None:
+        if dry_run:
+            return
+        try:
+            path = wf.archive_batch_attempt(
+                _workspace(config), archive_target[0], archive_target[1], text,
+                "# Batch result\n\n" + "\n".join(archive_lines) + "\n")
+            typer.echo(f"batch archive: {path}")
+        except Exception as exc:
+            typer.secho(f"WARN: batch archive could not be written: {exc}",
+                        fg=typer.colors.YELLOW, err=True)
 
     reg = _registry_for(alpha_dir, config)
     ws = _workspace(config)
@@ -784,14 +801,58 @@ def apply_batch_cmd(
             errors.append((it, f"{type(exc).__name__}: {exc}"))
     if errors:
         tmp.cleanup()
+        archive_lines.extend([f"- Proposed: {len(items)}",
+                              f"- Preflight rejected: {len(errors)}"])
+        archive_lines.extend(f"- Rejected {it.direction}/{it.track}/{it.branch}: {err}"
+                             for it, err in errors)
+        archive_lines.append("- Adopted: 0")
+        archive_lines.extend(["- Run counts: OK=0, PARTIAL=0, FAILED=0 (not started)",
+                              "- Run IDs: none (preflight rejected)",
+                              "- Branch decisions: pending author review"])
         for it, err in errors:
             typer.secho(f"[INVALID] {it.direction}/{it.track}/{it.branch}: {err}",
                         fg=typer.colors.RED, err=True)
         typer.secho("── batch summary ──────────────────────────────────────────",
                     fg=typer.colors.CYAN)
-        typer.secho(f"0 adopted — {len(errors)} invalid of {len(items)} → NOTHING written "
-                    "(all-or-nothing, D6)", fg=typer.colors.RED)
+        typer.secho(f"0 adopted — {len(errors)} invalid of {len(items)}; no strategy "
+                    "branches written (all-or-nothing, D6)", fg=typer.colors.RED)
+        _archive_attempt()
         raise typer.Exit(code=1)
+
+    # E1: compare normalized execution costs against the shared direction v01
+    # and across all candidates. None and explicit zero are distinct here.
+    cost_fields = ("spread_bps", "slippage_bps_per_side",
+                   "commission_bps_round_trip", "financing_bps_per_day")
+    cost_errors: list[tuple[batch_mod.BatchItem, str]] = []
+    baseline_path = ws / "strategies" / archive_target[0] / "v01.yaml"
+    try:
+        if not baseline_path.is_file():
+            raise FileNotFoundError(f"direction baseline not found: {baseline_path}")
+        baseline_spec = schema_mod.parse_strategy(str(baseline_path), reg)
+        baseline_costs = tuple(getattr(baseline_spec.execution, f) for f in cost_fields)
+    except Exception as exc:
+        baseline_costs = None
+        cost_errors.append((items[0], f"cannot read/validate v01 cost baseline: {exc}"))
+    candidate_costs = [tuple(getattr(spec.execution, f) for f in cost_fields)
+                       for _it, _p, spec in resolved]
+    if baseline_costs is not None:
+        for (it, _p, _spec), costs in zip(resolved, candidate_costs):
+            if costs != baseline_costs:
+                diffs = [f"{name}: candidate={got!r}, baseline={want!r}"
+                         for name, got, want in zip(cost_fields, costs, baseline_costs)
+                         if got != want]
+                cost_errors.append((it, "execution costs differ from shared v01 baseline; "
+                                         "copy the four fields exactly (including omitted vs 0): "
+                                         + "; ".join(diffs)))
+        if candidate_costs and any(costs != candidate_costs[0]
+                                   for costs in candidate_costs[1:]):
+            cost_errors.append((items[0], "candidates in this batch have different execution "
+                                         "cost fields; make all four values identical"))
+    if not cost_errors and candidate_costs and all(
+            value in (None, 0.0) for value in candidate_costs[0]):
+        typer.secho("WARN: all four execution cost fields are zero or unset; "
+                    "returns may be optimistically biased", fg=typer.colors.YELLOW,
+                    err=True)
 
     # --- Stage 2.5: FULL preflight (all predictable failures, zero writes) --
     # #131 (P0-3 / P-6 / P-7 / P1-2 / B3 / B6-T10): move every check that can
@@ -810,14 +871,57 @@ def apply_batch_cmd(
     #  7. no duplicate (direction, track, branch) within the batch (P-7)
     if run_it and data_dir is None:
         tmp.cleanup()
+        archive_lines.extend([f"- Proposed: {len(items)}", "- Preflight rejected: 1",
+                              "- Rejected: --run requires --data-dir",
+                              "- Adopted: 0",
+                              "- Run counts: OK=0, PARTIAL=0, FAILED=0 (not started)",
+                              "- Run IDs: none (--run rejected before adoption)",
+                              "- Branch decisions: pending author review"])
         typer.secho("ERROR: --run requires --data-dir (checked before any "
                     "writes; nothing was adopted).", fg=typer.colors.RED, err=True)
+        _archive_attempt()
         raise typer.Exit(code=2)
 
     def _branch_dest(it):
         return ws / "strategies" / it.direction / it.track / f"{it.branch}.yaml"
 
     pre_errors: list[tuple[batch_mod.BatchItem, str]] = []
+    pre_errors.extend(cost_errors)
+    candidate_analysis: list[str] = []
+    active_specs: list[tuple[str, dict[str, Any]]] = []
+    try:
+        active_names = wf._track_active(ws, archive_target[0], archive_target[1])
+    except Exception:
+        active_names = []
+    for active in active_names:
+        active_path = (ws / "strategies" / archive_target[0] / archive_target[1]
+                       / f"{active}.yaml")
+        if not active_path.is_file():
+            active_path = ws / "strategies" / archive_target[0] / f"{active}.yaml"
+        try:
+            active_spec = schema_mod.parse_strategy(str(active_path), reg)
+            active_specs.append((active, schema_mod.structural_signature(active_spec, reg)))
+        except Exception:
+            continue
+    for it, _p, spec in resolved:
+        sig = schema_mod.structural_signature(spec, reg)
+        complexity = schema_mod.ast_complexity(spec)
+        relations = [(branch, schema_mod.compare_structural_signatures(sig, other))
+                     for branch, other in active_specs]
+        if relations:
+            rank = {"identical": 0, "parameter_only": 1, "structural_change": 2}
+            nearest_branch, nearest = min(
+                relations, key=lambda pair: rank[pair[1]["classification"]])
+            relation_text = f"{nearest['classification']} vs {nearest_branch}"
+            if nearest["classification"] == "parameter_only":
+                relation_text = f"≈param-variant of {nearest_branch}"
+            if nearest["exit_structure_changed"]:
+                relation_text += " (exit_structure_changed)"
+        else:
+            relation_text = "no active sibling baseline"
+        candidate_analysis.append(
+            f"{it.direction}/{it.track}/{it.branch}: {relation_text}; "
+            f"complexity={complexity}")
     for it, p, spec in resolved:
         def _err(msg):
             pre_errors.append((it, msg))
@@ -891,16 +995,32 @@ def apply_batch_cmd(
                 f"{it.track}/{it.branch} appears more than once in this batch"))
         seen_targets.add(tgt)
 
+    if not 3 <= len(items) <= 4:
+        pre_errors.append((items[0],
+                           f"batch has {len(items)} candidates; expected 3–4"))
+    if len({(it.direction, it.track) for it in items}) != 1:
+        pre_errors.append((items[0],
+                           "all candidates must share one direction and track"))
+
     if pre_errors:
         tmp.cleanup()
+        archive_lines.extend([f"- Proposed: {len(items)}",
+                              f"- Preflight rejected: {len(pre_errors)}"])
+        archive_lines.extend(f"- Rejected {it.direction}/{it.track}/{it.branch}: {err}"
+                             for it, err in pre_errors)
+        archive_lines.append("- Adopted: 0")
+        archive_lines.extend(["- Run counts: OK=0, PARTIAL=0, FAILED=0 (not started)",
+                              "- Run IDs: none (preflight rejected)",
+                              "- Branch decisions: pending author review"])
         for it, err in pre_errors:
             typer.secho(f"[INVALID] {it.direction}/{it.track}/{it.branch}: {err}",
                         fg=typer.colors.RED, err=True)
         typer.secho("── batch summary (preflight FAILED) ──────────────────────",
                     fg=typer.colors.CYAN)
         typer.secho(f"0 adopted — {len(pre_errors)} item(s) failed preflight of "
-                    f"{len(items)} → NOTHING written (all-or-nothing, D6)",
+                    f"{len(items)}; no strategy branches written (all-or-nothing, D6)",
                     fg=typer.colors.RED)
+        _archive_attempt()
         raise typer.Exit(code=1)
 
     if dry_run:
@@ -908,6 +1028,8 @@ def apply_batch_cmd(
                     "nothing written ──", fg=typer.colors.GREEN)
         for it, _p, _s in resolved:
             typer.echo(f"  would adopt {it.direction}/{it.track}/{it.branch}")
+        for line in candidate_analysis:
+            typer.echo(f"  signature: {line}")
         tmp.cleanup()
         return
 
@@ -921,6 +1043,13 @@ def apply_batch_cmd(
                                    spec)
         except wf.WorkflowError as exc:
             tmp.cleanup()
+            archive_lines.extend([f"- Proposed: {len(items)}",
+                                  f"- Adopted before failure: {len(adopted)}",
+                                  f"- Adoption failure: {it.direction}/{it.track}/{it.branch}: {exc}"])
+            archive_lines.extend(["- Run counts: OK=0, PARTIAL=0, FAILED=0 (not started)",
+                                  "- Run IDs: none (adoption failed before run stage)",
+                                  "- Branch decisions: pending author review"])
+            _archive_attempt()
             # #131 (B2/P-6): honest messaging — preflight should have caught
             # every predictable conflict, so a failure here is unexpected
             # (I/O or concurrent-state change). Previously this printed
@@ -945,11 +1074,13 @@ def apply_batch_cmd(
     # #131 (B6-T10): the --data-dir requirement was checked in stage 2.5
     # (before any writes), so it is guaranteed present here.
     run_ok = run_fail = run_partial = 0
+    run_records: list[str] = []
     if run_it:
         for it, dest in adopted:
             try:
                 res = run(strategy=str(dest), data_dir=data_dir, alpha_dir=alpha_dir,
                           config=config, name=None, out=None, strict=False, track=it.track)
+                run_id = getattr(res, "run_id", None) if res is not None else None
                 # DEV-04/RED-06 (UsageLastReview #2): `strict=False` means run()
                 # returns a RunResult even when SOME instruments failed — and
                 # previously the batch counted that as "run ok". Now a partial
@@ -963,9 +1094,15 @@ def apply_batch_cmd(
                         f"  run {it.direction}/{it.track}/{it.branch}: PARTIAL — "
                         f"{len(res.metrics)} ok / {n_fail} instrument(s) FAILED: {names}",
                         fg=typer.colors.YELLOW)
+                    run_records.append(
+                        f"- Run {it.direction}/{it.track}/{it.branch}: PARTIAL; "
+                        f"run_id={run_id or 'unavailable'}; failures={n_fail}")
                 else:
                     run_ok += 1
                     typer.echo(f"  run {it.direction}/{it.track}/{it.branch}: ok")
+                    run_records.append(
+                        f"- Run {it.direction}/{it.track}/{it.branch}: OK; "
+                        f"run_id={run_id or 'unavailable'}")
             except Exception as exc:  # B6-T11: typer.Exit OR any run error
                 # #131 (B6-T11): run() raises typer.Exit (a SystemExit
                 # subclass) or a plain exception; both were previously
@@ -973,6 +1110,9 @@ def apply_batch_cmd(
                 # batch, so only the first failure was seen. Now every item
                 # runs independently and the batch summary always prints.
                 run_fail += 1
+                run_records.append(
+                    f"- Run {it.direction}/{it.track}/{it.branch}: FAILED; "
+                    f"run_id=none; reason={type(exc).__name__}: {exc}")
                 typer.secho(f"  run {it.direction}/{it.track}/{it.branch}: "
                             f"FAILED ({type(exc).__name__}) — others continue",
                             fg=typer.colors.YELLOW)
@@ -988,8 +1128,20 @@ def apply_batch_cmd(
                 fg=typer.colors.GREEN if not _warn else typer.colors.YELLOW)
     for it, dest in adopted:
         typer.echo(f"  [OK] {it.direction}/{it.track}/{it.branch} -> {dest}")
+    for line in candidate_analysis:
+        typer.echo(f"  signature: {line}")
     typer.secho(f"{len(adopted)} adopted" + run_note,
                 fg=typer.colors.GREEN if not _warn else typer.colors.YELLOW)
+    archive_lines.extend([f"- Proposed: {len(items)}",
+                          "- Preflight rejected: 0",
+                          f"- Adopted: {len(adopted)}",
+                          f"- Run counts: OK={run_ok}, PARTIAL={run_partial}, FAILED={run_fail}"])
+    archive_lines.extend(f"- {it.direction}/{it.track}/{it.branch}: {dest}"
+                         for it, dest in adopted)
+    archive_lines.extend(f"- Signature: {line}" for line in candidate_analysis)
+    archive_lines.extend(run_records or ["- Runs: not requested"])
+    archive_lines.append("- Branch decisions: pending author review")
+    _archive_attempt()
     if run_it and run_fail > 0:
         raise typer.Exit(code=3)
     if run_it and run_partial > 0:
@@ -1941,6 +2093,10 @@ def digest_cmd(
     from . import workflow
 
     ws = _workspace(config)
+    try:
+        digest_registry = _registry_for(None, config)
+    except Exception:
+        digest_registry = None
     if all_directions:
         # #131 (P-1/P-2): a real multi-direction view, not a stub. The old
         # implementation (a) only listed track counts, and (b) used
@@ -1981,7 +2137,7 @@ def digest_cmd(
                    + (f", {len(skipped)} skipped" if skipped else "") + ")")
         try:
             from .features import build_registry as _build_registry
-            _n_feats = len(_build_registry().names())
+            _n_feats = len((digest_registry or _build_registry()).names())
             typer.echo(f"features: {_n_feats} registered "
                        f"(FEATURE_VERSION={workflow.FEATURE_VERSION}) — "
                        f"see `lyra context <direction>` for a direction's full list")
@@ -1997,7 +2153,8 @@ def digest_cmd(
             try:
                 typer.echo(workflow.render_digest(ws, dname, track=track,
                                                   n_lessons=n_lessons,
-                                                  standalone=False))
+                                                  standalone=False,
+                                                  registry=digest_registry))
             except workflow.WorkflowError as exc:
                 if track is not None:
                     typer.secho(f"  (direction {dname}: no track {track!r} — "
@@ -2012,7 +2169,9 @@ def digest_cmd(
                     fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
     try:
-        typer.echo(workflow.render_digest(ws, direction, track=track, n_lessons=n_lessons))
+        typer.echo(workflow.render_digest(ws, direction, track=track,
+                                          n_lessons=n_lessons,
+                                          registry=digest_registry))
     except workflow.WorkflowError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)

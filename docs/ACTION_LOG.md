@@ -20,11 +20,11 @@
 | 项 | 值 |
 |---|---|
 | 更新于 | 2026-11-23 |
-| 阶段 | 计划 3/3 执行中；计划 3 §2.0 exit-month 诊断已完成，C5（决策 0015）正在实现。 |
-| 代码 | C5 全套门禁尚未运行；最近基线为 420 passed, 2 skipped（#142）。 |
-| 进行中 | C5 成本锁定、结构签名/复杂度提示、批次 workspace 留痕。 |
-| 下一步 | 完成 C5 second-model review、全套测试/pyflakes/alpha-gate；再进行 Pilot 第 2–3 轮。 |
-| 待用户输入 | Pilot 第 2–3 轮候选需先供用户审阅；OCI alpha/tracks 0 对象挂账仍待用户裁决。 |
+| 阶段 | 计划 3/3 执行中；§2.0 exit-month 诊断与 C5（决策 0015）均已落地。 |
+| 代码 | 434 passed, 2 skipped；`pyflakes` 与 `alpha-gate` 干净。 |
+| 进行中 | Pilot 第 2–3 轮候选研究与校准；尚未运行。 |
+| 下一步 | 整理 Round 2 候选供用户审阅，再 dry-run / run / prune / lesson / archive；随后完成 Round 3 与终验收。 |
+| 待用户输入 | Pilot Round 2 候选需审阅后才能执行；OCI alpha/tracks 0 对象挂账仍待用户裁决。 |
 | 未决问题 | O1–O18 均已关闭或已裁决。 |
 
 ## 条目（#134 起）
@@ -42,3 +42,4 @@
 | 142 | 2026-11-23 | doc | Task A（纯文档）：① 0012 v1.2 修订行+勘误，四成本字段名纠正为 `spread_bps` / `slippage_bps_per_side` / `commission_bps_round_trip` / `financing_bps_per_day`，注明 `stop_loss_pct` 为强制 2% 锁定项（C5 成本锁定以此为准）；② ACTION_LOG.en.md #134 恢复为 ac0150d 版完整英文，清除中文（0011 只增不删），Current state 恢复 OCI alpha/tracks 0 对象挂账到待用户输入行；③ ai_readme §4/§6 改用 strategies/examples/ 开源策略做范本（mean_reversion/t_mr 四候选 bundle 已 `lyra apply-batch --dry-run` 验证，复核 `lyra validate` 与 `lyra compile` 两示例均通过），0013 中英文档真实 run ID 改为 `<run_id_v02a/b/c>` 占位符；④ 0010 v1.1 追回 vp1_r06 命名规范、四层验证矩阵（用户裁决#3）、交付物清单；⑤ 补回 I5 直接覆盖测试 `test_data_digest_and_run_id_change_on_feature_perturbation`（feature 值扰动 → data_digest 与 run_id 变、market_data_snapshot_id 不变）。全套通过（pytest 420 passed/2 skipped、pyflakes 干净、alpha-gate OK）。Task A 完成，待用户确认后启动计划 3（C5，决策 0015）。 | `docs/decisions/0012*(.en).md`、`docs/decisions/0013*(.en).md`、`docs/ACTION_LOG*(.en).md`、`lyra/ai_readme.md`、`docs/decisions/0010*(.en).md`、`tests/test_runner.py` |
 
 | 143 | 2026-11-23 | code | 完成计划 3 §2.0 的只读 exit-month 诊断：新增 `lyra exit-months <run_dir>`，按退出时间、标的汇总交易并为研究窗口内零交易月份补零行；字段使用 `exit_month_*` 前缀，不写回 `metrics.json`。该诊断独立于指标与执行语义，细节及覆盖见决策 0014 v0.2。 | `lyra/diagnostics.py`、`lyra/cli.py`、`tests/test_diagnostics.py`、`docs/decisions/0014*(.en).md` |
+| 144 | 2026-11-23 | code | C5（决策 0015）落地批次护栏与留痕：`apply-batch` 现在锁定四项成本、限制 3–4 个同 direction/track 候选，并输出复杂度/结构关系；真实尝试归档 bundle、拒绝原因、运行状态与 run ID 到 workspace。全套回归 434 passed / 2 skipped，`pyflakes` 和 `alpha-gate` 通过；细节在 0015 与 `lyra/ai_readme.md`。 | `lyra/cli.py`、`lyra/strategy_schema.py`、`lyra/workflow.py`、`lyra/ai_readme.md`、`tests/test_batch.py`、`docs/decisions/0015*(.en).md` |

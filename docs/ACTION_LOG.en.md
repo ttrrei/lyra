@@ -20,11 +20,11 @@
 | Item | Value |
 |---|---|
 | Updated | 2026-11-23 |
-| Phase | Plan 3/3 in progress; the Plan 3 §2.0 exit-month diagnostic is complete and C5 (Decision 0015) is being implemented. |
-| Code | C5 full gates have not run; latest baseline is 420 passed, 2 skipped (#142). |
-| In progress | C5 cost lock, structural signature/complexity hints, and workspace batch records. |
-| Next | Complete C5 second-model review and full tests/pyflakes/alpha-gate, then run Pilot rounds 2–3. |
-| Awaiting user | Pilot round 2–3 candidates need user review first; OCI alpha/tracks 0-object backlog remains for user adjudication. |
+| Phase | Plan 3/3 in progress; both the §2.0 exit-month diagnostic and C5 (Decision 0015) have landed. |
+| Code | 434 passed, 2 skipped; `pyflakes` and `alpha-gate` are clean. |
+| In progress | Pilot rounds 2–3 candidate research and calibration; they have not run yet. |
+| Next | Prepare Round 2 candidates for user review, then dry-run / run / prune / lesson / archive; follow with Round 3 and final acceptance. |
+| Awaiting user | Pilot Round 2 candidates need review before execution; OCI alpha/tracks 0-object backlog remains for user adjudication. |
 | Open questions | O1–O18 are closed or decided. |
 
 ## Entries (from #134)
@@ -42,3 +42,4 @@
 | 142 | 2026-11-23 | doc | Task A (pure docs): ① 0012 v1.2 revision row + errata: the four cost fields corrected to `spread_bps` / `slippage_bps_per_side` / `commission_bps_round_trip` / `financing_bps_per_day`, with a note that `stop_loss_pct` is the mandatory 2% lock item (C5 cost locking follows it); ② ACTION_LOG.en.md #134 restored to the full-English ac0150d version, Chinese cleared (0011 append-only respected); Current state: OCI alpha/tracks 0-object backlog restored to the Awaiting-user row; ③ ai_readme §4/§6 based on the open-source strategies in strategies/examples/ (the new mean_reversion/t_mr four-candidate bundle verified with `lyra apply-batch --dry-run`; `lyra validate` + `lyra compile` re-checked on the examples), real run IDs in the 0013 docs replaced by `<run_id_v02a/b/c>` placeholders; ④ 0010 v1.1: vp1_r06 naming convention, four-layer validation matrix (user ruling #3), deliverables list restored; ⑤ backfilled the I5-directly-covered regression `test_data_digest_and_run_id_change_on_feature_perturbation` (feature value perturbation → data_digest and run_id change, market_data_snapshot_id unchanged). Full suite passes (pytest 420 passed/2 skipped, pyflakes, alpha-gate OK); awaiting user confirmation before starting Plan 3 (C5, Decision 0015). | `docs/decisions/0012*(.en).md`, `docs/decisions/0013*(.en).md`, `docs/ACTION_LOG*(.en).md`, `lyra/ai_readme.md`, `docs/decisions/0010*(.en).md`, `tests/test_runner.py` |
 
 | 143 | 2026-11-23 | code | Completed the read-only Plan 3 §2.0 exit-month diagnostic: added `lyra exit-months <run_dir>` to group trades by exit time and instrument and zero-fill months within the study window. Output fields use the `exit_month_*` prefix and never write to `metrics.json`. This diagnostic is separate from metric and execution semantics; details and coverage are in Decision 0014 v0.2. | `lyra/diagnostics.py`, `lyra/cli.py`, `tests/test_diagnostics.py`, `docs/decisions/0014*(.en).md` |
+| 144 | 2026-11-23 | code | C5 (Decision 0015) adds batch guards and records: `apply-batch` locks four cost fields, enforces 3–4 candidates in one direction/track, and reports complexity/structural relations; real attempts archive the bundle, rejection reasons, run outcomes, and run IDs in the workspace. Full regression: 434 passed / 2 skipped; `pyflakes` and `alpha-gate` pass. Details are in Decision 0015 and `lyra/ai_readme.md`. | `lyra/cli.py`, `lyra/strategy_schema.py`, `lyra/workflow.py`, `lyra/ai_readme.md`, `tests/test_batch.py`, `docs/decisions/0015*(.en).md` |

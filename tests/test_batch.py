@@ -97,7 +97,7 @@ def test_apply_batch_all_or_nothing(monkeypatch, tmp_path):
 
     out = CliRunner().invoke(cli.app, ["apply-batch", str(bundle)])
     assert out.exit_code != 0
-    assert "NOTHING written" in out.output
+    assert "no strategy branches written" in out.output
     # the valid item must NOT have been adopted (all-or-nothing)
     assert not (tmp_path / "strategies" / "d1" / "t1" / "v02.yaml").exists()
 
@@ -294,10 +294,11 @@ def test_apply_batch_lineage_persisted_in_adopted_file(tmp_path):
     from lyra import workflow as wf
     wf.create_track(ws, "d1", "t1")
     bundle = {"version": 1, "directions": [
-        {"direction": "d1", "track": "t1", "branch": "v02", "parent": "v01",
+        {"direction": "d1", "track": "t1", "branch": branch, "parent": "v01",
          "driven_by_lesson": "v01 baseline was too tight",
          "hypothesis": "Wider entry",
-         "strategy": dict(base, id="s2")}]}
+         "strategy": dict(base, id=f"s{n}")}
+        for n, branch in enumerate(("v02", "v03", "v04"), start=2)]}
     bf = tmp_path / "b.yaml"
     bf.write_text(_y.safe_dump(bundle, allow_unicode=True), encoding="utf-8")
     cfg = tmp_path / "cfg.yml"
@@ -312,6 +313,9 @@ def test_apply_batch_lineage_persisted_in_adopted_file(tmp_path):
     assert "v01" in adopted["parents"]
     assert adopted["driven_by_lesson"] == "v01 baseline was too tight"
     assert adopted["hypothesis"] == "Wider entry"
+    assert (ws / "research-batches" / "d1" / "t1" / "batch-0001.yaml").exists()
+    archived = (ws / "research-batches" / "d1" / "t1" / "batch-0001-result.md").read_text()
+    assert "Proposed: 3" in archived and "Adopted: 3" in archived
 
 
 def test_submit_missing_direction_is_actionable(tmp_path):
@@ -409,10 +413,11 @@ def test_apply_batch_strategy_missing_direction_rejected(tmp_path):
     no_dir = {k: v for k, v in base.items() if k != "direction"}
     no_dir["id"] = "s2"
     bundle = {"version": 1, "directions": [
-        {"direction": "d1", "track": "t1", "branch": "v02", "parent": "v01",
+        {"direction": "d1", "track": "t1", "branch": branch, "parent": "v01",
          "driven_by_lesson": "v01 baseline was too tight",
          "hypothesis": "Wider entry",
-         "strategy": no_dir}]}
+         "strategy": dict(no_dir, id=f"s{n}")}
+        for n, branch in enumerate(("v02", "v03", "v04"), start=2)]}
     bf = tmp_path / "b.yaml"
     bf.write_text(_y.safe_dump(bundle, allow_unicode=True), encoding="utf-8")
     cfg = tmp_path / "cfg.yml"
@@ -425,3 +430,218 @@ def test_apply_batch_strategy_missing_direction_rejected(tmp_path):
     assert "no direction" in r.output or "declares no direction" in r.output
     # zero writes: the branch file must NOT exist
     assert not (d / "t1" / "v02.yaml").exists()
+
+
+def _make_cost_batch(tmp_path, baseline_costs, candidate_costs):
+    import yaml
+    from lyra import workflow as wf
+    ws = tmp_path / "ws"
+    direction_dir = ws / "strategies" / "d1"
+    (direction_dir / "pilot").mkdir(parents=True)
+    cost_fields = ("spread_bps", "slippage_bps_per_side",
+                   "commission_bps_round_trip", "financing_bps_per_day")
+    base = {
+        "version": 1, "id": "base", "direction": "d1",
+        "timeframe_minutes": 60,
+        "entry": {"long": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                  "short": {"feature": "sma_6", "op": "lt", "value": "sma_24"}},
+        "exit": {"long": {"feature": "sma_6", "op": "lt", "value": "sma_24"},
+                 "short": {"feature": "sma_6", "op": "gt", "value": "sma_24"},
+                 "stop_loss_pct": 0.02},
+        "execution": dict(zip(cost_fields, baseline_costs)),
+    }
+    (direction_dir / "v01.yaml").write_text(yaml.safe_dump(base), encoding="utf-8")
+    wf.create_track(ws, "d1", "pilot")
+    candidates = []
+    for i, costs in enumerate(candidate_costs, start=2):
+        strategy = dict(base, id=f"candidate-{i}")
+        strategy["execution"] = dict(zip(cost_fields, costs))
+        candidates.append({"direction": "d1", "track": "pilot",
+                           "branch": f"v0{i}", "parent": "v01",
+                           "driven_by_lesson": "baseline lesson",
+                           "hypothesis": f"candidate {i}", "strategy": strategy})
+    bundle = tmp_path / "batch.yaml"
+    bundle.write_text(yaml.safe_dump({"version": 1, "directions": candidates}),
+                      encoding="utf-8")
+    config = tmp_path / "config.yml"
+    config.write_text(
+        f"local:\n  workspace: {ws}\n  data: {ws}/data\n"
+        f"  strategies: {ws}/strategies\n  runs: {ws}/runs\n  alpha: {ws}/alpha\n",
+        encoding="utf-8")
+    return ws, direction_dir, bundle, config
+
+
+def test_apply_batch_cost_mismatch_is_zero_write(tmp_path):
+    from typer.testing import CliRunner
+    from lyra import cli
+    costs = (2.0, 0.2, 0.2, 0.1)
+    ws, direction_dir, bundle, config = _make_cost_batch(
+        tmp_path, costs, [costs, (3.0, 0.2, 0.2, 0.1), costs])
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(config)])
+    assert result.exit_code != 0
+    assert "execution costs differ" in result.output
+    assert "no strategy branches written" in result.output
+    assert not list((direction_dir / "pilot").glob("v0[234].yaml"))
+    archive = ws / "research-batches" / "d1" / "pilot"
+    assert (archive / "batch-0001.yaml").exists()
+    assert "Preflight rejected" in (archive / "batch-0001-result.md").read_text()
+
+
+def test_apply_batch_cost_match_and_zero_warning(tmp_path):
+    from typer.testing import CliRunner
+    from lyra import cli
+    zeros = (0.0, 0.0, 0.0, 0.0)
+    _ws, _d, bundle, config = _make_cost_batch(tmp_path, zeros, [zeros] * 3)
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(config), "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "all four execution cost fields are zero or unset" in result.output
+    assert "would adopt" in result.output
+
+
+def test_apply_batch_cost_none_differs_from_explicit_zero(tmp_path):
+    from typer.testing import CliRunner
+    from lyra import cli
+    unset = (None, None, None, None)
+    zero = (0.0, None, None, None)
+    _ws, direction_dir, bundle, config = _make_cost_batch(
+        tmp_path, unset, [unset, zero, unset])
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(config), "--dry-run"])
+    assert result.exit_code != 0
+    assert "spread_bps: candidate=0.0, baseline=None" in result.output
+    assert not list((direction_dir / "pilot").glob("v0[234].yaml"))
+
+
+@pytest.mark.parametrize("count", [2, 5])
+def test_apply_batch_candidate_count_shape_is_enforced(tmp_path, count):
+    from typer.testing import CliRunner
+    from lyra import cli
+    costs = (2.0, 0.2, 0.2, 0.1)
+    _ws, direction_dir, bundle, config = _make_cost_batch(
+        tmp_path, costs, [costs] * count)
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(config), "--dry-run"])
+    assert result.exit_code != 0
+    assert f"batch has {count} candidates; expected 3–4" in result.output
+    assert not list((direction_dir / "pilot").glob("v0*.yaml"))
+
+
+def test_apply_batch_rejects_mixed_direction_track(tmp_path):
+    import yaml
+    from typer.testing import CliRunner
+    from lyra import cli
+    costs = (2.0, 0.2, 0.2, 0.1)
+    _ws, _direction_dir, bundle, config = _make_cost_batch(
+        tmp_path, costs, [costs] * 3)
+    data = yaml.safe_load(bundle.read_text(encoding="utf-8"))
+    data["directions"][2]["track"] = "other"
+    bundle.write_text(yaml.safe_dump(data), encoding="utf-8")
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(config), "--dry-run"])
+    assert result.exit_code != 0
+    assert "all candidates must share one direction and track" in result.output
+
+
+def test_structural_signature_registered_feature_coverage():
+    from lyra.features import build_registry
+    from lyra.strategy_schema import _normalized_feature_map
+    registry = build_registry()
+    normalized = _normalized_feature_map(registry)
+    assert set(normalized) == set(registry.names())
+    assert normalized["sma_6"] == "sma_<w>"
+    assert normalized["sma_alignment_6_24"] == "sma_alignment_<w>_<w>"
+    assert normalized["macd_6_12_6_line"] == "macd_<w>_<w>_<w>_line"
+    assert normalized["prior60_high"] == "prior60_high"
+    assert normalized["close_ema60_distance_atr"] == "close_ema60_distance_atr"
+
+
+def test_ast_complexity_and_signature_classification(tmp_path):
+    import yaml
+    from lyra.features import build_registry
+    from lyra.strategy_schema import (parse_strategy, structural_signature,
+                                      compare_structural_signatures, ast_complexity)
+    registry = build_registry()
+    base = {
+        "version": 1, "id": "s", "direction": "d1", "timeframe_minutes": 60,
+        "entry": {"long": {"feature": "sma_6", "op": "gt", "value": 10},
+                  "short": {"feature": "sma_6", "op": "lt", "value": 10}},
+        "exit": {"long": {"feature": "sma_6", "op": "lt", "value": 10},
+                 "short": {"feature": "sma_6", "op": "gt", "value": 10}},
+    }
+
+    def signature(data, suffix):
+        path = tmp_path / f"{suffix}.yaml"
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        spec = parse_strategy(str(path), registry)
+        return structural_signature(spec, registry), ast_complexity(spec)
+
+    original, complexity = signature(base, "original")
+    same, _ = signature(base, "same")
+    const_change, _ = signature({**base, "entry": {**base["entry"],
+        "long": {"feature": "sma_6", "op": "gt", "value": 11}}}, "constant")
+    window_change, _ = signature({**base, "entry": {**base["entry"],
+        "long": {"feature": "sma_24", "op": "gt", "value": 10}}}, "window")
+    op_change, _ = signature({**base, "entry": {**base["entry"],
+        "long": {"feature": "sma_6", "op": "lt", "value": 10}}}, "op")
+    exit_change, _ = signature({**base, "exit": {**base["exit"],
+        "long": {"feature": "sma_6", "op": "gt", "value": 10}}}, "exit")
+    assert compare_structural_signatures(original, same)["classification"] == "identical"
+    assert compare_structural_signatures(original, const_change)["classification"] == "parameter_only"
+    assert compare_structural_signatures(original, window_change)["classification"] == "parameter_only"
+    assert compare_structural_signatures(original, op_change)["classification"] == "structural_change"
+    exit_relation = compare_structural_signatures(original, exit_change)
+    assert exit_relation["classification"] == "structural_change"
+    assert exit_relation["exit_structure_changed"] is True
+    assert complexity["feature_count"] == 1
+    assert complexity["leaf_count"] == 4
+    assert complexity["entry_condition_count"] == 2
+    assert complexity["exit_condition_count"] == 2
+
+
+def test_archive_batch_attempt_numbering_and_containment(tmp_path):
+    from lyra.workflow import archive_batch_attempt, WorkflowError
+    first = archive_batch_attempt(tmp_path, "d1", "pilot", "x: 1\n", "one\n")
+    second = archive_batch_attempt(tmp_path, "d1", "pilot", "x: 2\n", "two\n")
+    assert first.name == "batch-0001-result.md"
+    assert second.name == "batch-0002-result.md"
+    assert (second.parent / "batch-0002.yaml").read_text() == "x: 2\n"
+    with pytest.raises(WorkflowError):
+        archive_batch_attempt(tmp_path, "../outside", "pilot", "x", "y")
+
+
+def test_apply_batch_archive_failure_warns_without_changing_adoption(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+    from lyra import cli, workflow as wf
+    costs = (2.0, 0.2, 0.2, 0.1)
+    _ws, direction_dir, bundle, config = _make_cost_batch(
+        tmp_path, costs, [costs] * 3)
+    def fail_archive(*args, **kwargs):
+        raise OSError("workspace archive is read-only")
+    monkeypatch.setattr(wf, "archive_batch_attempt", fail_archive)
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(config)])
+    assert result.exit_code == 0, result.output
+    assert "WARN: batch archive could not be written" in result.output
+    assert len(list((direction_dir / "pilot").glob("v0[234].yaml"))) == 3
+
+
+def test_apply_batch_archive_records_run_ids(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from typer.testing import CliRunner
+    from lyra import cli
+    costs = (2.0, 0.2, 0.2, 0.1)
+    ws, _direction_dir, bundle, config = _make_cost_batch(
+        tmp_path, costs, [costs] * 3)
+    calls = iter(("run-aa", "run-bb", "run-cc"))
+    monkeypatch.setattr(cli, "run", lambda **kwargs: SimpleNamespace(
+        run_id=next(calls), metrics={}, instrument_failures=[]))
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(config), "--run",
+                                          "--data-dir", str(ws / "data")])
+    assert result.exit_code == 0, result.output
+    archive = ws / "research-batches" / "d1" / "pilot" / "batch-0001-result.md"
+    content = archive.read_text(encoding="utf-8")
+    assert all(run_id in content for run_id in ("run-aa", "run-bb", "run-cc"))
+    assert "Run counts: OK=3, PARTIAL=0, FAILED=0" in content

@@ -301,16 +301,35 @@ def archive_batch_attempt(workspace: Path, direction: str, track_id: str,
     resolved = folder.resolve()
     if root != resolved and root not in resolved.parents:
         raise WorkflowError(f"batch archive path escapes workspace: {resolved!r}")
+    import os
+
     numbers = []
-    for p in folder.glob("batch-*-result.md"):
-        m = re.fullmatch(r"batch-(\d{4,})-result\.md", p.name)
+    for p in folder.glob("batch-*"):
+        m = re.match(r"batch-(\d{4,})(?:\.|-)", p.name)
         if m:
             numbers.append(int(m.group(1)))
     number = max(numbers, default=0) + 1
-    stem = f"batch-{number:04d}"
-    (folder / f"{stem}.yaml").write_text(bundle_text, encoding="utf-8")
-    (folder / f"{stem}-result.md").write_text(result_text, encoding="utf-8")
-    return folder / f"{stem}-result.md"
+    while True:
+        stem = f"batch-{number:04d}"
+        reservation = folder / f"{stem}.reserved"
+        try:
+            fd = os.open(reservation, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.close(fd)
+            break
+        except FileExistsError:
+            number += 1
+    bundle_path = folder / f"{stem}.yaml"
+    result_path = folder / f"{stem}-result.md"
+    try:
+        with bundle_path.open("x", encoding="utf-8") as fh:
+            fh.write(bundle_text)
+        with result_path.open("x", encoding="utf-8") as fh:
+            fh.write(result_text)
+    except Exception:
+        # Keep the reservation so a partial archive can never be overwritten.
+        raise
+    reservation.unlink()
+    return result_path
 
 
 def create_track(workspace: Path, direction: str, track_id: str) -> dict[str, Any]:
@@ -967,6 +986,7 @@ def render_digest(
     track: str | None = None,
     n_lessons: int = 3,
     standalone: bool = True,
+    registry: Any | None = None,
 ) -> str:
     """A COMPACT (<~5KB) history digest of a direction/track (0014, 审查#128).
 
@@ -1029,6 +1049,23 @@ def render_digest(
         tid = t["track_id"]
         active = _track_active(workspace, direction, tid)
         cap = MAX_ACTIVE_BRANCHES_PER_TRACK
+        branch_signatures: dict[str, dict[str, Any]] = {}
+        try:
+            from .features import build_registry
+            from .strategy_schema import parse_strategy, structural_signature
+            reg = registry if registry is not None else build_registry()
+            for branch_name in active:
+                strategy_path = (workspace / "strategies" / direction / tid
+                                 / f"{branch_name}.yaml")
+                if not strategy_path.is_file():
+                    strategy_path = workspace / "strategies" / direction / f"{branch_name}.yaml"
+                if strategy_path.is_file():
+                    spec = parse_strategy(str(strategy_path), reg)
+                    branch_signatures[branch_name] = structural_signature(spec, reg)
+        except Exception:
+            # Alpha-only feature columns may be unavailable to the core digest;
+            # signature hints are informative and must not break this read path.
+            branch_signatures = {}
         out.append(f"\n## track {tid} — {len(active)}/{cap} active branches")
         for b in (active or ["(none)"]):
             runs = _runs_for_branch(workspace, direction, b, track=tid)
@@ -1066,6 +1103,22 @@ def render_digest(
                 for i in insts
             )
             out.append(f"    {inst_parts or '(no data)'}")
+            own_sig = branch_signatures.get(b)
+            peers = [(name, sig) for name, sig in branch_signatures.items()
+                     if name != b]
+            if own_sig and peers:
+                from .strategy_schema import compare_structural_signatures
+                ranked = [(name, compare_structural_signatures(own_sig, sig))
+                          for name, sig in peers]
+                rank = {"identical": 0, "parameter_only": 1,
+                        "structural_change": 2}
+                peer, relation = min(ranked, key=lambda row: rank[row[1]["classification"]])
+                hint = (f"≈{peer}"
+                        if relation["classification"] == "parameter_only"
+                        else f"{relation['classification'][:3]}:{peer}")
+                if relation["exit_structure_changed"]:
+                    hint += "/exitΔ"
+                out.append(f"   {hint}")
         # D9.3 (审查#128): pruned branches are where the track learned the
         # most — surface them (with the prune reason, if recorded) so the
         # next AI does not re-propose a dead end.

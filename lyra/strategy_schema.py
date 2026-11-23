@@ -39,6 +39,9 @@ __all__ = [
     "AllNode",
     "AnyNode",
     "NotNode",
+    "ast_complexity",
+    "structural_signature",
+    "compare_structural_signatures",
     "load_strategy_yaml",
     "parse_strategy",
     "MANDATORY_STOP_PCT",
@@ -221,6 +224,156 @@ class StrategySpec:
             if node is not None:
                 _collect_params(node, out)
         return out
+
+
+def ast_complexity(spec: StrategySpec) -> dict[str, int]:
+    """Return transparent AST size counts without scoring or rejecting a spec.
+
+    ``feature_count`` counts distinct referenced columns (including right-hand
+    feature comparisons); ``node_count`` and ``leaf_count`` count AST nodes and
+    comparison leaves across all four entry/exit trees. Maximum depth starts at
+    one for a leaf. Entry/exit condition counts are the corresponding leaf
+    counts, split by role.
+    """
+    trees = {
+        "entry_long": spec.entry_long,
+        "entry_short": spec.entry_short,
+        "exit_long": spec.exit_long,
+        "exit_short": spec.exit_short,
+    }
+    features: set[str] = set()
+    node_count = leaf_count = max_depth = 0
+    counts: dict[str, int] = {}
+
+    def walk(node: ExprNode | None, depth: int = 1) -> tuple[int, int, int]:
+        if node is None:
+            return 0, 0, 0
+        if isinstance(node, _LeafNode):
+            features.add(node.cmp.left_col)
+            if not node.cmp.right_is_const and node.cmp.right_col:
+                features.add(node.cmp.right_col)
+            return 1, 1, depth
+        children: tuple[ExprNode, ...]
+        if isinstance(node, (AllNode, AnyNode)):
+            children = node.children
+        elif isinstance(node, NotNode):
+            children = (node.child,)
+        elif isinstance(node, (HeldForNode, WithinNode)):
+            children = (node.condition,)
+        elif isinstance(node, AfterEventNode):
+            children = (node.event, node.condition)
+        else:  # defensive for future AST nodes
+            return 1, 0, depth
+        vals = [walk(child, depth + 1) for child in children]
+        return (1 + sum(v[0] for v in vals), sum(v[1] for v in vals),
+                max([depth, *(v[2] for v in vals)]))
+
+    for name, node in trees.items():
+        n, leaves, depth = walk(node)
+        node_count += n
+        leaf_count += leaves
+        max_depth = max(max_depth, depth)
+        counts[name] = leaves
+    return {
+        "feature_count": len(features),
+        "node_count": node_count,
+        "leaf_count": leaf_count,
+        "max_depth": max_depth,
+        "entry_condition_count": counts["entry_long"] + counts["entry_short"],
+        "exit_condition_count": counts["exit_long"] + counts["exit_short"],
+    }
+
+
+def _normalized_feature_map(registry: Registry) -> dict[str, str]:
+    """Build an exact registered-name map; never infer from arbitrary names.
+
+    A registered feature's declared ``window_params`` identify the exact
+    underscore-delimited token sequence to replace. Embedded digits such as
+    ``prior60_high`` and ``close_ema60_distance_atr`` do not match tokens and
+    therefore remain unchanged. Multiple possible matches are resolved from
+    left to right using the declared parameter sequence.
+    """
+    grid = {"6", "12", "24", "60", "120"}
+    out: dict[str, str] = {}
+    for name in registry.names():
+        spec = registry.get(name)
+        tokens = name.split("_")
+        params = [str(p) for p in spec.window_params]
+        if params and all(p in grid for p in params):
+            for start in range(len(tokens) - len(params) + 1):
+                if tokens[start:start + len(params)] == params:
+                    tokens[start:start + len(params)] = ["<w>"] * len(params)
+                    break
+        out[name] = "_".join(tokens)
+    return out
+
+
+def structural_signature(spec: StrategySpec, registry: Registry) -> dict[str, Any]:
+    """Return structure and parameter projections for the four AST trees.
+
+    Feature normalization is exact and registry-derived. Names not present in
+    the provided registry (including any alpha name missing from it) are kept
+    verbatim. The returned mapping is JSON-compatible for concise audit output.
+    """
+    normalized = _normalized_feature_map(registry)
+
+    def feature(name: str | None) -> str | None:
+        return normalized.get(name, name) if name is not None else None
+
+    def encode(node: ExprNode | None) -> tuple[Any, Any]:
+        if node is None:
+            return None, None
+        if isinstance(node, _LeafNode):
+            cmp = node.cmp
+            structure = ("leaf", feature(cmp.left_col), cmp.op,
+                         None if cmp.right_is_const else feature(cmp.right_col))
+            parameter = ("left-feature", cmp.left_col,
+                         "const", cmp.right_const) if cmp.right_is_const else (
+                "left-feature", cmp.left_col, "right-feature", cmp.right_col)
+            return structure, parameter
+        if isinstance(node, (AllNode, AnyNode)):
+            encoded = [encode(child) for child in node.children]
+            return ((type(node).__name__, tuple(s for s, _ in encoded)),
+                    tuple(p for _, p in encoded))
+        if isinstance(node, NotNode):
+            s, p = encode(node.child)
+            return (("NotNode", s), p)
+        if isinstance(node, (HeldForNode, WithinNode)):
+            s, p = encode(node.condition)
+            return ((type(node).__name__, s), ("bars", node.bars, p))
+        if isinstance(node, AfterEventNode):
+            es, ep = encode(node.event)
+            cs, cp = encode(node.condition)
+            return (("AfterEventNode", es, cs), ("bars", node.bars, ep, cp))
+        return (type(node).__name__, None)
+
+    trees = {}
+    for key in ("entry_long", "entry_short", "exit_long", "exit_short"):
+        structure, params = encode(getattr(spec, key))
+        trees[key] = {"structure": structure, "parameters": params}
+    return {"trees": trees, "complexity": ast_complexity(spec)}
+
+
+def compare_structural_signatures(left: dict[str, Any],
+                                  right: dict[str, Any]) -> dict[str, Any]:
+    """Classify two signatures without combining structure and parameters."""
+    lt, rt = left.get("trees", {}), right.get("trees", {})
+    keys = ("entry_long", "entry_short", "exit_long", "exit_short")
+    changed = [k for k in keys if lt.get(k, {}).get("structure")
+               != rt.get(k, {}).get("structure")]
+    exit_changed = any(k in changed for k in ("exit_long", "exit_short"))
+    if changed:
+        classification = "structural_change"
+    elif all(lt.get(k, {}).get("parameters")
+             == rt.get(k, {}).get("parameters") for k in keys):
+        classification = "identical"
+    else:
+        classification = "parameter_only"
+    return {
+        "classification": classification,
+        "exit_structure_changed": exit_changed,
+        "changed_trees": changed,
+    }
 
 
 def _collect_params(node: ExprNode, out: list[Any]) -> None:
