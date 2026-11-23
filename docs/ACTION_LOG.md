@@ -19,9 +19,9 @@
 
 | 项 | 值 |
 |---|---|
-| 更新于 | 2026-11-22 |
+| 更新于 | 2026-11-23 |
 | 阶段 | 计划 2/3（执行计划 2）全部完成：C3（决策 0013 可比性解耦）与 C4（决策 0014 跨标的摘要与中位数排序）均已落地。 |
-| 代码 | 419 passed, 2 skipped；`pyflakes` 与 `alpha-gate` 干净；`doctor` 0 fail/0 warn。 |
+| 代码 | 420 passed, 2 skipped；`pyflakes` 与 `alpha-gate` 干净。 |
 | 进行中 | 计划 2 收口交接（HANDOFF.md 已更新，冒烟证据已保存至 workspace）。 |
 | 下一步 | 批量候选研究计划 3/3（commit C5，决策 0015：结构指纹与成本锁定；可选收口 exit-month 诊断）。 |
 | 待用户输入 | 审阅计划 2 成果，确认启动计划 3；OCI alpha/tracks 0 对象挂账（tracks 相关 alpha 尚未推送至 OCI，待用户裁决）。 |
@@ -39,3 +39,4 @@
 | 139 | 2026-11-22 | doc | 重写 `lyra/ai_readme.md`（决策 0012 落地）：全面废除单分支迭代与调参示范，建立 3–4 候选批次提出、严禁纯参数微调、解释结构差异与 8 席位池化流转标准协议；示例完整替换为批次与剪枝闭环。0012 决策追加首轮 Pilot 实测结论修订行，未改动引擎代码，测试与门禁保持全绿。 | `lyra/ai_readme.md`、`docs/decisions/0012-ai-batch-candidate-research(.en).md` |
 | 140 | 2026-11-22 | code | 行情数据快照 ID 与跨特征候选可比性解耦（决策 0013，commit C3）：在 `runner.py` 引入 `market_data_snapshot_id`（仅对 OHLC 基础列哈希），写入 metrics 与 manifest；`workflow._run_comparable_reason` 首位比较维度由 `data_digest` 替换为 `market_data_snapshot_id`，解除相同行情下不同特征候选被误判为不可比的限制；保留 `data_digest` 原有复现性职责。全套回归测试通过，真实 pilot 数据冒烟验证兄弟候选 `comparable=True`。 | `lyra/runner.py`、`lyra/workflow.py`、`lyra/cli.py`、`tests/test_runner.py`、`tests/test_workflow.py`、`docs/decisions/0013-market-data-snapshot-id(.en).md` |
 | 141 | 2026-11-22 | code | 候选池摘要跨标的统计与兄弟比较中位数重排（决策 0014，commit C4）：`render_digest` 引入跨品种中位数（年化/净收益/期望值）、全宇宙盈利标的比例（含零交易与失败品种）、最差品种暴露及紧凑单行输出（8 分支 ≤5KB）；`compare_siblings` 与 CLI 排序机制改为按中位数年化收益降序重排，排除不可比分支，原单品种最高项保留为 `best_single_instrument` 并明确标注非综合分。全套回归测试通过，真实 pilot 数据冒烟验证中位数排序与摘要输出生效。 | `lyra/workflow.py`、`lyra/cli.py`、`tests/test_workflow.py`、`docs/decisions/0014-digest-cross-instrument-summary(.en).md` |
+| 142 | 2026-11-23 | doc | Task A（纯文档）：① 0012 v1.2 修订行+勘误，四成本字段名纠正为 `spread_bps` / `slippage_bps_per_side` / `commission_bps_round_trip` / `financing_bps_per_day`，注明 `stop_loss_pct` 为强制 2% 锁定项（C5 成本锁定以此为准）；② ACTION_LOG.en.md #134 恢复为 ac0150d 版完整英文，清除中文（0011 只增不删），Current state 恢复 OCI alpha/tracks 0 对象挂账到待用户输入行；③ ai_readme §4/§6 改用 strategies/examples/ 开源策略做范本（mean_reversion/t_mr 四候选 bundle 已 `lyra apply-batch --dry-run` 验证，复核 `lyra validate` 与 `lyra compile` 两示例均通过），0013 中英文档真实 run ID 改为 `<run_id_v02a/b/c>` 占位符；④ 0010 v1.1 追回 vp1_r06 命名规范、四层验证矩阵（用户裁决#3）、交付物清单；⑤ 补回 I5 直接覆盖测试 `test_data_digest_and_run_id_change_on_feature_perturbation`（feature 值扰动 → data_digest 与 run_id 变、market_data_snapshot_id 不变）。全套通过（pytest 420 passed/2 skipped、pyflakes 干净、alpha-gate OK）。Task A 完成，待用户确认后启动计划 3（C5，决策 0015）。 | `docs/decisions/0012*(.en).md`、`docs/decisions/0013*(.en).md`、`docs/ACTION_LOG*(.en).md`、`lyra/ai_readme.md`、`docs/decisions/0010*(.en).md`、`tests/test_runner.py` |
