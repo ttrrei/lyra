@@ -84,6 +84,34 @@ execution:
 """
 
 
+_STRAT_VOL = """
+version: 1
+id: run_smoke_vol
+direction: test
+timeframe_minutes: 60
+entry:
+  long:
+    all:
+      - {feature: volume, op: gt, value: 500}
+  short:
+    all:
+      - {feature: volume, op: lt, value: 100}
+exit:
+  long:
+    all:
+      - {feature: volume, op: lt, value: 900}
+  short:
+    all:
+      - {feature: volume, op: gt, value: 1100}
+  stop_loss_pct: 0.02
+execution:
+  spread_bps: 0
+  slippage_bps_per_side: 0
+  commission_bps_round_trip: 0
+  financing_bps_per_day: 10
+"""
+
+
 @pytest.fixture
 def env(tmp_path):
     """A data root (features/ohlcv_1h + catalog) + strategy YAML + registry."""
@@ -724,4 +752,47 @@ def test_0013_market_data_snapshot_id_sensitive_to_ohlc_and_instruments(env):
             con2.close()
     finally:
         feat.write_bytes(orig_bytes)
+
+
+def test_data_digest_and_run_id_change_on_feature_perturbation(env):
+    """0013/I5: perturbing a strategy-consumed feature value changes data_digest
+    and run_id, while market_data_snapshot_id (OHLC-only identity) stays
+    unchanged — the fixture view carries the non-OHLC `volume` column, so the
+    strategy consumes it and the digest moves while the snapshot does not."""
+    data_root, reg = env["data_root"], env["registry"]
+
+    # Register the view's non-OHLC `volume` column as a consumable feature
+    # (OHLC aliases close/open resolve to mid_c/mid_o, which are inside the
+    # market_data_snapshot_id hash; consuming `volume` lets the digest move
+    # while the snapshot stays put).
+    reg.register("volume", None, kind=features.FeatureKind.VALUE,
+                 unit="quote_volume", warmup_bars=0, family="test")
+
+    strat_vol = Path(data_root.parent) / "s_vol.yaml"
+    strat_vol.write_text(_STRAT_VOL)
+
+    def _run():
+        res = runner.run_strategy(strat_vol, data_root, registry=reg,
+                                  out_dir=str(data_root / "runs"))
+        return json.loads((res.out_dir / "metrics.json").read_text(encoding="utf-8"))
+
+    m1 = _run()
+
+    # Perturb the `volume` feature values of EURUSD (non-OHLC) in place.
+    feat = data_root / "features" / "ohlcv_1h" / "EURUSD.parquet"
+    orig_bytes = feat.read_bytes()
+    src = feat.with_suffix(".orig.parquet")
+    src.write_bytes(orig_bytes)
+    try:
+        duckdb.connect().execute(
+            f"COPY (SELECT * REPLACE (volume + 1 AS volume) FROM '{src}') "
+            f"TO '{feat}' (FORMAT PARQUET)")
+        src.unlink(missing_ok=True)
+        m2 = _run()
+    finally:
+        feat.write_bytes(orig_bytes)
+
+    assert m1["data_digest"] != m2["data_digest"]
+    assert m1["run_id"] != m2["run_id"]
+    assert m1["market_data_snapshot_id"] == m2["market_data_snapshot_id"]
 
