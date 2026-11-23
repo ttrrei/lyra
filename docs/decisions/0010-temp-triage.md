@@ -102,3 +102,4 @@
 |---|---|---|
 | 2026-11-14 | 0.1 | 初稿：完成输入盘点、命名规范与三态分诊定义。 |
 | 2026-11-22 | 1.0 | 补全标准决策文档结构（问题、边界、不变量、测试、回滚），对齐 HLD §8 要求与 P1 规划。 |
+| 2026-11-23 | 1.1 | 补回 vp1_r06 命名规范：分支名取 `v<原始 id 的最后两段数字 rNN>`（如 `campaign_failed_breakout_p1_r06` → `vp1_r06`，策略 id 唯一），必须匹配 `_VNN_RE`/`_BRANCH_RE`（v 后直接为数字，否则 UNCLASSIFIED、违反 I17），保留原始 id 可追溯性（`provenance.source_id` + temp 索引），同方向内 rNN 实测无碰撞。四层验证矩阵（用户裁决#3：程序正确与内容正确）：L1 `lyra validate` 全通过（程序合规），L2 逐字节等于方向基线 `v01.yaml`（内容排重 → duplicate），L3 追加 provenance 注释块且 plan_hash 不变（内容可追溯），L4 track `nova` 激活 ≤ 8（I21 激活上限）。交付物清单：OCI corpus `_index.json` 三态 verdict（promote/archive/duplicate/keep_in_temp，append-only，F2）、promote 结果 `directions/<family>/nova/vNN.yaml`（工作树，待 push，不进 git）、行动日志条目。 |
