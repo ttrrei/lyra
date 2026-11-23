@@ -141,117 +141,149 @@ invalid, the whole batch is rejected and nothing is written.
 
 ## 4. Batch Proposal Bundle Specification
 
-The web-AI packages 3–4 candidates into a single YAML file:
+The web-AI packages 3–4 candidates into a single YAML file. The examples
+below use the **open-source example strategies in `strategies/examples/`**
+as the template — copy `strategies/examples/rsi_pullback/v01.yaml` (direction
+`mean_reversion`) and change the structural variants; never just tweak
+numbers.
 
 ```yaml
 version: 1
 bundle:
-  # Candidate 1: New hypothesis (Regime conditioning)
-  - direction: failed_breakout
-    track: t_fb
+  # Candidate 1: New hypothesis — trend-bias confirmation (structural variant
+  # adds the SMA(6) > SMA(24) uptrend-bias condition to the baseline entry)
+  - direction: mean_reversion
+    track: t_mr
     branch: v02a
     parent: v01
-    driven_by_lesson: "L1: v01 unconditioned sweeps generate excess noise; require regime filter."
-    hypothesis: "New hypothesis: False breakout sweeps mean-revert only during low market efficiency."
+    driven_by_lesson: "L1: v01's rsi_pullback reverts in every regime; add trend-bias confirmation."
+    hypothesis: "New hypothesis: long when RSI(6) < 30 while SMA(6) > SMA(24) — reversion only during uptrend context."
     strategy:
       version: 1
-      id: fb_t_fb_v02a
-      family: failed_breakout
+      id: mr_t_mr_v02a
+      direction: mean_reversion
       timeframe_minutes: 60
-      hypothesis: "Sweeps conditioned on low market efficiency (<0.35) mean-revert to range midpoint."
+      hypothesis: "RSI(6) mean reversion gated by SMA(6) > SMA(24) uptrend bias."
       entry:
         long:
           all:
-            - {feature: failed_breakout_down_24, op: eq, value: true}
-            - {feature: range_position_24, op: lt, value: 0.5}
-            - {feature: efficiency_24, op: lt, value: 0.35}
+            - {feature: rsi_6, op: lt, value: 30}
+            - {feature: sma_6, op: gt, value: sma_24}
         short:
           all:
-            - {feature: failed_breakout_up_24, op: eq, value: true}
-            - {feature: range_position_24, op: gt, value: 0.5}
-            - {feature: efficiency_24, op: lt, value: 0.35}
+            - {feature: rsi_6, op: gt, value: 70}
+            - {feature: sma_6, op: lt, value: sma_24}
       exit:
+        long: {feature: rsi_6, op: gt, value: 55}
+        short: {feature: rsi_6, op: lt, value: 45}
         stop_loss_pct: 0.02
-        take_profit_pct: 0.02
-        max_holding_bars: 12
-        long: {feature: range_position_24, op: gte, value: 0.5}
-        short: {feature: range_position_24, op: lte, value: 0.5}
       execution:
         spread_bps: 2
         slippage_bps_per_side: 0.2
-        commission_bps_round_trip: 0
-        financing_bps_per_day: 0
+        commission_bps_round_trip: 0.2
+        financing_bps_per_day: 0.1
 
-  # Candidate 2: Logical combination (Momentum exhaustion confirmation)
-  - direction: failed_breakout
-    track: t_fb
+  # Candidate 2: Logical combination — volume-weighted entry gate
+  - direction: mean_reversion
+    track: t_mr
     branch: v02b
     parent: v01
-    driven_by_lesson: "L1: v01 unconditioned sweeps suffer momentum continuation; require exhaustion check."
-    hypothesis: "Logical combination: Sweeps combined with extreme RSI exhaustion (oversold/overbought) confirm reversal."
+    driven_by_lesson: "L1: v01 reverts regardless of volume; require activity confirmation."
+    hypothesis: "Logical combination: RSI(6) reversion plus relative volume above the recent average at entry."
     strategy:
       version: 1
-      id: fb_t_fb_v02b
-      family: failed_breakout
+      id: mr_t_mr_v02b
+      direction: mean_reversion
       timeframe_minutes: 60
-      hypothesis: "Sweeps with momentum exhaustion confirmation (RSI 12 extreme) mean-revert."
+      hypothesis: "RSI(6) mean reversion gated by relative volume at entry."
       entry:
         long:
           all:
-            - {feature: failed_breakout_down_24, op: eq, value: true}
-            - {feature: range_position_24, op: lt, value: 0.5}
-            - {feature: rsi_12, op: lt, value: 30.0}
+            - {feature: rsi_6, op: lt, value: 30}
+            - {feature: relative_volume_24, op: gt, value: 1.2}
         short:
           all:
-            - {feature: failed_breakout_up_24, op: eq, value: true}
-            - {feature: range_position_24, op: gt, value: 0.5}
-            - {feature: rsi_12, op: gt, value: 70.0}
+            - {feature: rsi_6, op: gt, value: 70}
+            - {feature: relative_volume_24, op: lt, value: 0.8}
       exit:
+        long: {feature: rsi_6, op: gt, value: 55}
+        short: {feature: rsi_6, op: lt, value: 45}
         stop_loss_pct: 0.02
-        take_profit_pct: 0.02
-        max_holding_bars: 12
-        long: {feature: range_position_24, op: gte, value: 0.5}
-        short: {feature: range_position_24, op: lte, value: 0.5}
       execution:
         spread_bps: 2
         slippage_bps_per_side: 0.2
-        commission_bps_round_trip: 0
-        financing_bps_per_day: 0
+        commission_bps_round_trip: 0.2
+        financing_bps_per_day: 0.1
 
-  # Candidate 3: Mechanism replacement (Dynamic volatility band exit)
-  - direction: failed_breakout
-    track: t_fb
+  # Candidate 3: New hypothesis — z-score divergence confirmation
+  - direction: mean_reversion
+    track: t_mr
     branch: v02c
     parent: v01
-    driven_by_lesson: "L1: v01 static midpoint exit holds through reversals; test dynamic exit."
-    hypothesis: "Mechanism replacement: Replace static range midpoint exit with dynamic Bollinger band percentile exit."
+    driven_by_lesson: "L1: v01 reverts on shallow RSI moves; require z-score divergence."
+    hypothesis: "New hypothesis: long when RSI(6) < 30 while z-score(6) < -1 — avoid shallow-move reverts."
     strategy:
       version: 1
-      id: fb_t_fb_v02c
-      family: failed_breakout
+      id: mr_t_mr_v02c
+      direction: mean_reversion
       timeframe_minutes: 60
-      hypothesis: "Dynamic volatility band exit captures impulse without holding through retracements."
+      hypothesis: "RSI(6) mean reversion gated by z-score divergence."
       entry:
         long:
           all:
-            - {feature: failed_breakout_down_24, op: eq, value: true}
-            - {feature: range_position_24, op: lt, value: 0.5}
+            - {feature: rsi_6, op: lt, value: 30}
+            - {feature: zscore_6, op: lt, value: -1.0}
         short:
           all:
-            - {feature: failed_breakout_up_24, op: eq, value: true}
-            - {feature: range_position_24, op: gt, value: 0.5}
+            - {feature: rsi_6, op: gt, value: 70}
+            - {feature: zscore_6, op: gt, value: 1.0}
       exit:
+        long: {feature: rsi_6, op: gt, value: 55}
+        short: {feature: rsi_6, op: lt, value: 45}
         stop_loss_pct: 0.02
-        take_profit_pct: 0.04
-        max_holding_bars: 6
-        long: {feature: bband_pctb_24, op: gte, value: 0.8}
-        short: {feature: bband_pctb_24, op: lte, value: 0.2}
       execution:
         spread_bps: 2
         slippage_bps_per_side: 0.2
-        commission_bps_round_trip: 0
-        financing_bps_per_day: 0
+        commission_bps_round_trip: 0.2
+        financing_bps_per_day: 0.1
+
+  # Candidate 4: Mechanism replacement — SM6/24 alignment-state exit
+  - direction: mean_reversion
+    track: t_mr
+    branch: v02d
+    parent: v01
+    driven_by_lesson: "L1: v01's fixed RSI exit cuts reversals too early; replace the exit mechanism."
+    hypothesis: "Mechanism replacement: replace fixed RSI exit with SM6/24 alignment-state exit."
+    strategy:
+      version: 1
+      id: mr_t_mr_v02d
+      direction: mean_reversion
+      timeframe_minutes: 60
+      hypothesis: "RSI(6) mean reversion exited by SM6/24 alignment state instead of fixed RSI."
+      entry:
+        long:
+          all:
+            - {feature: rsi_6, op: lt, value: 30}
+        short:
+          all:
+            - {feature: rsi_6, op: gt, value: 70}
+      exit:
+        long: {feature: sma_alignment_6_24, op: eq, value: -1}
+        short: {feature: sma_alignment_6_24, op: eq, value: 1}
+        stop_loss_pct: 0.02
+      execution:
+        spread_bps: 2
+        slippage_bps_per_side: 0.2
+        commission_bps_round_trip: 0.2
+        financing_bps_per_day: 0.1
 ```
+
+- **The Golden Rule: No Pure Parameter Micro-tuning (Decision 0012)**:
+  - **PROHIBITED**: Simply tweaking numeric thresholds (e.g. RSI 30→35), altering smoothing windows (e.g. SMA 20→25), or presenting parameter variants as structural innovations.
+  - **REQUIRED**: Explain the structural difference relative to in-pool candidates in plain text.
+  - **Recommended batch mix**: 2 new hypotheses + 1 logical combination + 1 mechanism replacement.
+  - **Cost consistency**: the four execution cost fields above are copied from the open-source example `strategies/examples/rsi_pullback/v01.yaml` (`spread_bps: 2` / `slippage_bps_per_side: 0.2` / `commission_bps_round_trip: 0.2` / `financing_bps_per_day: 0.1`); `stop_loss_pct` is the mandatory 2% lock item (not one of the four optional costs).
+  - **Scope**: All candidates in a batch must target the same direction and track.
 
 ---
 
@@ -277,41 +309,44 @@ bundle:
 ## 6. Example Complete Batch Session
 
 ```
-AI:  lyra digest failed_breakout --track t_fb --config config/config.yml
-     → reads current pool: 1 active baseline (v01), 0/8 candidates, recent lessons (L1)
-     → protocol: inspects v01 YAML + L1 lesson ("unconditioned sweeps negative on 19/21 assets")
+AI:  lyra digest mean_reversion --track t_mr --config config/config.yml
+     → reads current pool: 1 active baseline (v01 — the open-source example
+       `strategies/examples/rsi_pullback/v01.yaml`), 0/8 candidates, recent lessons
 
-AI:  writes batch-0001.yaml (3 structurally distinct candidates:
-       - v02a: New hypothesis (efficiency_24 < 0.35 filter)
-       - v02b: Logical combination (rsi_12 momentum exhaustion)
-       - v02c: Mechanism replacement (dynamic Bollinger percentile exit)
-     All execution costs copied identically from v01 baseline.)
+AI:  writes batch-0001.yaml — 3–4 structurally distinct candidates over the
+     rsi_pullback shape (copy `strategies/examples/rsi_pullback/v01.yaml` as the
+     base; execution costs copied identically from v01; `stop_loss_pct` stays
+     the mandatory 2%):
+       - v02a: New hypothesis (SMA(6) > SMA(24) trend-bias filter)
+       - v02b: Logical combination (relative_volume_24 > 1.2 entry gate)
+       - v02c: New hypothesis (z-score divergence confirmation)
+       - v02d: Mechanism replacement (SM6/24 alignment-state exit)
 
 AI:  lyra apply-batch batch-0001.yaml --config config/config.yml --dry-run
-     → dry-run: all items VALID (parse + compile + preflight), 3 would adopt
+     → dry-run: all items VALID (parse + compile + preflight), 4 would adopt
 
 AI:  lyra apply-batch batch-0001.yaml --config config/config.yml --run \
-       --data-dir ~/.lyra/default/data
-     → 3 adopted · 3 run ok (v02a, v02b, v02c)
+        --data-dir ~/.lyra/default/data
+     → 4 adopted · 4 run ok (v02a, v02b, v02c, v02d)
 
-AI:  lyra digest failed_breakout --track t_fb --config config/config.yml
-     → v02a: trade count down 20%, positive on SPX500/UK100
-     → v02b: trade count down 65%, positive on CN50/HK33, cut drawdown
-     → v02c: trade count increased, negative on 20/21 assets due to turnover drag
+AI:  lyra digest mean_reversion --track t_mr --config config/config.yml
+     → v02a: fewer trades, positive on quiet ranges;
+       v02b: higher participation, small negative edge;
+       v02c: negative — z-score confirmation adds noise at 1h;
+       v02d: needs review — alignment exit trades too rarely
 
-AI:  lyra compare failed_breakout --track t_fb --siblings
+AI:  lyra compare mean_reversion --track t_mr --siblings
      → reviews cross-branch evidence table
 
-AI:  lyra prune failed_breakout --track t_fb --branch v02c \
-       --reason "v02c dynamic band exit increased turnover and fee drag, negative on 20/21 assets."
-     → track t_fb: 2/8 active branches (v02a, v02b retained)
+AI:  lyra prune mean_reversion --track t_mr --branch v02c \
+        --reason "z-score confirmation adds noise at 1h; drop from pool."
+     → track t_mr: 3/8 active branches (v02a, v02b, v02d retained)
 
-AI:  lyra lesson failed_breakout --track t_fb \
-       "L2: Dynamic band exit (v02c) increases overtrading; regime efficiency (v02a) and RSI exhaustion (v02b) improve equities but fail on FX; next explore session temporal filtering." \
-       --config config/config.yml
+AI:  lyra lesson mean_reversion --track t_mr \
+        "L2: Trend-bias filter (v02a) improved win rate; volume gate (v02b) added drawdown; alignment-state exit (v02d) trades too rarely." \
+        --config config/config.yml
 
 AI:  lyra backup --config config/config.yml
-     → syncs active tracks, runs, and strategies to OCI
+      → syncs active tracks, runs, and strategies to OCI
 
-→ loop continues with next batch (proposing 3 new structural candidates into remaining capacity)…
-```
+→ loop continues with the next batch (proposing 3 new structural candidates into remaining capacity)…

@@ -28,9 +28,9 @@ In 0009 D13, `compare_siblings` used `data_digest` as the first dimension to jud
 - **Pilot Empirical Evidence (2026-11-22)**: During the Round 1 pilot on `failed_breakout/pilot`, 3 structurally distinct candidates (`v02a` consuming `efficiency_24`, `v02b` consuming `rsi_12`, `v02c` consuming `bband_pctb_24`) ran on the identical 21-instrument 1h dataset. Running `lyra compare --siblings` produced:
   ```text
   comparable: NOT COMPARABLE (data_digests=3, ...)
-    v02a: run aaf42301aa44 incomparable — data_digest
-    v02b: run 8812c0d9365a incomparable — data_digest
-    v02c: run 041ab46a9242 incomparable — data_digest
+    v02a: run <run_id_v02a> incomparable — data_digest
+    v02b: run <run_id_v02b> incomparable — data_digest
+    v02c: run <run_id_v02c> incomparable — data_digest
   ```
   This false incomparability blocked multi-candidate horizontal evaluations.
 

@@ -28,9 +28,9 @@
 - **Pilot 实测撞墙证据（2026-11-22）**：在 `failed_breakout/pilot` 轨道的首轮测试中，3 个结构不同的候选（`v02a` 读 `efficiency_24`，`v02b` 读 `rsi_12`，`v02c` 读 `bband_pctb_24`）在完全一致的 21 标的 1h 数据上运行，但 `lyra compare --siblings` 输出：
   ```text
   comparable: NOT COMPARABLE (data_digests=3, ...)
-    v02a: run aaf42301aa44 incomparable — data_digest
-    v02b: run 8812c0d9365a incomparable — data_digest
-    v02c: run 041ab46a9242 incomparable — data_digest
+    v02a: run <run_id_v02a> incomparable — data_digest
+    v02b: run <run_id_v02b> incomparable — data_digest
+    v02c: run <run_id_v02c> incomparable — data_digest
   ```
   该错误直接阻断了多候选横向有效评估。
 
