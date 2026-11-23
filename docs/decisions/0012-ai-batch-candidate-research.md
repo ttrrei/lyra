@@ -43,7 +43,7 @@
    - 严禁仅改变数值阈值（如 RSI 30→35）、仅改变平滑/回溯窗口（如 SMA 20→25）或将数值变体包装为新结构；
    - 结构差异必须能在文本假设中被人类审计清晰理解。
 3. **成本与基线一致性**：
-   - 候选策略的执行元信息四成本字段（`commission_round_trip`、`financing_per_day`、`stop_loss`、`slippage` 等）必须与当前 track 基线严格一致，禁止通过降低滑点或费率虚增绩效。
+   - 候选策略的执行元信息四成本字段（`spread_bps` / `slippage_bps_per_side` / `commission_bps_round_trip` / `financing_bps_per_day`）必须与当前 track 基线严格一致，禁止通过降低滑点或费率虚增绩效；`stop_loss_pct` 是强制 2%（adverse-price 锁定项，Lyra 非约定），不属四可选成本，所有候选与 v01 基线一致。
 4. **同批同轨比较与阅读协议**：
    - 同一批次只比较相同 `direction` 与 `track` 内的候选；
    - AI 阅读协议以 `lyra digest`（低 token 摘要）为主；
@@ -107,3 +107,4 @@
 |---|---|---|
 | 2026-11-22 | 1.0 | 初稿：确立 3–4 候选批次结构、禁止纯参数微调契约、8 席位池化流转规则。 |
 | 2026-11-22 | 1.1 | 结合首轮手动 Pilot（failed_breakout/pilot）实测结论修订：验证 8 席位周转闭环（3 提出/3 采用/1 剪枝），证实跨特征候选 data_digest 不可比与 digest 缺乏跨品种汇总两处摩擦，作为后续 0013/0014 的输入依据。 |
+| 2026-11-23 | 1.2 | 勘误：四成本字段名纠正为 `spread_bps` / `slippage_bps_per_side` / `commission_bps_round_trip` / `financing_bps_per_day`（前文误将 `stop_loss` 计入成本）；注明 `stop_loss_pct` 是强制 2% 锁定项、非四可选成本；C5 成本锁定以此为准。 |

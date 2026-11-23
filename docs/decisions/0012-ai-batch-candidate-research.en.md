@@ -43,7 +43,9 @@ Under the single-line iteration workflow, AI models tend to repeatedly tweak num
    - Strictly ban tweaking numeric thresholds alone (e.g. RSI 30→35), altering lookback windows alone (e.g. SMA 20→25), or masquerading parameter variants as structural novelty.
    - Structural differences must be clearly auditable and justifiable in plain language.
 3. **Cost and Baseline Consistency**:
-   - All 4 execution cost fields (`commission_round_trip`, `financing_per_day`, `stop_loss`, `slippage`) must match the track baseline exactly, preventing artificial metric inflation via fee/slippage deflation.
+   - All 4 execution cost fields (`spread_bps` / `slippage_bps_per_side` / `commission_bps_round_trip` / `financing_bps_per_day`) must match the track baseline
+     exactly, preventing artificial metric inflation via fee/slippage deflation; `stop_loss_pct` is the mandatory 2% adverse-price lock item (not one of the
+     four optional costs) — all candidates and the v01 baseline are identical there.
 4. **Intra-Track Comparison and Reading Protocol**:
    - A batch is only compared against candidates within the same `direction` and `track`.
    - AI reading protocol prioritizes `lyra digest` (low-token compact history).
@@ -107,3 +109,4 @@ Under the single-line iteration workflow, AI models tend to repeatedly tweak num
 |---|---|---|
 | 2026-11-22 | 1.0 | Initial draft: establish 3–4 candidate batch structure, anti-micro-tuning contract, and 8-seat pool rotation rules. |
 | 2026-11-22 | 1.1 | Revision incorporating Round 1 manual pilot (failed_breakout/pilot) findings: validated 8-seat rotation loop (3 proposed / 3 adopted / 1 pruned), confirmed empirical friction in data_digest incomparability across distinct features and lack of cross-instrument summary in digest, serving as inputs for decisions 0013/0014. |
+| 2026-11-23 | 1.2 | Errata: the four cost fields are corrected to `spread_bps` / `slippage_bps_per_side` / `commission_bps_round_trip` / `financing_bps_per_day` (the old text counted `stop_loss` among the costs); noted that `stop_loss_pct` is the mandatory 2% lock item, not one of the four optional costs. C5 cost locking follows this. |
