@@ -94,3 +94,4 @@
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-11-22 | 0.1 | 初版提案：digest 跨品种统计与 compare 中位数排序。 |
+| 2026-11-23 | 0.2 | 完成可选 exit-month 诊断：新增只读 `lyra exit-months <run_dir>`，从 `trades.parquet` 按 exit_time、逐标的分组，并按 run window 补齐零交易月；输出字段均以 `exit_month_*` 命名，绝不写回 `metrics.json`。实现与覆盖见 `lyra/diagnostics.py`、`tests/test_diagnostics.py`。 |

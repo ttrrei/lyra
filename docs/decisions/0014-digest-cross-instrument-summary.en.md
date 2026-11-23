@@ -94,3 +94,4 @@ Clean revert via git commit C4. All changes are pure Python presentation and agg
 | Date | Version | Change |
 |---|---|---|
 | 2026-11-22 | 0.1 | Initial proposal: digest cross-instrument summary and compare median re-sorting. |
+| 2026-11-23 | 0.2 | Completed the optional exit-month diagnostic: added read-only `lyra exit-months <run_dir>`, grouping `trades.parquet` by exit time and instrument and filling zero-trade months across the run window. Output fields use the `exit_month_*` prefix; `metrics.json` is never modified. See `lyra/diagnostics.py` and `tests/test_diagnostics.py`. |

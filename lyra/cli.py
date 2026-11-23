@@ -1023,6 +1023,28 @@ def report(
     typer.echo(f"(see {d / 'report.md'} for the full report)")
 
 
+@app.command(name="exit-months")
+def exit_months_cmd(
+    run_dir: str = typer.Argument(..., help="Run artifact directory"),
+) -> None:
+    """Print read-only per-instrument diagnostics grouped by trade exit month."""
+    import csv
+    import sys
+    from .diagnostics import exit_month_diagnostics
+    try:
+        rows = exit_month_diagnostics(Path(run_dir))
+    except Exception as exc:
+        typer.secho(f"ERROR: cannot build exit-month diagnostics: {exc}",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    fields = ["instrument", "exit_month", "exit_month_trade_count",
+              "exit_month_net_return_sum", "exit_month_win_rate",
+              "exit_month_avg_bars_held"]
+    writer = csv.DictWriter(sys.stdout, fieldnames=fields, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+
+
 # ---- 0007 Part A: OCI push / backup / list ---------------------------------
 
 

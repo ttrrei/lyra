@@ -287,6 +287,32 @@ def validate_ident(ident: str, what: str = "identifier") -> None:
         )
 
 
+def archive_batch_attempt(workspace: Path, direction: str, track_id: str,
+                          bundle_text: str, result_text: str) -> Path:
+    """Write one private, monotonically numbered batch record in the workspace."""
+    validate_ident(direction, "direction")
+    validate_ident(track_id, "track")
+    root = Path(workspace).resolve()
+    folder = Path(workspace) / "research-batches" / direction / track_id
+    resolved = folder.resolve()
+    if root != resolved and root not in resolved.parents:
+        raise WorkflowError(f"batch archive path escapes workspace: {resolved!r}")
+    folder.mkdir(parents=True, exist_ok=True)
+    resolved = folder.resolve()
+    if root != resolved and root not in resolved.parents:
+        raise WorkflowError(f"batch archive path escapes workspace: {resolved!r}")
+    numbers = []
+    for p in folder.glob("batch-*-result.md"):
+        m = re.fullmatch(r"batch-(\d{4,})-result\.md", p.name)
+        if m:
+            numbers.append(int(m.group(1)))
+    number = max(numbers, default=0) + 1
+    stem = f"batch-{number:04d}"
+    (folder / f"{stem}.yaml").write_text(bundle_text, encoding="utf-8")
+    (folder / f"{stem}-result.md").write_text(result_text, encoding="utf-8")
+    return folder / f"{stem}-result.md"
+
+
 def create_track(workspace: Path, direction: str, track_id: str) -> dict[str, Any]:
     """Create a track and freeze its baseline (I18).
 

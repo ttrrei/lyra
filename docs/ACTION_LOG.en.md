@@ -20,12 +20,12 @@
 | Item | Value |
 |---|---|
 | Updated | 2026-11-23 |
-| Phase | Plan 2/3 fully complete: C3 (Decision 0013 comparability decoupling) and C4 (Decision 0014 cross-instrument summary & median sort) landed. |
-| Code | 420 passed, 2 skipped; `pyflakes` and `alpha-gate` clean. |
-| In progress | Plan 2 handoff (HANDOFF.md updated, smoke evidence recorded in workspace). |
-| Next | Batch Candidate Research Plan 3/3 (commit C5, Decision 0015: structural signature & cost locking; exit-month diagnosis). |
-| Awaiting user | Review Plan 2 deliverables, confirm kickoff of Plan 3; OCI alpha/tracks backlog: 0 objects (tracks-related alpha not yet pushed to OCI). |
-| Open questions | O1–O18 closed or decided; exit-month diagnosis deferred to Plan 3 §2.0. |
+| Phase | Plan 3/3 in progress; the Plan 3 §2.0 exit-month diagnostic is complete and C5 (Decision 0015) is being implemented. |
+| Code | C5 full gates have not run; latest baseline is 420 passed, 2 skipped (#142). |
+| In progress | C5 cost lock, structural signature/complexity hints, and workspace batch records. |
+| Next | Complete C5 second-model review and full tests/pyflakes/alpha-gate, then run Pilot rounds 2–3. |
+| Awaiting user | Pilot round 2–3 candidates need user review first; OCI alpha/tracks 0-object backlog remains for user adjudication. |
+| Open questions | O1–O18 are closed or decided. |
 
 ## Entries (from #134)
 
@@ -40,3 +40,5 @@
 | 140 | 2026-11-22 | code | Market data snapshot ID and cross-feature comparability decoupling (decision 0013, commit C3): introduced `market_data_snapshot_id` in `runner.py` (hashes OHLC base columns only), recorded in metrics and manifest; replaced `data_digest` with `market_data_snapshot_id` as the primary comparability check in `workflow._run_comparable_reason`, allowing candidates consuming different features on identical market data to be judged comparable while preserving `data_digest` for single-run reproducibility. All regression tests pass; real pilot track smoke confirms sibling `comparable=True`. | `lyra/runner.py`, `lyra/workflow.py`, `lyra/cli.py`, `tests/test_runner.py`, `tests/test_workflow.py`, `docs/decisions/0013-market-data-snapshot-id(.en).md` |
 | 141 | 2026-11-22 | code | Candidate pool digest cross-instrument summary & median re-sort (decision 0014, commit C4): `render_digest` introduces cross-instrument medians (annualized/net/expectancy), universe-wide profitable ratio (including zero-trade and failed instruments), worst instrument exposure, and compact one-liners (8 branches ≤5KB); `compare_siblings` and CLI re-rank branches by median annualized return descending, excluding incomparable runs, while retaining best single instrument labeled as non-aggregate. All regression tests pass; smoke verified on real pilot data. | `lyra/workflow.py`, `lyra/cli.py`, `tests/test_workflow.py`, `docs/decisions/0014-digest-cross-instrument-summary(.en).md` |
 | 142 | 2026-11-23 | doc | Task A (pure docs): ① 0012 v1.2 revision row + errata: the four cost fields corrected to `spread_bps` / `slippage_bps_per_side` / `commission_bps_round_trip` / `financing_bps_per_day`, with a note that `stop_loss_pct` is the mandatory 2% lock item (C5 cost locking follows it); ② ACTION_LOG.en.md #134 restored to the full-English ac0150d version, Chinese cleared (0011 append-only respected); Current state: OCI alpha/tracks 0-object backlog restored to the Awaiting-user row; ③ ai_readme §4/§6 based on the open-source strategies in strategies/examples/ (the new mean_reversion/t_mr four-candidate bundle verified with `lyra apply-batch --dry-run`; `lyra validate` + `lyra compile` re-checked on the examples), real run IDs in the 0013 docs replaced by `<run_id_v02a/b/c>` placeholders; ④ 0010 v1.1: vp1_r06 naming convention, four-layer validation matrix (user ruling #3), deliverables list restored; ⑤ backfilled the I5-directly-covered regression `test_data_digest_and_run_id_change_on_feature_perturbation` (feature value perturbation → data_digest and run_id change, market_data_snapshot_id unchanged). Full suite passes (pytest 420 passed/2 skipped, pyflakes, alpha-gate OK); awaiting user confirmation before starting Plan 3 (C5, Decision 0015). | `docs/decisions/0012*(.en).md`, `docs/decisions/0013*(.en).md`, `docs/ACTION_LOG*(.en).md`, `lyra/ai_readme.md`, `docs/decisions/0010*(.en).md`, `tests/test_runner.py` |
+
+| 143 | 2026-11-23 | code | Completed the read-only Plan 3 §2.0 exit-month diagnostic: added `lyra exit-months <run_dir>` to group trades by exit time and instrument and zero-fill months within the study window. Output fields use the `exit_month_*` prefix and never write to `metrics.json`. This diagnostic is separate from metric and execution semantics; details and coverage are in Decision 0014 v0.2. | `lyra/diagnostics.py`, `lyra/cli.py`, `tests/test_diagnostics.py`, `docs/decisions/0014*(.en).md` |
