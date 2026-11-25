@@ -19,12 +19,12 @@
 
 | 项 | 值 |
 |---|---|
-| 更新于 | 2026-11-25 |
-| 阶段 | 计划 3/3 执行中；OCI v02a/v02b 冲突已通过只读比对后在本地恢复为 OCI 原件，backup dry-run 当前 0 conflicts；未写 OCI。 |
-| 代码 | 本地不可变 run 复用、OCI 预检与 apply-batch 输入先行归档已实现；全套 451 passed, 2 skipped，`pyflakes` 与 `alpha-gate` 干净。 |
-| 进行中 | 三项修复及其文档一致性收尾均已提交（0015/0016/0017 修订行、ai_readme 归档说明、决策引用）；Round 3 尚未开始。 |
-| 下一步 | 准备 Round 3 候选供用户审阅，再完成 Round 3 闭环与终验收；工程侧文档收尾已完成。 |
-| 待用户输入 | OCI alpha/tracks 0 对象挂账仍待裁决。 |
+| 更新于 | 2026-11-26 |
+| 阶段 | 计划 3/3 工程加固完成；OCI v02a/v02b 冲突已于 11-25 从 OCI 原件本地恢复，backup dry-run 0 conflicts；0019 复用加固已落地，仍未写 OCI。 |
+| 代码 | 0019 落地复用产出提示、只读 `--verify` 三档验证、归属 fail-closed 与数值金标；465 passed / 2 skipped，`pyflakes` 与 `alpha-gate` 干净。 |
+| 进行中 | 0019 中英决策、0016 修订行、双语 ACTION_LOG 与测试均已提交；Round 3 尚未开始。 |
+| 下一步 | 准备 Round 3 候选供用户审阅，再完成 Round 3 闭环与终验收；工程侧加固已完成。 |
+| 待用户输入 | OCI alpha/tracks 0 对象挂账待裁决；`runs_par_url` 指向独立 `lyra-runs` 桶，0017 预检只覆盖 strategies 桶（已报告用户，布局未改）。 |
 | 未决问题 | O1–O18 均已关闭或已裁决。 |
 
 ## 条目（#134 起）
@@ -47,3 +47,4 @@
 | 147 | 2026-11-25 | code | 决策 0017 增加跨机器 OCI 只读预检：本地 miss 后按 backup 原有路径查询，完整且无歧义的 run 会校验 SHA 后恢复复用；网络查询失败告警后继续，损坏、重复异字节副本或缺失对象 fail-closed。补充不可变冲突恢复手册与操作性错误文案；预检只读，不改变 OCI 布局或写入对象。 | `lyra/cli.py`、`lyra/runner.py`、`lyra/oci_push.py`、`lyra/ai_readme.md`、`tests/test_runner.py`、`tests/test_oci_push.py`、`docs/decisions/0017*(.en).md`、`docs/decisions/0007*(.en).md` |
 | 148 | 2026-11-25 | code | 决策 0018 将真实 `apply-batch` bundle 的原始 bytes 先写入 workspace intake，再解析并路由至 direction/track 编号归档；损坏 UTF-8/YAML、混合或不安全身份转入 `_unparsed/unassigned` 并保存失败原因，归档故障仅 WARN，dry-run 继续保持零写入。现有编号归档 API 保持兼容；全套测试与门禁通过。 | `lyra/cli.py`、`lyra/workflow.py`、`tests/test_batch.py`、`docs/decisions/0018*(.en).md` |
 | 149 | 2026-11-25 | doc | 文档一致性收尾：0015 中英追加 0018 修订指针，说明批次原文先入 `_intake/`、按单一身份路由、失败留档 `_unparsed/unassigned/`；0016 中英澄清 `+dirty` 属于确定性边界并显式继承 0006 M4 的已接受风险，0017 中英把 HLD 引用修正为 §4 I17 与 0007 的 I19/I20。`ai_readme` 的 apply-batch 归档段同步 0018；ACTION_LOG 当前状态的“下一步”已刷新，被空行拆开的条目表合并回单表以符合 0011“一张表、一套账”。未改任何代码，测试与门禁保持全绿。 | `docs/decisions/0015*(.en).md`、`docs/decisions/0016*(.en).md`、`docs/decisions/0017*(.en).md`、`lyra/ai_readme.md`、`docs/ACTION_LOG*(.en).md` |
+| 150 | 2026-11-26 | code | 决策 0019 落地 run 复用加固：复用命中时若 manifest 的 git commit 与当前不同，追加 `note:` 提示（旧格式显示 `legacy`、git 不可用则跳过），仅提示不写文件；新增只读 `lyra run --verify`，在系统临时目录重算并按 IDENTICAL / DESCRIPTIVE_ONLY / NUMERIC_DIFFERENCE 三档报告（数值档退出码 2），不触发 OCI 预检、不写 `runs/`。复用前校验 run_meta 的 branch/track，不一致 fail-closed，旧格式缺字段 WARN 后继续；branch 覆盖全部复用路径，track 仅在 `--track` 可确定时生效（A3 范围）。新增数值金标与 run_id payload 固定测试，0016 追加测试名漂移修订行；A1–A3 核对记入 HANDOFF（7 个 commit 已在 origin、CI 绿，`runs_par_url` 指向独立 `lyra-runs` 桶已报告未改），全套 465 passed / 2 skipped，`pyflakes` 与 `alpha-gate` 干净。 | `lyra/cli.py`、`tests/test_reuse_hardening.py`、`docs/decisions/0019*(.en).md`、`docs/decisions/0016*(.en).md`、`docs/ACTION_LOG*(.en).md`、`HANDOFF.md` |

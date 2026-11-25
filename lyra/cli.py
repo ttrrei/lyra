@@ -530,6 +530,170 @@ def _oci_run_preflight(par_url: str, run_name: str, run_id: str,
         )
 
 
+# --- 0019: reuse notice / read-only verify / attribution ---------------------
+
+def _reuse_commit_notice(run_dir: Path) -> None:
+    """0019 B1: say which commit produced a reused run (notice only)."""
+    import json
+
+    from . import runner as runner_mod
+
+    current = runner_mod._git_commit()
+    if current == "no-git":
+        return
+    try:
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    except Exception:
+        return  # best effort only; never block a reuse
+    produced = manifest.get("git_commit") or "legacy"
+    if produced == current:
+        return
+    typer.echo(
+        f"note: 该 run 由 commit {produced} 产出，当前为 {current}；未重算。"
+        "用 --verify 核对数值；仅当数值语义变化时才需递增 _ENGINE_VERSION"
+        "（会生成新 run_id）。"
+    )
+
+
+def _check_reuse_attribution(strategy_path: str, track: str | None,
+                             run_dir: Path) -> None:
+    """0019 B3: a cached run must belong to the same branch (and track)."""
+    import json
+
+    path = Path(strategy_path)
+    branch = path.name[:-5] if path.name.endswith(".yaml") else path.name
+    try:
+        meta = json.loads((run_dir / "run_meta.json").read_text(encoding="utf-8"))
+    except Exception:
+        typer.secho(
+            "WARN: run_meta.json is missing or unreadable; reusing without "
+            "branch/track attribution check.", fg=typer.colors.YELLOW, err=True,
+        )
+        return
+    old_branch = meta.get("branch")
+    old_track = meta.get("track_id", meta.get("track"))
+    if not old_branch or old_track is None:
+        typer.secho(
+            "WARN: legacy run_meta.json lacks branch/track; reusing without "
+            "attribution check.", fg=typer.colors.YELLOW, err=True,
+        )
+        return
+    where_new = f"（track {track}）" if track is not None else ""
+    if old_branch == branch and (track is None or old_track == track):
+        return
+    typer.secho(
+        f"RUN FAILED: 该 run_id 已存在于 branch {old_branch}（track {old_track}）；"
+        f"相同的策略内容（含内部 id）在 branch {branch}{where_new} 下不能复用。"
+        "若确为新的候选，请修改 YAML 的实质内容（含 id）或使用新的 slug。",
+        fg=typer.colors.RED, err=True,
+    )
+    raise typer.Exit(code=1)
+
+
+def _json_diff(a: Any, b: Any, prefix: str = "") -> list[str]:
+    """Field names whose values differ, for descriptive-only reporting."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        out: list[str] = []
+        for key in sorted(set(a) | set(b)):
+            out.extend(_json_diff(a.get(key), b.get(key),
+                                  f"{prefix}.{key}" if prefix else key))
+        return out
+    if a != b:
+        return [prefix] if prefix else ["<root>"]
+    return []
+
+
+def _verify_compare(staged_dir: Path, archived_dir: Path) -> None:
+    """0019 B2: three-way read-only comparison; exits 2 on numeric change."""
+    import json
+
+    def _load(path: Path) -> Any:
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    numeric_fields = ("per_instrument", "summary", "costs_bps",
+                      "stop_trigger_rate", "instrument_failures")
+    diffs: list[str] = []
+    for fname in ("signals.parquet", "trades.parquet"):
+        if (staged_dir / fname).read_bytes() != (archived_dir / fname).read_bytes():
+            diffs.append(fname)
+    staged_metrics = _load(staged_dir / "metrics.json")
+    archived_metrics = _load(archived_dir / "metrics.json")
+    diffs.extend(f"metrics.json:{p}" for p in _json_diff(
+        {k: staged_metrics.get(k) for k in numeric_fields},
+        {k: archived_metrics.get(k) for k in numeric_fields},
+    ))
+    if diffs:
+        typer.secho(
+            "VERIFY: NUMERIC_DIFFERENCE — " + ", ".join(diffs) + "\n"
+            "  数值语义已变，请评估是否递增 `_ENGINE_VERSION`（会产生新 run_id）。",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    descriptive: list[str] = []
+    descriptive.extend(f"manifest.{p}" for p in _json_diff(
+        _load(staged_dir / "manifest.json"), _load(archived_dir / "manifest.json")))
+    staged_report = (staged_dir / "report.md").read_text(encoding="utf-8").splitlines()
+    archived_report = (archived_dir / "report.md").read_text(encoding="utf-8").splitlines()
+    for i, (a, b) in enumerate(zip(staged_report, archived_report)):
+        if a != b:
+            label = (a.split(":", 1)[0] or b.split(":", 1)[0]).strip() or f"line{i+1}"
+            descriptive.append(f"report.{label}")
+    if len(staged_report) != len(archived_report):
+        descriptive.append("report.line_count")
+    for fname in ("run_meta.json",):
+        sp, ap = staged_dir / fname, archived_dir / fname
+        if sp.is_file() and ap.is_file():
+            descriptive.extend(f"{fname}.{p}" for p in _json_diff(_load(sp), _load(ap)))
+    descriptive = sorted(set(descriptive))
+    if descriptive:
+        typer.secho(
+            "VERIFY: DESCRIPTIVE_ONLY — signals/trades bytes and metric values "
+            "are identical; differing descriptive fields: " + ", ".join(descriptive),
+            fg=typer.colors.YELLOW,
+        )
+        return
+    typer.secho("VERIFY: IDENTICAL — all run artifacts are byte-identical.",
+                fg=typer.colors.GREEN)
+
+
+def _verify_run(strategy: str, data_dir: str, alpha_dir: str | None,
+                config: str, track: str | None, name: str | None,
+                out: str | None, reg) -> None:
+    """0019 B2: recompute in a system temp dir; never write to runs/."""
+    from . import runner as runner_mod
+    from . import strategy_schema as schema_mod
+
+    ws = _workspace(config)
+    out_root = Path(out) if out is not None else ws / "runs"
+    effective_name = name
+    if effective_name is None and track is not None:
+        try:
+            _spec = schema_mod.parse_strategy(strategy, reg)
+            effective_name = f"{_spec.id}__{track}"
+        except Exception:
+            pass  # validated by the normal path
+    with tempfile.TemporaryDirectory(prefix="lyra-verify-") as td:
+        staged = runner_mod.run_strategy(
+            strategy, data_dir, registry=reg, name=effective_name,
+            out_dir=Path(td), strict=False,
+            run_meta_payload=_run_meta_payload(Path(strategy), track, ws),
+            require_run_meta=False,
+            audit_log_path=None,
+            remote_run_preflight=None,
+        )
+        archived = runner_mod._find_local_run(
+            out_root, effective_name, staged.run_id, require_run_meta=False)
+        if archived is None:
+            typer.secho(
+                f"VERIFY FAILED: no complete local run for {staged.run_id[:12]} "
+                f"under {out_root}; run `lyra run` first or pull it from OCI.",
+                fg=typer.colors.RED, err=True,
+            )
+            raise typer.Exit(code=1)
+        _verify_compare(staged.out_dir, archived.out_dir)
+
+
 @app.command()
 def run(
     strategy: str = typer.Argument(..., help="Path to a strategy YAML (0004)"),
@@ -540,6 +704,7 @@ def run(
     out: str | None = typer.Option(None, "--out", help="Artifact root (default <workspace>/runs; 0009 D2)"),
     strict: bool = typer.Option(False, "--strict", help="Fail if any instrument failed (I16)"),
     track: str | None = typer.Option(None, "--track", help="Research track id to attribute this run to (0009 D2 run_meta)"),
+    verify: bool = typer.Option(False, "--verify", help="Read-only check: recompute in a temp dir and compare with the archived run; never writes to runs/ (0019)."),
 ) -> None:
     """Run a strategy end-to-end (0006): signals -> trade engine -> metrics.
 
@@ -560,6 +725,17 @@ def run(
     if out is None:
         ws = _workspace(config)
         out = str(ws / "runs")
+
+    if verify is True:  # direct Python calls leave Typer's OptionInfo default
+        try:
+            _verify_run(strategy, data_dir, alpha_dir, config, track, name, out, reg)
+        except typer.Exit:
+            raise
+        except (schema_mod.SchemaError, FileNotFoundError, RuntimeError,
+                duckdb.Error) as exc:
+            typer.secho(f"RUN FAILED: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        return
 
     # M3 (审查#128): two tracks running the **same** YAML (same spec.id,
     # same data/runtime → same run_id) on the same day with no explicit
@@ -647,8 +823,11 @@ def run(
             fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
     if result.reused:
+        _check_reuse_attribution(strategy, track, Path(result.out_dir))
+    if result.reused:
         typer.secho(f"reused existing run {result.run_id[:12]} -> {result.out_dir}",
                     fg=typer.colors.CYAN)
+        _reuse_commit_notice(Path(result.out_dir))
     else:
         typer.secho(f"OK: run {result.run_id[:12]} -> {result.out_dir}",
                     fg=typer.colors.GREEN)
