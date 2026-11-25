@@ -99,3 +99,4 @@ In 0009 D13, `compare_siblings` used `data_digest` as the first dimension to jud
 | Date | Version | Change |
 |---|---|---|
 | 2026-11-22 | 1.0 | Initial draft: introduce `market_data_snapshot_id`, revise 0009 D13 comparability criteria, decoupling feature differences from market data consistency. |
+| 2026-11-25 | 1.1 | Decision 0016: the field is written only to newly created runs; completed historical runs are never backfilled or rewritten, and missing identity remains `missing_market_data_snapshot_id`. |

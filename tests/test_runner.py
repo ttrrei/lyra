@@ -175,27 +175,164 @@ def test_run_multi_instrument_isolated(env):
 
 
 def test_run_reproducible_identical_manifest(env):
-    """I5: same inputs -> same run_id + byte-identical deterministic artifacts.
-
-    ``metrics.json``/``manifest.json`` carry a wall-clock ``generated_at``
-    (excluded from run_id by design, D5/I5), so those are compared on all
-    fields except ``generated_at``; the data artifacts are byte-identical.
-    """
+    """0016/I5: same source tree and inputs produce byte-identical artifacts."""
+    run_meta = {
+        "direction": "test", "branch": "v01", "track_id": "pilot",
+        "spec_id": "run_smoke", "strategy_path": "strategies/test/v01.yaml",
+    }
     a = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
-                            out_dir=env["strat"].parent / "a")
+                            out_dir=env["strat"].parent / "a",
+                            run_meta_payload=run_meta)
     b = runner.run_strategy(env["strat"], env["data_root"], registry=env["registry"],
-                            out_dir=env["strat"].parent / "b")
+                            out_dir=env["strat"].parent / "b",
+                            run_meta_payload=run_meta)
     assert a.run_id == b.run_id
-    # deterministic data artifacts: byte-for-byte identical
-    for fname in ("trades.parquet", "signals.parquet", "report.md"):
+    for fname in ("trades.parquet", "signals.parquet", "report.md",
+                  "metrics.json", "manifest.json", "run_meta.json"):
         assert (a.out_dir / fname).read_bytes() == (b.out_dir / fname).read_bytes()
-    # metrics.json / manifest.json: identical except the wall-clock field
-    for fname in ("metrics.json", "manifest.json"):
-        ma = json.loads((a.out_dir / fname).read_text())
-        mb = json.loads((b.out_dir / fname).read_text())
-        ma.pop("generated_at", None)
-        mb.pop("generated_at", None)
-        assert ma == mb
+    manifest = json.loads((a.out_dir / "manifest.json").read_text())
+    metrics = json.loads((a.out_dir / "metrics.json").read_text())
+    assert "generated_at" not in manifest
+    assert "git_commit" in manifest
+    assert "git_commit" not in metrics
+    assert "git commit:" in (a.out_dir / "report.md").read_text()
+
+
+def test_local_run_reuse_skips_execution_and_writes(env, monkeypatch):
+    """0016: a complete cache hit returns stored metrics without rewriting files."""
+    out = env["strat"].parent / "reuse"
+    meta = {"direction": "test", "branch": "v01", "track_id": "pilot",
+            "spec_id": "run_smoke", "strategy_path": "strategies/test/v01.yaml"}
+    first = runner.run_strategy(env["strat"], env["data_root"],
+                                registry=env["registry"], out_dir=out,
+                                run_meta_payload=meta, require_run_meta=True)
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns)
+              for p in first.out_dir.iterdir() if p.is_file()}
+
+    def unexpected_execution(*_args, **_kwargs):
+        raise AssertionError("cache hit executed the strategy")
+
+    monkeypatch.setattr(runner, "simulate", unexpected_execution)
+    second = runner.run_strategy(env["strat"], env["data_root"],
+                                 registry=env["registry"], out_dir=out,
+                                 run_meta_payload=meta, require_run_meta=True)
+    after = {p.name: (p.read_bytes(), p.stat().st_mtime_ns)
+             for p in second.out_dir.iterdir() if p.is_file()}
+    assert second.reused is True
+    assert second.out_dir == first.out_dir
+    assert second.metrics == first.metrics
+    assert after == before
+
+
+def test_cli_run_reuse_does_not_rewrite_run_meta(env, monkeypatch, capsys):
+    """0016: CLI sidecar handling also leaves a reused run byte/mtime stable."""
+    from lyra import cli
+
+    workspace = env["strat"].parent / "workspace"
+    monkeypatch.setattr(cli, "_registry_for", lambda *_args, **_kwargs: env["registry"])
+    monkeypatch.setattr(cli, "_workspace", lambda _config: workspace)
+    out = workspace / "runs"
+    first = cli.run(strategy=str(env["strat"]), data_dir=str(env["data_root"]),
+                    config="unused", name=None, out=str(out), track="pilot")
+    capsys.readouterr()
+    sidecar = first.out_dir / "run_meta.json"
+    before = sidecar.read_bytes(), sidecar.stat().st_mtime_ns
+
+    def unexpected_execution(*_args, **_kwargs):
+        raise AssertionError("CLI cache hit executed the strategy")
+
+    monkeypatch.setattr(runner, "simulate", unexpected_execution)
+    second = cli.run(strategy=str(env["strat"]), data_dir=str(env["data_root"]),
+                     config="unused", name=None, out=str(out), track="pilot")
+    output = capsys.readouterr().out
+    assert second.reused is True
+    assert "reused existing run" in output
+    assert (sidecar.read_bytes(), sidecar.stat().st_mtime_ns) == before
+    assert not Path(json.loads(sidecar.read_text())["strategy_path"]).is_absolute()
+
+
+def test_local_run_reuse_searches_all_dates(env):
+    """0016: run identity reuse searches beyond today's date directory."""
+    out = env["strat"].parent / "old-date"
+    first = runner.run_strategy(env["strat"], env["data_root"],
+                                registry=env["registry"], out_dir=out)
+    old_parent = first.out_dir.parent.parent / "19990101"
+    old_parent.mkdir(parents=True)
+    old_dir = old_parent / first.run_id
+    first.out_dir.rename(old_dir)
+    second = runner.run_strategy(env["strat"], env["data_root"],
+                                 registry=env["registry"], out_dir=out)
+    assert second.reused is True
+    assert second.out_dir == old_dir
+    assert len(list((out / "run_smoke").glob(f"*/{first.run_id}"))) == 1
+
+
+def test_local_run_reuse_rejects_corrupt_existing_run(env):
+    """0016: a corrupt matching run is never silently overwritten."""
+    out = env["strat"].parent / "corrupt"
+    first = runner.run_strategy(env["strat"], env["data_root"],
+                                registry=env["registry"], out_dir=out)
+    metrics = first.out_dir / "metrics.json"
+    metrics.write_text(metrics.read_text() + " ", encoding="utf-8")
+    before = metrics.read_bytes()
+    with pytest.raises(RuntimeError, match="existing run.*incomplete|SHA"):
+        runner.run_strategy(env["strat"], env["data_root"],
+                            registry=env["registry"], out_dir=out)
+    assert metrics.read_bytes() == before
+
+
+def test_local_run_reuse_rejects_different_complete_duplicates(env):
+    """0016: same run ID with valid but different date copies is ambiguous."""
+    import shutil
+
+    out = env["strat"].parent / "ambiguous"
+    first = runner.run_strategy(env["strat"], env["data_root"],
+                                registry=env["registry"], out_dir=out)
+    duplicate_parent = first.out_dir.parent.parent / "19990102"
+    duplicate_parent.mkdir(parents=True)
+    duplicate = duplicate_parent / first.run_id
+    shutil.copytree(first.out_dir, duplicate)
+    report = duplicate / "report.md"
+    report.write_text(report.read_text() + "\n", encoding="utf-8")
+    manifest_path = duplicate / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["artifacts"]["report.md"] = hashlib.sha256(report.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    with pytest.raises(RuntimeError, match="ambiguous existing run"):
+        runner.run_strategy(env["strat"], env["data_root"],
+                            registry=env["registry"], out_dir=out)
+
+
+def test_run_write_is_atomic(env, monkeypatch):
+    """0016: an artifact writer failure leaves no published run directory."""
+    def fail_after_partial(run_dir, *_args, **_kwargs):
+        (run_dir / "partial").write_text("incomplete")
+        raise RuntimeError("injected writer failure")
+
+    monkeypatch.setattr(runner, "_write_artifacts", fail_after_partial)
+    out = env["strat"].parent / "atomic"
+    with pytest.raises(RuntimeError, match="injected writer failure"):
+        runner.run_strategy(env["strat"], env["data_root"],
+                            registry=env["registry"], out_dir=out)
+    assert not list(out.glob("run_smoke/*/*"))
+
+
+def test_run_execution_audit_is_outside_backup_scope(env, tmp_path):
+    """0016: execution audit is local workspace data, not an OCI backup object."""
+    from lyra import oci_push
+
+    audit = tmp_path / "research-batches" / "run-executions.jsonl"
+    result = runner.run_strategy(
+        env["strat"], env["data_root"], registry=env["registry"],
+        out_dir=tmp_path / "runs", audit_log_path=audit,
+    )
+    rows = [json.loads(line) for line in audit.read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["run_id"] == result.run_id
+    assert rows[0]["git_commit"]
+    plan = oci_push.plan_push(None, tmp_path, "https://example.invalid/", {})
+    assert not any(item.rel_path.startswith("research-batches/")
+                   for item in plan.uploads)
 
 
 def test_run_reproducible_perturbation_fails(env):

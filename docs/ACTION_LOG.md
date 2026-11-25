@@ -19,12 +19,12 @@
 
 | 项 | 值 |
 |---|---|
-| 更新于 | 2026-11-23 |
-| 阶段 | 计划 3/3 执行中；§2.0 exit-month 诊断、C5 与 Pilot Round 2 已完成，OCI backup 被 6 个不可变 run 对象冲突阻塞。 |
-| 代码 | 434 passed, 2 skipped；`pyflakes` 与 `alpha-gate` 干净。 |
-| 进行中 | Round 2 本地归档、剪枝、lesson 均完成；Round 3 尚未开始。 |
-| 下一步 | 用户裁决 OCI 不可变冲突的处理方案；解除后完成 backup，再准备 Round 3 候选供审阅。 |
-| 待用户输入 | 决定是否恢复/协调 v02a 与 v02b 的 OCI run 冲突；OCI alpha/tracks 0 对象挂账仍待裁决。 |
+| 更新于 | 2026-11-25 |
+| 阶段 | 计划 3/3 执行中；OCI v02a/v02b 冲突已通过只读比对后在本地恢复为 OCI 原件，backup dry-run 当前 0 conflicts；未写 OCI。 |
+| 代码 | 本地不可变 run 复用已实现；全套 441 passed, 2 skipped，`pyflakes` 与 `alpha-gate` 干净。 |
+| 进行中 | 跨机器 OCI 预检与 apply-batch 输入归档仍在实现；Round 3 尚未开始。 |
+| 下一步 | 完成 OCI 预检、bundle 归档和三项变更提交，再准备 Round 3 候选供审阅。 |
+| 待用户输入 | OCI alpha/tracks 0 对象挂账仍待裁决。 |
 | 未决问题 | O1–O18 均已关闭或已裁决。 |
 
 ## 条目（#134 起）
@@ -45,3 +45,4 @@
 | 144 | 2026-11-23 | code | C5（决策 0015）落地批次护栏与留痕：`apply-batch` 现在锁定四项成本、限制 3–4 个同 direction/track 候选，并输出复杂度/结构关系；真实尝试归档 bundle、拒绝原因、运行状态与 run ID 到 workspace。全套回归 434 passed / 2 skipped，`pyflakes` 和 `alpha-gate` 通过；细节在 0015 与 `lyra/ai_readme.md`。 | `lyra/cli.py`、`lyra/strategy_schema.py`、`lyra/workflow.py`、`lyra/ai_readme.md`、`tests/test_batch.py`、`docs/decisions/0015*(.en).md` |
 
 | 145 | 2026-11-23 | review | Pilot Round 2 已完成 3 候选运行、跨标的 compare、prune、lesson 与 workspace 归档；一支保留、两支淘汰。backup dry-run 发现 v02a/v02b 的 6 个历史 run 对象与 OCI immutable SHA 不同，因此未执行上传；详细校准数据仅在 workspace 报告，等待用户裁决冲突处理。 | `/home/coder/.lyra/default/research-batches/failed_breakout/pilot/pilot-round-2.md`、`batch-0003-result.md`、`tracks/failed_breakout/pilot.lessons.md`、OCI backup dry-run |
+| 146 | 2026-11-25 | code | 决策 0016 落地本地 run 不可变与复用：先计算 run identity 并校验所有日期目录的完整产物，命中时跳过策略 SQL/simulation，损坏或歧义副本 fail-closed；新产物完整写入临时目录后原子发布。manifest 不再含 wall-clock `generated_at`，保留 R5/D5 要求的 git commit；OCI 原件比对与本地恢复记录在 HANDOFF，未上传任何对象。 | `lyra/runner.py`、`lyra/cli.py`、`tests/test_runner.py`、`docs/decisions/0016*(.en).md`、`docs/decisions/0006*(.en).md`、`docs/decisions/0013*(.en).md`、`HANDOFF.md` |

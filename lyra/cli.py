@@ -336,17 +336,15 @@ def compile(
     typer.echo(plan.sql)
 
 
-def _write_run_meta(strategy_path: Path, run_dir: Path,
-                    track: str | None) -> None:
-    """0009 D2: identity sidecar for a finished run.
+def _run_meta_payload(strategy_path: Path, track: str | None,
+                      workspace_root: Path) -> dict[str, Any]:
+    """Build the stable 0009 D2 attribution sidecar for a run.
 
     ``{direction, branch, track_id, spec_id, strategy_path, run_id}`` — the
     R12 workflow (``_runs_for_branch`` / ``compare_siblings``) reads this
     first, so run→direction/branch/track attribution no longer depends on
     spec_id naming conventions.
     """
-    import json as _json
-
     spec_id: object = None
     direction: object = None
     try:
@@ -367,22 +365,20 @@ def _write_run_meta(strategy_path: Path, run_dir: Path,
     branch = (strategy_path.name[:-5]
               if strategy_path.name.endswith(".yaml")
               else strategy_path.name)
-    run_id = None
     try:
-        manifest = _json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-        run_id = manifest.get("run_id")
-    except Exception:
-        run_id = run_dir.name  # run_dir is already run_id-scoped
+        relative_strategy_path = os.path.relpath(
+            strategy_path.resolve(), workspace_root.resolve(),
+        )
+    except (OSError, ValueError):
+        relative_strategy_path = strategy_path.name
     payload = {
         "direction": direction,
         "branch": branch,
         "track_id": track,
         "spec_id": spec_id,
-        "strategy_path": str(strategy_path),
-        "run_id": run_id,
+        "strategy_path": Path(relative_strategy_path).as_posix(),
     }
-    (run_dir / "run_meta.json").write_text(
-        _json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return payload
 
 
 def _fmt_num(v: Any, pct: bool = False) -> str:
@@ -493,6 +489,11 @@ def run(
         result = runner_mod.run_strategy(
             strategy, data_dir, registry=reg, name=effective_name, out_dir=out,
             strict=strict,
+            run_meta_payload=_run_meta_payload(
+                Path(strategy), track, _workspace(config),
+            ),
+            require_run_meta=True,
+            audit_log_path=_workspace(config) / "research-batches" / "run-executions.jsonl",
         )
     except schema_mod.SchemaError as exc:
         typer.secho(f"INVALID: {exc}", fg=typer.colors.RED, err=True)
@@ -519,21 +520,6 @@ def run(
             "integrity).", fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(code=1)
 
-    # 0009 D2 (M4): run_meta.json is the R12 identity source — a run the
-    # workflow cannot attribute is broken, so a sidecar write failure must
-    # fail the command (not warn-and-succeed). The run itself already
-    # succeeded and its artifacts are on disk; the failure is attribution.
-    try:
-        _write_run_meta(Path(strategy), Path(result.out_dir), track)
-    except Exception as exc:
-        typer.secho(
-            f"RUN OK but FAILED to write run_meta.json "
-            f"({result.out_dir}): {exc} — this run will not be attributable "
-            "by the R12 workflow (context/compare).",
-            fg=typer.colors.RED, err=True,
-        )
-        raise typer.Exit(code=1)
-
     # P1-3 (UsageFinalReview): with ``strict=False`` (the default), a run in
     # which EVERY instrument failed used to print green "OK: run …" and exit 0
     # — any automation wrapping `lyra run` would treat a total failure as
@@ -551,8 +537,12 @@ def run(
             "strategy's feature names (`lyra doctor`, `lyra features`).",
             fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
-    typer.secho(f"OK: run {result.run_id[:12]} -> {result.out_dir}",
-                fg=typer.colors.GREEN)
+    if result.reused:
+        typer.secho(f"reused existing run {result.run_id[:12]} -> {result.out_dir}",
+                    fg=typer.colors.CYAN)
+    else:
+        typer.secho(f"OK: run {result.run_id[:12]} -> {result.out_dir}",
+                    fg=typer.colors.GREEN)
     for inst in sorted(result.metrics):
         m = result.metrics[inst]
         typer.echo(f"  {inst}: {m['trade_count']} trades, "

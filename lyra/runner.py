@@ -23,7 +23,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,7 +68,8 @@ def _sha256_file(path: Path) -> str:
 
 def _git_commit(cwd: Path | None = None) -> str:
     """Short HEAD (+dirty marker).  Deterministic for a given tree state (M4)."""
-    base = str(cwd) if cwd else None
+    # Resolve the Lyra source tree, not the caller's current directory.
+    base = str(cwd or Path(__file__).resolve().parents[1])
     try:
         short = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -230,6 +234,7 @@ class RunResult:
     trades: dict[str, list[Trade]] = field(default_factory=dict)
     bars_by_instrument: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     instrument_failures: list[dict[str, Any]] = field(default_factory=list)
+    reused: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +299,86 @@ def _write_json(obj: Any, path: Path) -> None:
 # Public entry point
 # ---------------------------------------------------------------------------
 
+def _load_complete_run(run_dir: Path, run_id: str, *,
+                       require_run_meta: bool) -> RunResult:
+    """Read a completed run only after validating its manifest checksums."""
+    try:
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("run_id") != run_id:
+            raise ValueError("manifest run_id does not match its directory")
+        artifacts = manifest.get("artifacts")
+        if not isinstance(artifacts, dict) or not artifacts:
+            raise ValueError("manifest has no artifact checksum map")
+        for name, expected in artifacts.items():
+            path = run_dir / name
+            if not path.is_file() or _sha256_file(path) != expected:
+                raise ValueError(f"artifact {name!r} is missing or has a SHA mismatch")
+        if require_run_meta:
+            meta_path = run_dir / "run_meta.json"
+            if not meta_path.is_file():
+                raise ValueError("run_meta.json is missing")
+            json.loads(meta_path.read_text(encoding="utf-8"))
+        payload = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+        if payload.get("run_id") != run_id:
+            raise ValueError("metrics run_id does not match its directory")
+        per_instrument = payload.get("per_instrument")
+        if not isinstance(per_instrument, dict):
+            raise ValueError("metrics has no per_instrument mapping")
+        return RunResult(
+            run_id=run_id,
+            out_dir=run_dir,
+            metrics=per_instrument,
+            summary=payload.get("summary") or {},
+            instrument_failures=payload.get("instrument_failures") or [],
+            reused=True,
+        )
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"existing run {run_id} is incomplete or invalid: {exc}") from exc
+
+
+def _find_local_run(out_root: Path, run_name: str, run_id: str, *,
+                    require_run_meta: bool) -> RunResult | None:
+    """Find and validate a matching run across all UTC date directories."""
+    named_root = out_root / run_name
+    candidates = sorted(named_root.glob(f"*/{run_id}")) if named_root.is_dir() else []
+    if not candidates:
+        return None
+    valid: list[RunResult] = []
+    for candidate in candidates:
+        if candidate.is_symlink() or not candidate.is_dir():
+            raise RuntimeError(f"existing run {run_id} is incomplete or invalid: unsafe path")
+        valid.append(_load_complete_run(candidate, run_id,
+                                        require_run_meta=require_run_meta))
+    fingerprints = []
+    for result in valid:
+        files = sorted(p for p in result.out_dir.rglob("*") if p.is_file())
+        fingerprints.append({p.relative_to(result.out_dir).as_posix(): _sha256_file(p)
+                             for p in files})
+    if any(fp != fingerprints[0] for fp in fingerprints[1:]):
+        paths = ", ".join(str(r.out_dir) for r in valid)
+        raise RuntimeError(
+            f"ambiguous existing run {run_id}: duplicate date directories have "
+            f"different bytes ({paths}); preserve them and resolve manually"
+        )
+    return valid[0]
+
+
+def _append_execution_audit(path: Path, result: RunResult, git_commit: str) -> None:
+    """Best-effort local execution log, deliberately outside ``runs/``."""
+    record = {
+        "run_id": result.run_id,
+        "run_path": str(result.out_dir),
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": git_commit,
+        "command_line": list(sys.argv),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        print(f"WARN: run execution audit could not be written: {exc}", file=sys.stderr)
+
 def run_strategy(
     strategy_path: str | Path,
     data_dir: str | Path,
@@ -303,6 +388,9 @@ def run_strategy(
     out_dir: str | Path | None = None,
     strict: bool = False,
     trading_days_for: TradingDaysCounter | None = None,
+    run_meta_payload: Mapping[str, Any] | None = None,
+    require_run_meta: bool = False,
+    audit_log_path: str | Path | None = None,
 ) -> RunResult:
     """Run one strategy end-to-end and write the 0006 run artifacts.
 
@@ -354,6 +442,54 @@ def run_strategy(
     # never be silently consumed into metrics or the run_id digest.
     _validate_generation_for_view(data_dir, spec.view)
 
+    run_name = name or spec.id
+    if name is not None:
+        from .workflow import validate_ident
+        validate_ident(run_name, "run name")
+    output_root = Path(out_dir) if out_dir else _default_out()
+
+    # Compute run identity before strategy SQL and simulation. This is the
+    # point where a complete local cache hit can skip the backtest.
+    identity_con = duckdb.connect(str(cat.path), read_only=True)
+    try:
+        identity_instruments = [r[0] for r in identity_con.execute(
+            f"SELECT DISTINCT instrument FROM {_q(spec.view)} ORDER BY instrument"
+        ).fetchall()]
+        market_data_id = market_data_snapshot_id(
+            identity_con, spec.view, identity_instruments,
+        )
+        data_digest = _data_digest(
+            identity_con, spec.view, identity_instruments,
+            feature_cols=plan.features_used,
+        )
+    finally:
+        identity_con.close()
+    run_id = _compute_run_id(
+        strategy_yaml_bytes=strategy_path.read_bytes(),
+        plan_hash=plan.plan_hash,
+        feature_version=features_mod.FEATURE_VERSION,
+        compiler_version=plan.compiler_version,
+        engine_version=_ENGINE_VERSION,
+        duckdb_version=duckdb.__version__,
+        params=_params_dict(plan),
+        trading_days_basis="trading" if trading_days_for else "calendar",
+        counter_fingerprint=_counter_fingerprint(trading_days_for),
+        data_digest=data_digest,
+        feature_snapshot_digest=feature_snapshot_id,
+        schema_version=spec.version,
+        spec_id=spec.id,
+        direction=spec.direction,
+    )
+    cached = _find_local_run(output_root, run_name, run_id,
+                             require_run_meta=require_run_meta)
+    if cached is not None:
+        if strict and cached.instrument_failures:
+            raise RuntimeError(
+                "run failed on "
+                + ", ".join(f["instrument"] for f in cached.instrument_failures)
+            )
+        return cached
+
     # 2) signal SQL + per-instrument OHLC (I16 isolation) --------------------
     con = duckdb.connect(str(cat.path), read_only=True)
     try:
@@ -368,11 +504,17 @@ def run_strategy(
                 "entry_long": bool(el), "entry_short": bool(es),
                 "exit_long": bool(xl), "exit_short": bool(xs),
             })
-        instruments = sorted(bars_by_inst)
+        signal_instruments = sorted(bars_by_inst)
+        if signal_instruments != identity_instruments:
+            raise RuntimeError(
+                "catalog instrument set changed while computing run identity; "
+                "refusing to publish a run with a stale run_id"
+            )
+        instruments = identity_instruments
 
         # 3) per-instrument simulate + metrics (I7: never aggregate across) --
-        result = RunResult(run_id="", out_dir=Path(out_dir) if out_dir
-                           else _default_out(), instrument_failures=[])
+        result = RunResult(run_id=run_id, out_dir=output_root,
+                           instrument_failures=[])
         for inst in instruments:
             try:
                 bars = bars_by_inst[inst]
@@ -392,58 +534,43 @@ def run_strategy(
                     "error": f"{type(exc).__name__}: {exc}",
                 })
 
-        # 4) reproducibility manifest inputs (D5/I5; computed while conn open)
-        # 0013: market_data_snapshot_id hashes OHLC columns only (for cross-candidate
-        # comparability); data_digest includes strategy-consumed feature columns (for
-        # single-run reproducibility identity).
-        market_data_id = market_data_snapshot_id(con, plan.view, instruments)
-        data_digest = _data_digest(
-            con, plan.view, instruments, feature_cols=plan.features_used,
-        )
     finally:
         con.close()
-
-    run_id = _compute_run_id(
-        strategy_yaml_bytes=strategy_path.read_bytes(),
-        plan_hash=plan.plan_hash,
-        feature_version=features_mod.FEATURE_VERSION,
-        compiler_version=plan.compiler_version,
-        engine_version=_ENGINE_VERSION,
-        duckdb_version=duckdb.__version__,
-        params=_params_dict(plan),
-        trading_days_basis="trading" if trading_days_for else "calendar",
-        counter_fingerprint=_counter_fingerprint(trading_days_for),
-        data_digest=data_digest,
-        feature_snapshot_digest=feature_snapshot_id,
-        schema_version=spec.version,
-        spec_id=spec.id,
-        direction=spec.direction,
-    )
     result.run_id = run_id
 
     # 5) write artifacts -----------------------------------------------------
-    run_name = name or spec.id
-    # P1-2 (UsageFinalReview): the CLI ``--name`` value is a USER-SUPPLIED path
-    # component (``spec.id`` is already whitelist-validated at parse time, but a
-    # raw ``--name ../../evil`` would walk OUT of the workspace and write/
-    # overwrite artifacts there).  ``workflow.validate_ident`` rejects
-    # separators / dot-segments / empty names.  Imported inside the function to
-    # avoid a module-level cycle (``workflow.py`` imports ``runner._ENGINE_VERSION``).
-    if name is not None:
-        from .workflow import validate_ident  # local import: avoid runner↔workflow cycle
-        validate_ident(run_name, "run name")
     run_date = datetime.now(timezone.utc).strftime("%Y%m%d")
     # 批次1-H3: every run gets its own run_id-scoped directory.  Reusing a
     # (name, date) directory across different run_ids would let a zero-trade
     # re-run inherit (and re-hash) a previous run's trades.parquet; scoping by
     # run_id makes each artifact set self-contained and verifiable against its
     # own manifest.
-    run_dir = Path(result.out_dir) / run_name / run_date / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    _write_artifacts(run_dir, plan, spec, result, run_id, trading_days_for,
-                     feature_catalog_snapshot, data_digest=data_digest,
-                     market_data_snapshot_id=market_data_id)
+    run_dir = output_root / run_name / run_date / run_id
+    if run_dir.exists():
+        raise RuntimeError(f"refusing to overwrite existing run directory: {run_dir}")
+    run_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f".lyra-run-{run_id[:12]}-",
+                                     dir=run_dir.parent) as temp:
+        staged = Path(temp) / "run"
+        staged.mkdir()
+        _write_artifacts(staged, plan, spec, result, run_id, trading_days_for,
+                         feature_catalog_snapshot, data_digest=data_digest,
+                         market_data_snapshot_id=market_data_id)
+        if run_meta_payload is not None:
+            meta = dict(run_meta_payload)
+            if meta.get("run_id") not in (None, run_id):
+                raise RuntimeError("run_meta_payload has a different run_id")
+            meta["run_id"] = run_id
+            _write_json(meta, staged / "run_meta.json")
+        try:
+            os.rename(staged, run_dir)
+        except OSError as exc:
+            raise RuntimeError(
+                f"could not publish run without overwriting {run_dir}: {exc}"
+            ) from exc
     result.out_dir = run_dir
+    if audit_log_path is not None:
+        _append_execution_audit(Path(audit_log_path), result, _git_commit())
 
     if strict and result.instrument_failures:
         raise RuntimeError(
@@ -616,7 +743,8 @@ def _stop_trigger_rate(trades: list[Any]) -> float:
     return stops / len(trades)
 
 
-def _write_report(path: Path, metrics_payload: dict[str, Any]) -> None:
+def _write_report(path: Path, metrics_payload: dict[str, Any], *,
+                  git_commit: str | None = None) -> None:
     """R5 report: strategy name, timeframe, instruments, time window, feature
     snapshot id, git commit, date; per-instrument metrics (no CAGR/HWM/Sharpe/
     Sortino — R5/I9); per-month rows (I8: zero-open months kept as 0).
@@ -639,10 +767,10 @@ def _write_report(path: Path, metrics_payload: dict[str, Any]) -> None:
     win = metrics_payload.get("window") or {}
     lines.append(f"- time window: {win.get('start', '—')} → {win.get('end', '—')}")
     lines.append(f"- feature snapshot id: `{metrics_payload.get('feature_snapshot_id', '—')}`")
-    lines.append(f"- git commit: `{metrics_payload.get('git_commit', '—')}`")
-    # R5 "日期" = the data window (deterministic); wall-clock is in manifest.
+    lines.append(f"- git commit: `{git_commit or metrics_payload.get('git_commit', '—')}`")
+    # R5 "日期" = the data window (deterministic); execution time is local audit data.
     lines.append(f"- date: {win.get('start', '—')} → {win.get('end', '—')} "
-                 "(data window; generation time in manifest.json)")
+                 "(data window)")
     basis = metrics_payload.get("trading_days_basis") or "calendar"
     lines.append("- financing day basis: " + ("trading days" if basis == "trading" else "calendar/natural days (default; R4/O15 trading-day basis is a future enhancement)"))
     costs = metrics_payload.get("costs_bps")
@@ -757,7 +885,6 @@ def _write_artifacts(
     data_digest: str | None = None,
     market_data_snapshot_id: str | None = None,
 ) -> None:
-    generated_at = datetime.now(timezone.utc).isoformat()
 
     # 批次1-M2: D8 lists signals.parquet + trades.parquet as required run
     # artifacts; even a zero-row result must emit them (with the fixed schema)
@@ -806,7 +933,6 @@ def _write_artifacts(
         "market_data_snapshot_id": market_data_snapshot_id,
         "data_digest": data_digest,
         "feature_version": features_mod.FEATURE_VERSION,
-        "git_commit": git_commit,
         "per_instrument": {i: result.metrics[i] for i in sorted(result.metrics)},
         "summary": summary,
         "instrument_failures": result.instrument_failures,
@@ -825,20 +951,18 @@ def _write_artifacts(
             for inst in sorted(result.trades)
         },
     }
-    # metrics.json is fully deterministic (I5): no wall-clock field.  The
-    # generation stamp lives only in manifest.json's ``generated_at``.
+    # metrics.json is fully deterministic (I5): no wall-clock field.
     # 批次1-M2: metrics.json is a key consumed artifact — it IS hashed into
     # the manifest checksums (previously omitted, so tamper/corruption of the
     # primary output was undetectable).
     _write_json(metrics_payload, run_dir / "metrics.json")
 
     # report.md (R5) — deterministic (no wall-clock inside; I5 byte-repro).
-    _write_report(run_dir / "report.md", metrics_payload)
+    _write_report(run_dir / "report.md", metrics_payload, git_commit=git_commit)
 
     # manifest.json (D5/I5): written LAST so it can hash the other artifacts.
     manifest = {
         "run_id": run_id,
-        "generated_at": generated_at,
         "spec_id": spec.id,
         "direction": spec.direction,
         "schema_version": spec.version,
