@@ -349,9 +349,19 @@ def push(
 
     # Fail-closed: any remaining conflict blocks the whole push.
     for conflict in plan.conflicts:
+        recovery = ""
+        if (conflict.reason == "immutable-sha-conflict"
+                and conflict.rel_path.startswith("runs/")):
+            recovery = (
+                " This run_id already exists in OCI with different content; "
+                "do not overwrite it. Move every local date copy of this run "
+                "to superseded-runs/, rerun the same `lyra run` with OCI "
+                "reachable so read-only preflight restores the OCI original, "
+                "then rerun dry-run."
+            )
         raise OciPushError(
             f"push blocked at {redact_par_url(par_url)}: "
-            f"{conflict.rel_path}: {conflict.reason} — {conflict.detail}"
+            f"{conflict.rel_path}: {conflict.reason} — {conflict.detail}.{recovery}"
         )
 
     # M4 (batch2): upload manifest.json LAST within a run directory so a

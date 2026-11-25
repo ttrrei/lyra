@@ -450,3 +450,4 @@ D 决策处置；3 个实现期检查项（B5）非设计缺陷。无阻塞设�
 无阻塞设计缺陷；C1/C2 是**实现期门禁**（R10 真实桶跑通 + append-only 逐字保留
 校验），需在 0007 实现期优先验证。
 | 2026-11-12 | 0.7 | **R10 验收通过 + 0007 签收（#105/#106）**：真实桶验收在 4 个新桶（lyra-data/features/strategies/runs）全部通过——LIST 200 / WRITE 200（readme.md 探针）/ READ-back 逐字节一致；OANDA 真实 token 验证（EUR_USD 2h = 113 根 K 线）；1.28 GB 全量基线 moneta_prices_m1.zip（2020→2026-10，21 标的）从 org 源桶迁移至 lyra-data 桶并三重校验（远端 content-length 一致 + Range read-back + list 确认）。状态行改"已签收"；验收清单 R10 项勾选。本决策稿全部挂起项清零，0007 正式关闭。 |
+| 2026-11-25 | 0.8 | **修订（决策 0017）**：`lyra run` 本地未命中时可只读预检现有 backup runs 布局，校验完整 OCI run 后恢复复用；冲突时不得覆盖，须先隔离该 run_id 的全部本地日期副本，再以相同 run 参数重跑触发预检恢复。`pull-runs` 的 runs bucket/layout 不适用于旧 backup 路径；预检不可用时告警并继续运行，后续冲突按 fail-closed 手册处理。 |

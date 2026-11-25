@@ -434,6 +434,102 @@ def _registry_for(alpha_dir: str | None, config: str):
     return feat.load_from(alpha)
 
 
+def _oci_run_preflight(par_url: str, run_name: str, run_id: str,
+                       output_root: Path, require_run_meta: bool) -> None:
+    """Best-effort read-only lookup in backup's legacy run-object layout."""
+    from . import oci_client, runner as runner_mod
+
+    base = par_url.rstrip("/") + "/"
+    transport = _push_transport()
+    try:
+        objects = oci_client.list_objects(transport, base)
+    except Exception as exc:
+        typer.secho(
+            "WARN: could not check OCI for this run; if push reports an immutable "
+            "conflict, follow the run recovery instructions. "
+            f"({type(exc).__name__})", fg=typer.colors.YELLOW, err=True,
+        )
+        return
+
+    root = f"runs/{run_name}/"
+    manifest_suffix = f"/{run_id}/manifest.json"
+    candidates: dict[str, list[dict[str, Any]]] = {}
+    for obj in objects:
+        name = str(obj.get("name", ""))
+        if name.startswith(root) and name.endswith(manifest_suffix):
+            prefix = name[:-len("manifest.json")]
+            date_part = prefix[len(root):-len(run_id) - 1].rstrip("/")
+            if len(date_part) == 8 and date_part.isdigit():
+                candidates[prefix] = [o for o in objects
+                                     if str(o.get("name", "")).startswith(prefix)]
+    if not candidates:
+        return
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="lyra-oci-run-") as temp_name:
+            temp_root = Path(temp_name)
+            validated: list[tuple[str, Path, dict[str, str]]] = []
+            for prefix, entries in sorted(candidates.items()):
+                for obj in entries:
+                    object_name = str(obj.get("name", ""))
+                    if oci_client.safe_relative_path(object_name, temp_root) is None:
+                        raise RuntimeError(
+                            f"OCI listed an unsafe object path for run {run_id}; "
+                            "refusing to restore it"
+                        )
+                    oci_client.download_object(
+                        transport, base, object_name, temp_root, obj,
+                    )
+                remote_dir = temp_root / prefix.rstrip("/")
+                runner_mod._load_complete_run(
+                    remote_dir, run_id, require_run_meta=require_run_meta,
+                )
+                hashes = {p.relative_to(remote_dir).as_posix():
+                          runner_mod._sha256_file(p)
+                          for p in remote_dir.rglob("*") if p.is_file()}
+                validated.append((prefix, remote_dir, hashes))
+            if any(item[2] != validated[0][2] for item in validated[1:]):
+                raise RuntimeError(
+                    f"ambiguous OCI run {run_id}: date copies have different bytes; "
+                    "preserve them and resolve manually"
+                )
+
+            prefix, remote_dir, _ = validated[0]
+            relative = prefix[len("runs/"):].rstrip("/").split("/")
+            _, run_date, _ = relative
+            target = output_root / run_name / run_date / run_id
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                raise RuntimeError(
+                    f"refusing to overwrite local run while restoring OCI copy: {target}"
+                )
+            with tempfile.TemporaryDirectory(prefix=".lyra-run-oci-stage-",
+                                             dir=target.parent) as stage_name:
+                staged = Path(stage_name) / "run"
+                shutil.copytree(remote_dir, staged)
+                runner_mod._load_complete_run(
+                    staged, run_id, require_run_meta=require_run_meta,
+                )
+                os.rename(staged, target)
+    except oci_client.ParExpiredError as exc:
+        if "404" in str(exc):
+            raise RuntimeError(
+                f"OCI listed run {run_id} but a required object returned 404; "
+                "the remote run is incomplete, refusing to execute or overwrite"
+            ) from exc
+        typer.secho(
+            "WARN: could not download the OCI run; if push reports an immutable "
+            "conflict, follow the run recovery instructions. "
+            f"({type(exc).__name__})", fg=typer.colors.YELLOW, err=True,
+        )
+    except oci_client.ParObjectError as exc:
+        typer.secho(
+            "WARN: could not download the OCI run; if push reports an immutable "
+            "conflict, follow the run recovery instructions. "
+            f"({type(exc).__name__})", fg=typer.colors.YELLOW, err=True,
+        )
+
+
 @app.command()
 def run(
     strategy: str = typer.Argument(..., help="Path to a strategy YAML (0004)"),
@@ -482,6 +578,18 @@ def run(
             pass  # will be caught by the schema check inside run_strategy
 
     try:
+        oci_cfg = oci_from_dict(load_config(config))
+        oci_runs_url = oci_cfg.strategies_par_url or oci_cfg.data_par_url
+    except ConfigError:
+        oci_runs_url = ""
+
+    def remote_preflight(run_name: str, run_id: str, output_root: Path,
+                         require_meta: bool) -> None:
+        if oci_runs_url:
+            _oci_run_preflight(oci_runs_url, run_name, run_id, output_root,
+                               require_meta)
+
+    try:
         # C2 (batch-4 review): the flat ``--financing-days`` scalar was
         # removed from the engine (it mischarged every trade the same day
         # count). The default is per-trade natural days; a real trading-day
@@ -494,6 +602,7 @@ def run(
             ),
             require_run_meta=True,
             audit_log_path=_workspace(config) / "research-batches" / "run-executions.jsonl",
+            remote_run_preflight=remote_preflight if oci_runs_url else None,
         )
     except schema_mod.SchemaError as exc:
         typer.secho(f"INVALID: {exc}", fg=typer.colors.RED, err=True)

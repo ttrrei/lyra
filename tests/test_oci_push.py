@@ -197,6 +197,19 @@ def test_push_immutable_conflict_fails(tmp_path):
     assert t.puts == []  # fail-closed: nothing uploaded
 
 
+def test_run_immutable_conflict_has_recovery_instructions(tmp_path):
+    seed_local(tmp_path, {"runs/myrun/20261122/r1/manifest.json": b"LOCAL"})
+    t = FakeParRW(objects={"runs/myrun/20261122/r1/manifest.json": b"REMOTE"})
+    with pytest.raises(OciPushError) as exc:
+        push(t, tmp_path, PREFIX)
+    message = str(exc.value)
+    assert "already exists in OCI with different content" in message
+    assert "do not overwrite" in message
+    assert "superseded-runs" in message
+    assert "read-only preflight restores the OCI original" in message
+    assert t.puts == []
+
+
 def test_push_immutable_force_push_overrides(tmp_path):
     seed_local(tmp_path, {"runs/d1/t1/r1/manifest.json": b"LOCAL"})
     t = FakeParRW(objects={"runs/d1/t1/r1/manifest.json": b"REMOTE"})

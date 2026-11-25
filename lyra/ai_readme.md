@@ -362,3 +362,47 @@ AI:  lyra backup --config config/config.yml
       → syncs active tracks, runs, and strategies to OCI
 
 → loop continues with the next batch (proposing 3 new structural candidates into remaining capacity)…
+
+## 7. Immutable Run Recovery
+
+Runs are immutable by `run_id`. On another machine, `lyra run` checks the local
+workspace first, then read-only checks the existing OCI backup layout before
+running the strategy. A verified OCI hit is restored and reused; no strategy SQL
+or simulation is repeated. If OCI lookup is unavailable, Lyra warns and proceeds;
+a later backup conflict still blocks the upload.
+
+If `lyra backup` reports an immutable run conflict:
+
+1. Do not force-push or edit the OCI object.
+2. Move **all local date directories** for that run ID into the track's
+   `superseded-runs/` archive, preserving every copy.
+3. With OCI reachable, rerun the same `lyra run` using the same strategy, data,
+   `--name`, `--track`, and config. The read-only preflight restores and validates
+   the OCI original before execution.
+4. Run `lyra backup --dry-run` and confirm the run conflict is gone.
+
+`lyra pull-runs` reads the canonical runs bucket/layout; these historical backup
+objects are under the strategies backup bucket and use
+`runs/<name>/<date>/<run_id>/`. If preflight cannot read that path, stop and keep
+the local copies for manual comparison. Never overwrite the OCI run. To generate
+a new artifact format for an old strategy, use a new branch slug; increment
+`_ENGINE_VERSION` only when execution semantics change.
+
+### 不可变 Run 恢复
+
+Run 按 `run_id` 不可变。换机器后，`lyra run` 先查 workspace，再只读预检现有
+OCI backup 路径；找到并校验通过就恢复复用，不会再次执行策略 SQL 或 simulation。
+如果 OCI 查询不可用，Lyra 会告警并继续本地运行；之后 backup 若发现冲突仍会阻止上传。
+
+若 `lyra backup` 报不可变 run 冲突：
+
+1. 不要强推，也不要编辑 OCI 对象。
+2. 将该 run ID 的**所有本地日期目录**移入 track 的 `superseded-runs/`，逐份保留。
+3. OCI 可访问时，用相同策略、数据、`--name`、`--track` 和 config 重跑相同的
+   `lyra run`。只读预检会在执行前恢复并校验 OCI 原件。
+4. 执行 `lyra backup --dry-run`，确认该 run 冲突已消失。
+
+`lyra pull-runs` 使用 canonical runs bucket/layout；历史 backup 对象实际位于
+strategies backup bucket，路径为 `runs/<name>/<date>/<run_id>/`。若预检无法读取该路径，
+停止操作并保留本地副本以供人工比较。绝不覆盖 OCI run。若要为旧策略生成新格式产物，
+使用新的 branch slug；仅在执行语义变化时递增 `_ENGINE_VERSION`。

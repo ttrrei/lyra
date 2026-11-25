@@ -30,7 +30,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import duckdb
 
@@ -310,8 +310,10 @@ def _load_complete_run(run_dir: Path, run_id: str, *,
         if not isinstance(artifacts, dict) or not artifacts:
             raise ValueError("manifest has no artifact checksum map")
         for name, expected in artifacts.items():
-            path = run_dir / name
-            if not path.is_file() or _sha256_file(path) != expected:
+            rel = Path(str(name))
+            path = run_dir / rel
+            if (rel.is_absolute() or ".." in rel.parts or path.is_symlink()
+                    or not path.is_file() or _sha256_file(path) != expected):
                 raise ValueError(f"artifact {name!r} is missing or has a SHA mismatch")
         if require_run_meta:
             meta_path = run_dir / "run_meta.json"
@@ -391,6 +393,7 @@ def run_strategy(
     run_meta_payload: Mapping[str, Any] | None = None,
     require_run_meta: bool = False,
     audit_log_path: str | Path | None = None,
+    remote_run_preflight: Callable[[str, str, Path, bool], None] | None = None,
 ) -> RunResult:
     """Run one strategy end-to-end and write the 0006 run artifacts.
 
@@ -482,6 +485,10 @@ def run_strategy(
     )
     cached = _find_local_run(output_root, run_name, run_id,
                              require_run_meta=require_run_meta)
+    if cached is None and remote_run_preflight is not None:
+        remote_run_preflight(run_name, run_id, output_root, require_run_meta)
+        cached = _find_local_run(output_root, run_name, run_id,
+                                 require_run_meta=require_run_meta)
     if cached is not None:
         if strict and cached.instrument_failures:
             raise RuntimeError(

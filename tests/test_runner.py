@@ -303,6 +303,121 @@ def test_local_run_reuse_rejects_different_complete_duplicates(env):
                             registry=env["registry"], out_dir=out)
 
 
+def test_oci_preflight_restores_complete_run_and_skips_execution(env, tmp_path,
+                                                                 monkeypatch):
+    """0017: restore a verified backup-layout run before SQL/simulation."""
+    from conftest import FakePar, PAR_PREFIX
+    from lyra import cli
+
+    original = runner.run_strategy(
+        env["strat"], env["data_root"], registry=env["registry"],
+        out_dir=tmp_path / "source", run_meta_payload={"strategy_path": "s.yaml"},
+        require_run_meta=True,
+    )
+    date = original.out_dir.parent.name
+    prefix = f"runs/run_smoke/{date}/{original.run_id}/"
+    remote = {prefix + p.relative_to(original.out_dir).as_posix(): p.read_bytes()
+              for p in original.out_dir.rglob("*") if p.is_file()}
+    transport = FakePar(objects=remote)
+    monkeypatch.setattr(cli, "_push_transport", lambda: transport)
+    monkeypatch.setattr(runner, "simulate", lambda *_a, **_k: pytest.fail("simulation ran"))
+
+    def preflight(run_name, run_id, output_root, require_meta):
+        cli._oci_run_preflight(PAR_PREFIX, run_name, run_id, output_root, require_meta)
+
+    result = runner.run_strategy(
+        env["strat"], env["data_root"], registry=env["registry"],
+        out_dir=tmp_path / "restored", require_run_meta=True,
+        remote_run_preflight=preflight,
+    )
+    assert result.reused is True
+    assert result.out_dir == tmp_path / "restored" / "run_smoke" / date / original.run_id
+    assert (result.out_dir / "report.md").read_bytes() == (original.out_dir / "report.md").read_bytes()
+
+
+def test_oci_preflight_rejects_corrupt_remote_run(env, tmp_path, monkeypatch):
+    """0017: a matching manifest with a bad artifact is a hard integrity error."""
+    from conftest import FakePar, PAR_PREFIX
+    from lyra import cli
+
+    original = runner.run_strategy(env["strat"], env["data_root"],
+                                   registry=env["registry"], out_dir=tmp_path / "source")
+    date = original.out_dir.parent.name
+    prefix = f"runs/run_smoke/{date}/{original.run_id}/"
+    remote = {prefix + p.relative_to(original.out_dir).as_posix(): p.read_bytes()
+              for p in original.out_dir.rglob("*") if p.is_file()}
+    remote[prefix + "metrics.json"] += b"corrupt"
+    monkeypatch.setattr(cli, "_push_transport", lambda: FakePar(objects=remote))
+    target = tmp_path / "target"
+    with pytest.raises(RuntimeError, match="incomplete or invalid"):
+        cli._oci_run_preflight(PAR_PREFIX, "run_smoke", original.run_id, target, False)
+    assert not target.exists()
+
+
+def test_oci_preflight_rejects_ambiguous_remote_date_copies(env, tmp_path,
+                                                             monkeypatch):
+    """0017: duplicate OCI date paths must be byte-identical to be reusable."""
+    from conftest import FakePar, PAR_PREFIX
+    from lyra import cli
+
+    original = runner.run_strategy(env["strat"], env["data_root"],
+                                   registry=env["registry"], out_dir=tmp_path / "source")
+    date = original.out_dir.parent.name
+    first_prefix = f"runs/run_smoke/{date}/{original.run_id}/"
+    second_prefix = f"runs/run_smoke/19990102/{original.run_id}/"
+    files = {p.relative_to(original.out_dir).as_posix(): p.read_bytes()
+             for p in original.out_dir.rglob("*") if p.is_file()}
+    remote = {first_prefix + name: data for name, data in files.items()}
+    second = dict(files)
+    second["report.md"] += b"\nOCI duplicate differs\n"
+    manifest = json.loads(second["manifest.json"])
+    manifest["artifacts"]["report.md"] = hashlib.sha256(second["report.md"]).hexdigest()
+    second["manifest.json"] = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+    remote.update({second_prefix + name: data for name, data in second.items()})
+    monkeypatch.setattr(cli, "_push_transport", lambda: FakePar(objects=remote))
+    with pytest.raises(RuntimeError, match="ambiguous OCI run"):
+        cli._oci_run_preflight(PAR_PREFIX, "run_smoke", original.run_id,
+                               tmp_path / "target", False)
+    assert not (tmp_path / "target").exists()
+
+
+def test_oci_preflight_missing_object_404_fails_closed(env, tmp_path, monkeypatch):
+    """0017: a listed run object that returns 404 is corruption, not a miss."""
+    from conftest import FakePar, PAR_PREFIX
+    from lyra import cli
+
+    original = runner.run_strategy(env["strat"], env["data_root"],
+                                   registry=env["registry"], out_dir=tmp_path / "source")
+    date = original.out_dir.parent.name
+    prefix = f"runs/run_smoke/{date}/{original.run_id}/"
+    remote = {prefix + p.relative_to(original.out_dir).as_posix(): p.read_bytes()
+              for p in original.out_dir.rglob("*") if p.is_file()}
+    monkeypatch.setattr(cli, "_push_transport",
+                        lambda: FakePar(objects=remote, download_status=404))
+    with pytest.raises(RuntimeError, match="required object returned 404"):
+        cli._oci_run_preflight(PAR_PREFIX, "run_smoke", original.run_id,
+                               tmp_path / "target", False)
+    assert not (tmp_path / "target").exists()
+
+
+def test_oci_preflight_unreachable_warns_then_runs(env, tmp_path, monkeypatch, capsys):
+    """0017: a failed remote list is a warning; local execution continues."""
+    from conftest import FakePar, PAR_PREFIX
+    from lyra import cli
+
+    monkeypatch.setattr(cli, "_push_transport",
+                        lambda: FakePar(objects={}, list_status=500))
+
+    def preflight(run_name, run_id, output_root, require_meta):
+        cli._oci_run_preflight(PAR_PREFIX, run_name, run_id, output_root, require_meta)
+
+    result = runner.run_strategy(env["strat"], env["data_root"],
+                                 registry=env["registry"], out_dir=tmp_path / "local",
+                                 remote_run_preflight=preflight)
+    assert result.reused is False
+    assert "WARN: could not check OCI" in capsys.readouterr().err
+
+
 def test_run_write_is_atomic(env, monkeypatch):
     """0016: an artifact writer failure leaves no published run directory."""
     def fail_after_partial(run_dir, *_args, **_kwargs):
