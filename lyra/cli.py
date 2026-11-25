@@ -819,31 +819,94 @@ def apply_batch_cmd(
     from . import workflow as wf
 
     try:
-        text = Path(batch_file).read_text(encoding="utf-8")
+        bundle_bytes = Path(batch_file).read_bytes()
     except OSError as exc:
         typer.secho(f"ERROR: cannot read bundle: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
+
+    intake_path: Path | None = None
+    archive_bundle_path: Path | None = None
+    if not dry_run:
+        try:
+            intake_path = wf.archive_batch_intake(_workspace(config), bundle_bytes)
+        except Exception as exc:
+            typer.secho(f"WARN: batch intake could not be written: {exc}",
+                        fg=typer.colors.YELLOW, err=True)
+
+    archive_lines: list[str] = []
+
+    def _archive_attempt() -> None:
+        if dry_run or archive_bundle_path is None:
+            return
+        try:
+            path = wf.write_batch_result(
+                archive_bundle_path,
+                "# Batch result\n\n" + "\n".join(archive_lines) + "\n",
+            )
+            typer.echo(f"batch archive: {path}")
+        except Exception as exc:
+            typer.secho(f"WARN: batch archive result could not be written: {exc}",
+                        fg=typer.colors.YELLOW, err=True)
+
     try:
+        text = bundle_bytes.decode("utf-8")
         items = batch_mod.parse_batch(text)
-    except batch_mod.BatchError as exc:
+    except (UnicodeDecodeError, batch_mod.BatchError) as exc:
+        failure = f"bundle malformed: {type(exc).__name__}: {exc}"
+        if intake_path is not None:
+            # A syntactically readable YAML mapping may still identify a safe,
+            # single direction/track even when the bundle schema is invalid.
+            route: tuple[str, str] | None = None
+            if isinstance(exc, batch_mod.BatchError):
+                try:
+                    raw = _yaml.safe_load(bundle_bytes.decode("utf-8"))
+                    rows = raw.get("directions") if isinstance(raw, dict) else None
+                    pairs = {(row.get("direction"), row.get("track"))
+                             for row in rows if isinstance(row, dict)} if isinstance(rows, list) else set()
+                    if len(pairs) == 1:
+                        dname, tid = next(iter(pairs))
+                        wf.validate_ident(dname, "direction")
+                        wf.validate_ident(tid, "track")
+                        route = (dname, tid)
+                except Exception:
+                    route = None
+            try:
+                archive_bundle_path = (
+                    wf.place_batch_intake(_workspace(config), intake_path, *route)
+                    if route else wf.archive_unparsed_intake(_workspace(config), intake_path)
+                )
+            except Exception as archive_exc:
+                archive_bundle_path = intake_path
+                typer.secho(f"WARN: batch archive routing failed: {archive_exc}",
+                            fg=typer.colors.YELLOW, err=True)
+            archive_lines.extend(["- Proposed: unavailable (bundle parse failed)",
+                                  f"- Failure: {failure}", "- Adopted: 0",
+                                  "- Run counts: OK=0, PARTIAL=0, FAILED=0 (not started)",
+                                  "- Run IDs: none (bundle parse failed)"])
+            _archive_attempt()
         typer.secho(f"ERROR (batch malformed): {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
     # P3: every research batch has one direction/track and 3–4 candidates.
-    # Preserve a real rejected attempt when its archive target is identifiable.
+    # Preserve one original bundle and its result sidecar for real attempts.
     archive_target = (items[0].direction, items[0].track)
-    archive_lines: list[str] = []
-
-    def _archive_attempt() -> None:
-        if dry_run:
-            return
+    if intake_path is not None:
         try:
-            path = wf.archive_batch_attempt(
-                _workspace(config), archive_target[0], archive_target[1], text,
-                "# Batch result\n\n" + "\n".join(archive_lines) + "\n")
-            typer.echo(f"batch archive: {path}")
+            identities = {(it.direction, it.track) for it in items}
+            if len(identities) == 1:
+                archive_bundle_path = wf.place_batch_intake(
+                    _workspace(config), intake_path, *next(iter(identities)),
+                )
+            else:
+                archive_bundle_path = wf.archive_unparsed_intake(
+                    _workspace(config), intake_path,
+                )
+                typer.secho("WARN: mixed direction/track batch kept under "
+                            "research-batches/_unparsed/unassigned/",
+                            fg=typer.colors.YELLOW, err=True)
         except Exception as exc:
-            typer.secho(f"WARN: batch archive could not be written: {exc}",
+            archive_bundle_path = intake_path
+            typer.secho(f"WARN: batch archive routing failed: {exc}",
                         fg=typer.colors.YELLOW, err=True)
 
     reg = _registry_for(alpha_dir, config)

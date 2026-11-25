@@ -303,21 +303,7 @@ def archive_batch_attempt(workspace: Path, direction: str, track_id: str,
         raise WorkflowError(f"batch archive path escapes workspace: {resolved!r}")
     import os
 
-    numbers = []
-    for p in folder.glob("batch-*"):
-        m = re.match(r"batch-(\d{4,})(?:\.|-)", p.name)
-        if m:
-            numbers.append(int(m.group(1)))
-    number = max(numbers, default=0) + 1
-    while True:
-        stem = f"batch-{number:04d}"
-        reservation = folder / f"{stem}.reserved"
-        try:
-            fd = os.open(reservation, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.close(fd)
-            break
-        except FileExistsError:
-            number += 1
+    stem, reservation = _reserve_batch_stem(folder, os)
     bundle_path = folder / f"{stem}.yaml"
     result_path = folder / f"{stem}-result.md"
     try:
@@ -329,6 +315,115 @@ def archive_batch_attempt(workspace: Path, direction: str, track_id: str,
         # Keep the reservation so a partial archive can never be overwritten.
         raise
     reservation.unlink()
+    return result_path
+
+
+def _reserve_batch_stem(folder: Path, os_module=None) -> tuple[str, Path]:
+    """Reserve the next batch number in one folder without replacing files."""
+    if os_module is None:
+        import os as os_module
+    numbers = []
+    for path in folder.glob("batch-*"):
+        match = re.match(r"batch-(\d{4,})(?:\.|-)", path.name)
+        if match:
+            numbers.append(int(match.group(1)))
+    number = max(numbers, default=0) + 1
+    while True:
+        stem = f"batch-{number:04d}"
+        reservation = folder / f"{stem}.reserved"
+        try:
+            fd = os_module.open(reservation,
+                                os_module.O_CREAT | os_module.O_EXCL | os_module.O_WRONLY,
+                                0o600)
+            os_module.close(fd)
+            return stem, reservation
+        except FileExistsError:
+            number += 1
+
+
+def _assert_workspace_path(workspace: Path, path: Path) -> None:
+    root = Path(workspace).resolve()
+    resolved = path.resolve()
+    if root != resolved and root not in resolved.parents:
+        raise WorkflowError(f"batch archive path escapes workspace: {resolved!r}")
+
+
+def archive_batch_intake(workspace: Path, bundle_bytes: bytes) -> Path:
+    """Durably preserve raw input before parsing; caller may later route it."""
+    import os
+    import uuid
+
+    root = Path(workspace).resolve()
+    folder = root / "research-batches" / "_intake"
+    folder.mkdir(parents=True, exist_ok=True)
+    _assert_workspace_path(root, folder)
+    token = uuid.uuid4().hex
+    target = folder / f"batch-{token}.yaml"
+    temp = folder / f".{token}.tmp"
+    try:
+        with temp.open("xb") as stream:
+            stream.write(bundle_bytes)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, target)
+    except Exception:
+        # Retain any completed raw intake; a partial temporary file is not a
+        # valid archive and is safe to remove.
+        temp.unlink(missing_ok=True)
+        raise
+    return target
+
+
+def place_batch_intake(workspace: Path, intake_path: Path,
+                       direction: str, track_id: str) -> Path:
+    """Move a pre-parse intake into its numbered direction/track archive."""
+    import os
+
+    validate_ident(direction, "direction")
+    validate_ident(track_id, "track")
+    root = Path(workspace).resolve()
+    intake = Path(intake_path)
+    _assert_workspace_path(root, intake)
+    expected_intake = root / "research-batches" / "_intake"
+    if expected_intake.resolve() not in intake.resolve().parents:
+        raise WorkflowError("batch intake is outside research-batches/_intake")
+    folder = root / "research-batches" / direction / track_id
+    folder.mkdir(parents=True, exist_ok=True)
+    _assert_workspace_path(root, folder)
+    stem, reservation = _reserve_batch_stem(folder, os)
+    target = folder / f"{stem}.yaml"
+    try:
+        os.replace(intake, target)
+    except Exception:
+        # Keep reservation and original intake so an interrupted move cannot
+        # cause a later submission to overwrite this attempt.
+        raise
+    reservation.unlink()
+    return target
+
+
+def archive_unparsed_intake(workspace: Path, intake_path: Path) -> Path:
+    """Keep a malformed/unroutable submission in a safe fixed fallback folder."""
+    import os
+
+    root = Path(workspace).resolve()
+    intake = Path(intake_path)
+    _assert_workspace_path(root, intake)
+    folder = root / "research-batches" / "_unparsed" / "unassigned"
+    folder.mkdir(parents=True, exist_ok=True)
+    _assert_workspace_path(root, folder)
+    target = folder / intake.name
+    if target.exists():
+        raise WorkflowError(f"unparsed batch archive already exists: {target}")
+    os.replace(intake, target)
+    return target
+
+
+def write_batch_result(bundle_path: Path, result_text: str) -> Path:
+    """Write the result sidecar once, preserving the raw bundle on failure."""
+    result_path = Path(bundle_path).with_name(Path(bundle_path).stem + "-result.md")
+    with result_path.open("x", encoding="utf-8") as stream:
+        stream.write(result_text)
     return result_path
 
 

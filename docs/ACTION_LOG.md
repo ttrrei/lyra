@@ -21,9 +21,9 @@
 |---|---|
 | 更新于 | 2026-11-25 |
 | 阶段 | 计划 3/3 执行中；OCI v02a/v02b 冲突已通过只读比对后在本地恢复为 OCI 原件，backup dry-run 当前 0 conflicts；未写 OCI。 |
-| 代码 | 本地不可变 run 复用与 OCI 预检已实现；全套 447 passed, 2 skipped，`pyflakes` 与 `alpha-gate` 干净。 |
-| 进行中 | 本地不可变 run 与跨机器 OCI 预检已实现；apply-batch 输入先行归档仍待实现；Round 3 尚未开始。 |
-| 下一步 | 完成 bundle 归档与三项变更提交，再准备 Round 3 候选供审阅。 |
+| 代码 | 本地不可变 run 复用、OCI 预检与 apply-batch 输入先行归档已实现；全套 451 passed, 2 skipped，`pyflakes` 与 `alpha-gate` 干净。 |
+| 进行中 | 提示要求的三项修复均已提交；Round 3 尚未开始。 |
+| 下一步 | 记录 HANDOFF 工程收尾，再准备 Round 3 候选供审阅。 |
 | 待用户输入 | OCI alpha/tracks 0 对象挂账仍待裁决。 |
 | 未决问题 | O1–O18 均已关闭或已裁决。 |
 
@@ -47,3 +47,4 @@
 | 145 | 2026-11-23 | review | Pilot Round 2 已完成 3 候选运行、跨标的 compare、prune、lesson 与 workspace 归档；一支保留、两支淘汰。backup dry-run 发现 v02a/v02b 的 6 个历史 run 对象与 OCI immutable SHA 不同，因此未执行上传；详细校准数据仅在 workspace 报告，等待用户裁决冲突处理。 | `/home/coder/.lyra/default/research-batches/failed_breakout/pilot/pilot-round-2.md`、`batch-0003-result.md`、`tracks/failed_breakout/pilot.lessons.md`、OCI backup dry-run |
 | 146 | 2026-11-25 | code | 决策 0016 落地本地 run 不可变与复用：先计算 run identity 并校验所有日期目录的完整产物，命中时跳过策略 SQL/simulation，损坏或歧义副本 fail-closed；新产物完整写入临时目录后原子发布。manifest 不再含 wall-clock `generated_at`，保留 R5/D5 要求的 git commit；OCI 原件比对与本地恢复记录在 HANDOFF，未上传任何对象。 | `lyra/runner.py`、`lyra/cli.py`、`tests/test_runner.py`、`docs/decisions/0016*(.en).md`、`docs/decisions/0006*(.en).md`、`docs/decisions/0013*(.en).md`、`HANDOFF.md` |
 | 147 | 2026-11-25 | code | 决策 0017 增加跨机器 OCI 只读预检：本地 miss 后按 backup 原有路径查询，完整且无歧义的 run 会校验 SHA 后恢复复用；网络查询失败告警后继续，损坏、重复异字节副本或缺失对象 fail-closed。补充不可变冲突恢复手册与操作性错误文案；预检只读，不改变 OCI 布局或写入对象。 | `lyra/cli.py`、`lyra/runner.py`、`lyra/oci_push.py`、`lyra/ai_readme.md`、`tests/test_runner.py`、`tests/test_oci_push.py`、`docs/decisions/0017*(.en).md`、`docs/decisions/0007*(.en).md` |
+| 148 | 2026-11-25 | code | 决策 0018 将真实 `apply-batch` bundle 的原始 bytes 先写入 workspace intake，再解析并路由至 direction/track 编号归档；损坏 UTF-8/YAML、混合或不安全身份转入 `_unparsed/unassigned` 并保存失败原因，归档故障仅 WARN，dry-run 继续保持零写入。现有编号归档 API 保持兼容；全套测试与门禁通过。 | `lyra/cli.py`、`lyra/workflow.py`、`tests/test_batch.py`、`docs/decisions/0018*(.en).md` |

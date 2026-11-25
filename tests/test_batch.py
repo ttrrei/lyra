@@ -619,12 +619,86 @@ def test_apply_batch_archive_failure_warns_without_changing_adoption(tmp_path, m
         tmp_path, costs, [costs] * 3)
     def fail_archive(*args, **kwargs):
         raise OSError("workspace archive is read-only")
-    monkeypatch.setattr(wf, "archive_batch_attempt", fail_archive)
+    monkeypatch.setattr(wf, "archive_batch_intake", fail_archive)
     result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
                                           "--config", str(config)])
     assert result.exit_code == 0, result.output
-    assert "WARN: batch archive could not be written" in result.output
+    assert "WARN: batch intake could not be written" in result.output
     assert len(list((direction_dir / "pilot").glob("v0[234].yaml"))) == 3
+
+
+def test_apply_batch_archives_raw_bundle_before_parse_failure(tmp_path):
+    from typer.testing import CliRunner
+    from lyra import cli
+
+    ws = tmp_path / "ws"
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(f"local:\n  workspace: {ws}\n", encoding="utf-8")
+    bundle = tmp_path / "broken.yaml"
+    raw = b"version: [\ndirections: definitely malformed\n"
+    bundle.write_bytes(raw)
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(cfg)])
+    assert result.exit_code != 0
+    stored = list((ws / "research-batches" / "_unparsed" / "unassigned").glob("*.yaml"))
+    assert len(stored) == 1
+    assert stored[0].read_bytes() == raw
+    sidecar = stored[0].with_name(stored[0].stem + "-result.md")
+    assert "malformed" in sidecar.read_text(encoding="utf-8").lower()
+
+
+def test_apply_batch_preserves_invalid_utf8_bundle_bytes(tmp_path):
+    from typer.testing import CliRunner
+    from lyra import cli
+
+    ws = tmp_path / "ws"
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(f"local:\n  workspace: {ws}\n", encoding="utf-8")
+    bundle = tmp_path / "invalid-utf8.yaml"
+    raw = b"version: 1\ndirections:\n  - \xff\n"
+    bundle.write_bytes(raw)
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(cfg)])
+    assert result.exit_code != 0
+    stored = list((ws / "research-batches" / "_unparsed" / "unassigned").glob("*.yaml"))
+    assert len(stored) == 1
+    assert stored[0].read_bytes() == raw
+    assert "utf-8" in stored[0].with_name(
+        stored[0].stem + "-result.md").read_text(encoding="utf-8").lower()
+
+
+def test_apply_batch_parseable_rejection_archives_in_direction_track(tmp_path):
+    from typer.testing import CliRunner
+    from lyra import cli
+
+    ws = tmp_path / "ws"
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(f"local:\n  workspace: {ws}\n", encoding="utf-8")
+    bundle = tmp_path / "rejected.yaml"
+    raw = ("version: 2\ndirections:\n"
+           "  - direction: d1\n    track: t1\n    branch: v02\n")
+    bundle.write_text(raw, encoding="utf-8")
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(cfg)])
+    assert result.exit_code != 0
+    folder = ws / "research-batches" / "d1" / "t1"
+    assert (folder / "batch-0001.yaml").read_text(encoding="utf-8") == raw
+    assert "version" in (folder / "batch-0001-result.md").read_text(encoding="utf-8")
+
+
+def test_apply_batch_malformed_dry_run_does_not_archive(tmp_path):
+    from typer.testing import CliRunner
+    from lyra import cli
+
+    ws = tmp_path / "ws"
+    cfg = tmp_path / "cfg.yml"
+    cfg.write_text(f"local:\n  workspace: {ws}\n", encoding="utf-8")
+    bundle = tmp_path / "broken.yaml"
+    bundle.write_text("version: [\n", encoding="utf-8")
+    result = CliRunner().invoke(cli.app, ["apply-batch", str(bundle),
+                                          "--config", str(cfg), "--dry-run"])
+    assert result.exit_code != 0
+    assert not (ws / "research-batches").exists()
 
 
 def test_apply_batch_archive_records_run_ids(tmp_path, monkeypatch):
