@@ -13,7 +13,7 @@
 | Status | Approved |
 | Created | `2026-11-25` |
 | Related requirements | `docs/requirements.md` §R6, §R7 |
-| Related HLD | `docs/hld.md` §2.5, §4 (I17, I19, I20) |
+| Related HLD | `docs/hld.md` §2.5, §4 (I17); I19/I20 (redaction and idempotency) are defined in `docs/decisions/0007-oci-push-and-backup.md` |
 | Related decisions | 0006, 0007, 0016 |
 
 ## 1. Problem

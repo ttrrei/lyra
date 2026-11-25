@@ -13,7 +13,7 @@
 | 状态 | 已批准 / Approved |
 | 创建日期 | `2026-11-25` |
 | 相关需求 | `docs/requirements.md` §R6, §R7 |
-| 相关 HLD | `docs/hld.md` §2.5, §4 (I17, I19, I20) |
+| 相关 HLD | `docs/hld.md` §2.5, §4 (I17)；I19/I20 的 OCI 脱敏与幂等语义见 `docs/decisions/0007-oci-push-and-backup.md` |
 | 相关决策 | 0006、0007、0016 |
 
 ## 1. 问题

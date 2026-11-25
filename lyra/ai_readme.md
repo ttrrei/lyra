@@ -97,12 +97,15 @@ lyra apply-batch batch-0001.yaml --config config/config.yml --run \
 
 This operates under **all-or-nothing** semantics: if any candidate in the bundle is
 invalid, the whole batch is rejected and nothing is written.
-Every real submission, including a zero-write preflight rejection, attempts to archive
-the original bundle and `result.md` under
-`~/.lyra/<workspace>/research-batches/<direction>/<track>/batch-NNNN.*`. The archive
-records rejections, adoption/run counts, run IDs (or failure reasons), and leaves a
-branch-decision slot for the researcher. Dry-runs are not archived. Archive errors
-print a warning and do not change the apply/run result.
+Every real submission first preserves the original bundle bytes under
+`~/.lyra/<workspace>/research-batches/_intake/` before decoding or parsing (Decision
+0018). After a successful parse, a bundle with one safe direction/track is moved to
+`research-batches/<direction>/<track>/batch-NNNN.yaml` with its `batch-NNNN-result.md`
+sidecar; malformed, mixed, or unsafe submissions are kept under
+`research-batches/_unparsed/unassigned/` with the failure reason. The result records
+rejections, adoption/run counts, run IDs (or failure reasons), and leaves a
+branch-decision slot for the researcher. Dry-runs create no intake or archive at all.
+Archive failures print a warning and do not change the apply/run result.
 
 ### Step D — Analyze, Prune, and Record Lessons
 

@@ -93,3 +93,4 @@
 |---|---|---|
 | 2026-11-25 | 0.1 | 提案：同 run ID 本地只写一次、复用完整产物、拒绝覆盖并原子发布。 |
 | 2026-11-25 | 0.2 | 用户批准执行计划 v2；第二模型复核无阻塞项，明确 run 身份在策略 SQL/simulation 前计算，CLI 复用时不重写 sidecar。 |
+| 2026-11-25 | 0.3 | **澄清确定性边界**：`_git_commit()` 在 HEAD 短哈希后附加 `+dirty`，且 `git status --porcelain` 把未跟踪文件也计入（如本仓库的 `PROMPT/`）。因此"相同代码树"包含 dirty 状态：同一 HEAD 的干净检出与 dirty 检出会产生不同字节（manifest 与 report 均变）；跨机器复用依赖 0017 的只读 OCI 预检，预检不可用且字节已变时按 fail-closed 手册处理，绝不覆盖 OCI。此为 0006 M4 已接受风险的显式继承，不改变 `_compute_run_id` 的 payload。 |
