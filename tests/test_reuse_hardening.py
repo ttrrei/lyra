@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import inspect
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pyarrow.parquet as pq
 import pytest
 import typer
 
@@ -35,9 +37,11 @@ GOLDEN_MESSAGE = (
     "数值输出变化。如果这是有意的数值语义变化：递增 `_ENGINE_VERSION`，"
     "并在同一 commit 更新本金标和决策文档。如果不是有意的：说明引擎被意外改动。"
 )
-GOLDEN_SHA = {
-    "signals.parquet": "e8b103a66b649f707e3a8f1535ad4a3b762a30516c403428260ecbefd3edee59",
-    "trades.parquet": "62493a6a061812c1a5f60d101bbe629d93318b746f73dbd36f83b539d5e1aa0c",
+# Logical (timezone-normalized) row digests, not raw parquet bytes: parquet
+# metadata/timezone rendering differs between developer machines and CI.
+GOLDEN_DIGEST = {
+    "signals.parquet": "cdfdc1b1c1946c4c66aec012f80a5b424ad3b61d82b750ced50f5af2a20bb4c5",
+    "trades.parquet": "b4e99b913aec2268d96d5507cbe0c65a73676e53206c1d70eb00ea5ff4327801",
 }
 GOLDEN_METRICS = {
     "costs_bps": {"commission_round_trip": 0.0, "financing_per_day": 10.0,
@@ -254,9 +258,33 @@ def test_b3_attribution_applies_to_preflight_restore(cli_env, monkeypatch, capsy
 
 # --- B4: numeric golden + payload guard -------------------------------------
 
+def _logical_digest(path: Path) -> str:
+    """Hash canonical rows with timestamps normalized to UTC (portable golden)."""
+    rows = pq.read_table(path).to_pylist()
+
+    def canon(value):
+        if isinstance(value, dt.datetime):
+            parsed = value
+        elif isinstance(value, str):
+            try:
+                parsed = dt.datetime.fromisoformat(value)
+            except ValueError:
+                return value  # non-time strings (instrument, exit_reason, ...)
+        else:
+            return value
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return parsed.astimezone(dt.timezone.utc).isoformat()
+
+    canonical = [{k: canon(v) for k, v in row.items()} for row in rows]
+    return hashlib.sha256(
+        json.dumps(canonical, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
 def _assert_golden(run_dir: Path) -> None:
-    for fname, expected in GOLDEN_SHA.items():
-        actual = hashlib.sha256((run_dir / fname).read_bytes()).hexdigest()
+    for fname, expected in GOLDEN_DIGEST.items():
+        actual = _logical_digest(run_dir / fname)
         assert actual == expected, GOLDEN_MESSAGE + f" ({fname})"
     payload = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
     for key, expected in GOLDEN_METRICS.items():

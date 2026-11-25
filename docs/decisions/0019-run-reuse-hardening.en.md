@@ -107,3 +107,4 @@ That review also suggested putting `code_digest` and `artifact_schema_version` i
 | Date | Version | Change |
 |---|---|---|
 | 2026-11-26 | 0.1 | Proposal: reuse notice, read-only three-way `--verify`, fail-closed attribution, numeric golden, and test-name drift fix; explicitly rejects code_digest / schema_version in run_id and defines the `_ENGINE_VERSION` bump rule. |
+| 2026-11-26 | 0.2 | Golden implementation clarified: B4 allows "SHA256 or a content digest"; the implementation pins a timezone-normalized logical row digest rather than raw parquet bytes, because parquet metadata varies with timezone/dependency and falsely failed CI (UTC) against a local +11 environment. Metric-value goldens are unchanged. |
